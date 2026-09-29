@@ -45,6 +45,30 @@ fn lint(dir: &Path, args: &[&str]) -> Vec<Value> {
 }
 
 #[test]
+fn script_entries_enable_undefined_names_by_default() {
+    let dir = project(&["main.jl"]);
+    write(
+        dir.path(),
+        "fatou.toml",
+        "[project]\nentry-points = [\"main.jl\"]\n",
+    );
+    write(
+        dir.path(),
+        "main.jl",
+        "provided = 1\ninclude(\"worker.jl\")\n",
+    );
+    write(dir.path(), "worker.jl", "f() = provided + typo\n");
+    write(dir.path(), "loose.jl", "g() = unrelated_typo\n");
+
+    for args in [vec!["."], vec!["--fix", "."]] {
+        let findings = lint(dir.path(), &args);
+        assert_eq!(findings.len(), 1, "{args:?}: {findings:#?}");
+        assert_eq!(findings[0]["rule"], "undefined-name");
+        assert!(findings[0].to_string().contains("`typo`"));
+    }
+}
+
+#[test]
 fn script_globals_and_transitive_includes_resolve() {
     let dir = project(&["main.jl"]);
     write(
@@ -227,6 +251,8 @@ fn script_entries_preserve_selection_excludes_and_severity() {
     assert!(findings[0].to_string().contains("`typo`"));
     for selection in [
         "select = []",
+        "select = [\"unused-binding\"]",
+        "ignore = [\"undefined-name\"]",
         "extend-select = [\"undefined-name\"]\nignore = [\"undefined-name\"]",
     ] {
         write(

@@ -80,22 +80,25 @@ pub(crate) fn lint_findings_via_db(
         let model = snapshot.semantic_model(file);
         // The server resolves free reads against its harvested library, with
         // the workspace tier when the file belongs to the package under
-        // development. `undefined-name` joins the default rule set only then:
-        // for a workspace member the include graph pins the host module, so
-        // sibling and host globals resolve; loose files require an explicit
-        // opt-in because they may be fragments whose host we cannot know.
+        // development. Workspace membership and explicit script programs pin
+        // the host module, so sibling and host globals resolve. Loose files
+        // require an explicit opt-in because their host is unknown.
         let scripts =
             (!rules.entry_points.is_empty()).then(|| snapshot.scripts(&rules.entry_points));
-        let workspace = if scripts
+        let in_script = scripts
             .as_ref()
-            .is_some_and(|scripts| scripts.applies(path))
-        {
+            .is_some_and(|scripts| scripts.applies(path));
+        let workspace = if in_script {
             None
         } else {
             snapshot.workspace_member(path)
         };
         let script_packages = ScriptPackages(snapshot);
-        let rules = rules.get(workspace.is_some());
+        let rules = if in_script {
+            &rules.script
+        } else {
+            rules.get(workspace.is_some())
+        };
         // Only a member file loads against the package's own project, so the
         // declared dependency set (and with it `unresolved-import`) rides along
         // exactly there.
@@ -165,17 +168,17 @@ const WORKSPACE_MEMBER_RULES: &[&str] = RESOLUTION_RULES;
 
 /// The rule sets the server lints with, resolved once per configuration (the
 /// dispatch table included) rather than per lint run: the configured set
-/// as-is, plus a variant with [`WORKSPACE_MEMBER_RULES`] added for workspace
-/// member files, where the server carries the resolution context that makes
-/// those rules sound.
+/// as-is, a variant with [`WORKSPACE_MEMBER_RULES`] added for workspace members,
+/// and a variant with script defaults for explicit programs.
 pub(crate) struct ServerRules {
     pub(crate) entry_points: Vec<std::path::PathBuf>,
     plain: ResolvedRules,
     member: ResolvedRules,
+    script: ResolvedRules,
 }
 
 impl ServerRules {
-    /// Resolve both rule sets from `lint`, returning the unknown rule IDs the
+    /// Resolve the rule sets from `lint`, returning the unknown rule IDs the
     /// configuration named (for the caller to log). The member variant unions
     /// [`WORKSPACE_MEMBER_RULES`] into the effective enabled set before
     /// resolving, so `ignore` still subtracts afterward (a user who ignores
@@ -187,13 +190,15 @@ impl ServerRules {
         member_config
             .extend_select
             .extend(WORKSPACE_MEMBER_RULES.iter().map(|id| id.to_string()));
-        // Unknown IDs are reported off the plain resolve only: the member
-        // config repeats the user's IDs, so its unknowns are duplicates.
+        // Report unknown IDs from the plain resolve only: the other variants
+        // repeat the user's IDs and would duplicate those warnings.
         let (member, _) = ResolvedRules::resolve(&member_config);
+        let (script, _) = ResolvedRules::resolve_for_scripts(lint);
         (
             Self {
                 plain,
                 member,
+                script,
                 entry_points: Vec::new(),
             },
             unknown,
@@ -292,10 +297,7 @@ mod tests {
             &load_sources(&entries, &BTreeMap::new()),
             &BTreeMap::new(),
         );
-        let (mut rules, _) = super::ServerRules::from_config(&crate::config::LintConfig {
-            select: Some(vec!["undefined-name".into()]),
-            ..Default::default()
-        });
+        let (mut rules, _) = super::ServerRules::from_config(&crate::config::LintConfig::default());
         rules.entry_points = entries;
         let buffer = crate::text::TextBuffer::new(text);
         let check = |db: &IncrementalDatabase| {
@@ -315,6 +317,74 @@ mod tests {
     use lsp_types::Position;
 
     const UNUSED_LOCAL: &str = "function f(x)\n    tmp = x + 1\n    return x\nend\n";
+
+    #[test]
+    fn script_defaults_honor_selection_ignore_and_severity() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("main.jl");
+        let loose = dir.path().join("loose.jl");
+        let text = TextBuffer::from("f() = typo\n");
+        let mut db = IncrementalDatabase::default();
+        db.set_script_sources(
+            std::slice::from_ref(&entry),
+            &[(entry.clone(), Ok(Arc::from(text.text())))].into(),
+            &Default::default(),
+        );
+        db.upsert_file(&loose, text.text_arc());
+
+        for (config, expected) in [
+            (LintConfig::default(), Some(Severity::Warning)),
+            (
+                LintConfig {
+                    select: Some(vec![]),
+                    ..Default::default()
+                },
+                None,
+            ),
+            (
+                LintConfig {
+                    select: Some(vec!["unused-binding".into()]),
+                    ..Default::default()
+                },
+                None,
+            ),
+            (
+                LintConfig {
+                    ignore: vec!["undefined-name".into()],
+                    ..Default::default()
+                },
+                None,
+            ),
+            (
+                LintConfig {
+                    extend_select: vec!["unused-argument".into()],
+                    ..Default::default()
+                },
+                Some(Severity::Warning),
+            ),
+            (
+                LintConfig {
+                    severity: [("undefined-name".into(), Severity::Hint)].into(),
+                    ..Default::default()
+                },
+                Some(Severity::Hint),
+            ),
+        ] {
+            let (mut rules, _) = ServerRules::from_config(&config);
+            rules.entry_points = vec![entry.clone()];
+            let findings = lint_findings_via_db(&db.snapshot(), &entry, &text, &rules);
+            assert_eq!(
+                findings.len(),
+                usize::from(expected.is_some()),
+                "{config:?}: {findings:?}"
+            );
+            if let Some(severity) = expected {
+                assert_eq!(findings[0].rule, "undefined-name");
+                assert_eq!(findings[0].severity, severity);
+            }
+            assert!(lint_findings_via_db(&db.snapshot(), &loose, &text, &rules).is_empty());
+        }
+    }
 
     #[test]
     fn unused_binding_becomes_a_tagged_warning() {

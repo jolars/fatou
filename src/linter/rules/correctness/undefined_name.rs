@@ -52,24 +52,26 @@ impl Rule for UndefinedName {
 
     fn default_enabled(&self) -> bool {
         // Sound only with project context: a bare file may be an `include`d
-        // fragment reading its host's globals. The language server turns the
-        // rule on for workspace member files; CLI users opt in for
-        // self-contained scripts or explicit entry points.
+        // fragment reading its host's globals. Explicit script programs add
+        // this rule to their defaults; the language server also enables it
+        // for workspace member files.
         false
     }
 
     fn description(&self) -> &'static str {
         "Flag an identifier that no resolution tier provides: not a local or \
          a file binding, not a same-module global from included files, not a \
-         whole-module `using`'s export, and not a Base/Core name. Opt in with \
-         `[lint] extend-select = [\"undefined-name\"]`. For standalone programs, \
-         declare `[project] entry-points = [\"main.jl\"]` to follow static includes \
-         and resolve ordinary global assignments. Each entry point and host \
+         whole-module `using`'s export, and not a Base/Core name. For standalone \
+         programs, declare `[project] entry-points = [\"main.jl\"]` to enable this \
+         rule by default, follow static includes, and resolve ordinary global \
+         assignments. An explicit `[lint] select` replaces the defaults, and \
+         `ignore = [\"undefined-name\"]` disables the rule. Each entry point and host \
          module is checked independently; findings name the failing contexts. \
          Dynamic includes, `eval`, unresolved whole-module `using`s, and broken \
          include closures suppress findings for that entry. Value reads inside \
          macro calls and quoted code remain exempt. Without entry points, \
-         standalone files containing includes are skipped. The language server \
+         opt in with `[lint] extend-select = [\"undefined-name\"]`; standalone \
+         files containing includes are skipped. The language server \
          also enables this rule for workspace package files."
     }
 

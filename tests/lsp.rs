@@ -7038,6 +7038,48 @@ fn open_document(client: &Connection, uri: &Uri, text: &str) {
         .unwrap();
 }
 
+#[test]
+fn script_entry_points_enable_default_diagnostics_after_loading() {
+    let dir = TempDir::new("fatou-lsp-script-defaults");
+    write_file(
+        &dir.path.join("fatou.toml"),
+        "[project]\nentry-points = [\"main.jl\"]\n",
+    );
+    write_file(
+        &dir.path.join("main.jl"),
+        "provided = 1\ninclude(\"worker.jl\")\n",
+    );
+    write_file(&dir.path.join("worker.jl"), "f() = provided\n");
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_options(&client, serde_json::Value::Null);
+    let uri = file_uri(&dir.path.join("worker.jl"));
+    open_document(&client, &uri, "f() = provided + typo\n");
+    // The first publish may precede the background load. Its refresh must
+    // report the unsaved typo without another edit or an explicit rule opt-in.
+    let published = loop {
+        let published = recv_publish_for(&client, &uri);
+        if !published.diagnostics.is_empty() {
+            break published;
+        }
+    };
+    assert_eq!(published.version, Some(1));
+    assert_eq!(published.diagnostics.len(), 1);
+    assert_eq!(
+        published.diagnostics[0].code,
+        Some(NumberOrString::String("undefined-name".into()))
+    );
+    assert!(published.diagnostics[0].message.contains("`typo`"));
+
+    let loose_uri = file_uri(&dir.path.join("loose.jl"));
+    open_document(&client, &loose_uri, "g() = unrelated_typo\n");
+    assert!(recv_publish_for(&client, &loose_uri).diagnostics.is_empty());
+    drop(client);
+    server_thread.join().unwrap();
+}
+
 /// Request full-document formatting and return the raw edits (`None` when the
 /// server answers `null`, as it does for a document it will not format).
 fn format_document(client: &Connection, uri: &Uri, id: i32) -> Option<Vec<TextEdit>> {

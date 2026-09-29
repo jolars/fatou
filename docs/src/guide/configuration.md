@@ -148,10 +148,12 @@ across their static includes:
 ```toml
 [project]
 entry-points = ["scripts/main.jl"]
-
-[lint]
-extend-select = ["undefined-name"]
 ```
+
+The CLI and language server enable `undefined-name` by default for each entry
+point and its included files. An explicit `[lint] select` replaces those
+defaults; `ignore = ["undefined-name"]` disables the rule. Files outside these
+programs keep their usual defaults.
 
 No Julia package is required. Paths are relative to the configuration file. If
 `main.jl` includes `settings.jl` and `worker.jl`, functions in `worker.jl` can
@@ -226,8 +228,8 @@ to follow the platform Fatou runs on.
 
 By default most rules run; the [rule reference](../reference/rules.md) lists the
 few that are opt-in. Use `extend-select` to enable additional rules while
-keeping the defaults. For example, to report undefined names in standalone
-scripts without losing unused-variable warnings:
+keeping the defaults. For example, to report undefined names in self-contained
+files without configuring entry points or losing unused-variable warnings:
 
 ```toml
 [lint]

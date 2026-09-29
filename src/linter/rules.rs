@@ -743,6 +743,18 @@ pub struct ResolvedRules {
 }
 
 impl ResolvedRules {
+    /// Resolve rules for an explicit script program. Its known entry point
+    /// makes `undefined-name` a default, while `select` still replaces defaults
+    /// and `ignore` still disables any selected rule.
+    pub fn resolve_for_scripts(config: &LintConfig) -> (Self, Vec<String>) {
+        if config.select.is_some() {
+            return Self::resolve(config);
+        }
+        let mut config = config.clone();
+        config.extend_select.push("undefined-name".into());
+        Self::resolve(&config)
+    }
+
     /// Build the rule set honoring `config`, alongside any `select`,
     /// `extend-select`, `ignore`, or `severity` entries that name no shipped rule.
     ///

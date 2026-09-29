@@ -49,17 +49,19 @@ points in a file; editor-pushed settings do not establish a project root.
 ```toml
 [project]
 entry-points = ["scripts/main.jl"]
-
-[lint]
-extend-select = ["undefined-name"]
 ```
 
-Entry points provide resolution context; they do not enable rules or expand the
-files selected for linting. Fatou follows static `include("path")` calls and
-resolves global bindings in their host modules. Each entry point and host module
-is analyzed separately. Findings identify the contexts in which a name is
-undefined. Includes may supply names even when their files are excluded from
-diagnostic reporting.
+The CLI and language server enable `undefined-name` by default for these
+programs. An explicit `[lint] select` replaces the defaults, and
+`ignore = ["undefined-name"]` disables the rule. Files outside the configured
+programs keep their usual defaults.
+
+Entry points provide resolution context without expanding the files selected for
+linting. Fatou follows static `include("path")` calls and resolves global
+bindings in their host modules. Each entry point and host module is analyzed
+separately. Findings identify the contexts in which a name is undefined.
+Includes may supply names even when their files are excluded from diagnostic
+reporting.
 
 A missing or unreadable entry point fails CLI linting. The language server logs
 the failure and continues checking other entries. Dynamic includes, `eval`,

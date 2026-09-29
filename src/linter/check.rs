@@ -162,6 +162,14 @@ pub fn check_paths_with_config(
     let files = collect_julia_files(paths, exclude).map_err(LintError::Discovery)?;
     let (rules, unknown_rules) = ResolvedRules::resolve(config);
     let rules = rules.with_julia_target(julia_target);
+    let script_rules = match project {
+        ProjectContext::Scripts { .. } => Some(
+            ResolvedRules::resolve_for_scripts(config)
+                .0
+                .with_julia_target(julia_target),
+        ),
+        _ => None,
+    };
 
     // Read and parse every file up front (in parallel): the include-graph
     // pre-pass wants all trees before the per-file rule runs, so a file's
@@ -196,7 +204,13 @@ pub fn check_paths_with_config(
                 .get(path)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            check_parsed(Some(path), &root, diagnostics, &rules, includes, project)
+            let rules = match (project, &script_rules) {
+                (ProjectContext::Scripts { scripts, .. }, Some(rules)) if scripts.applies(path) => {
+                    rules
+                }
+                _ => &rules,
+            };
+            check_parsed(Some(path), &root, diagnostics, rules, includes, project)
         })
         .collect();
 
