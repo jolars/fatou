@@ -23,6 +23,8 @@ use crate::ast::{AstToken, CallExpr, Expr, HasArgList, Name, StringLiteral};
 use crate::semantic::{ScopeKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
+pub mod scripts;
+
 /// The names bound at file (top) level — what another file that `include`s this
 /// one sees. Every binding whose scope is the file top level, `import`/`using`
 /// names included.

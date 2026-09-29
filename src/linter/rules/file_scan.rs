@@ -13,8 +13,7 @@
 
 use rowan::TextRange;
 
-use crate::ast::{AstNode, AstToken, CallExpr, MacroCall};
-use crate::project::include_target;
+use crate::project::scripts::DefinitionEffects;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
 /// One pass over the CST collecting everything a resolution-dependent rule
@@ -45,42 +44,20 @@ impl FileScan {
             literal_include: false,
             dynamic_include: false,
         };
+        let mut effects = DefinitionEffects::default();
         for node in root.descendants() {
+            effects.observe(&node);
             match node.kind() {
-                SyntaxKind::MACRO_CALL => {
-                    scan.macro_calls.push(node.text_range());
-                    let name = MacroCall::cast(node)
-                        .and_then(|call| call.name())
-                        .and_then(|name| name.macro_token());
-                    if name.is_some_and(|token| token.text() == "eval") {
-                        scan.calls_eval = true;
-                    }
-                }
+                SyntaxKind::MACRO_CALL => scan.macro_calls.push(node.text_range()),
                 SyntaxKind::QUOTE_EXPR | SyntaxKind::QUOTE_SYM => {
-                    scan.quotes.push(node.text_range());
-                }
-                SyntaxKind::CALL_EXPR => {
-                    let Some(call) = CallExpr::cast(node) else {
-                        continue;
-                    };
-                    let Some(callee) = call.callee_ident() else {
-                        continue;
-                    };
-                    match callee.text() {
-                        "eval" => scan.calls_eval = true,
-                        "include" => {
-                            if include_target(&call).is_some() {
-                                scan.literal_include = true;
-                            } else {
-                                scan.dynamic_include = true;
-                            }
-                        }
-                        _ => {}
-                    }
+                    scan.quotes.push(node.text_range())
                 }
                 _ => {}
             }
         }
+        scan.calls_eval = effects.calls_eval;
+        scan.literal_include = effects.literal_include;
+        scan.dynamic_include = effects.dynamic_include;
         scan
     }
 

@@ -33,6 +33,7 @@ const DEFAULT_INDENT_WIDTH: u32 = 4;
 pub struct Config {
     pub format: FormatConfig,
     pub lint: LintConfig,
+    pub project: ProjectConfig,
     /// Julia-language settings (target version, and room to grow into
     /// environment-resolution overrides).
     pub julia: JuliaConfig,
@@ -44,6 +45,34 @@ pub struct Config {
     /// `exclude` ever gains built-in defaults, setting it replaces them, while
     /// `extend-exclude` only ever adds patterns.
     pub extend_exclude: Vec<String>,
+}
+
+/// Explicit programs analyzed independently of package entry points.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct ProjectConfig {
+    /// Script entry files, relative to the containing configuration file.
+    /// Includes supply resolution context without expanding lint targets.
+    #[serde(default)]
+    pub entry_points: Vec<PathBuf>,
+}
+
+impl ProjectConfig {
+    /// Anchor literal paths at the configuration file, including user configs.
+    pub fn entry_points(&self, source: &ConfigSource) -> Vec<PathBuf> {
+        let Some(base) = source.path().and_then(Path::parent) else {
+            return Vec::new();
+        };
+        let mut entries: Vec<_> = self
+            .entry_points
+            .iter()
+            .map(|path| crate::incremental::normalize_path(&base.join(path)))
+            .collect();
+        entries.sort();
+        entries.dedup();
+        entries
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -298,6 +327,9 @@ impl std::error::Error for ConfigError {}
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawConfig {
+    /// Explicit script entry points for project analysis.
+    #[serde(default)]
+    project: ProjectConfig,
     /// Formatter settings. Omitted values use Fatou's built-in defaults.
     #[serde(default)]
     format: RawFormat,
@@ -519,6 +551,7 @@ impl RawConfig {
         let defaults = FormatConfig::default();
         let mut warnings = Vec::new();
         let config = Config {
+            project: self.project,
             format: self.format.resolve(&defaults, &mut warnings),
             lint: LintConfig {
                 select: self.lint.select,

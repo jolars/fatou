@@ -251,7 +251,10 @@ fn resolve_callee<P: PackageSource>(
         }
         // This resolver has no workspace context.
         Resolution::Workspace { .. } => None,
-        Resolution::WorkspaceImport { .. } | Resolution::Unresolved => None,
+        Resolution::Script { .. }
+        | Resolution::Ambiguous
+        | Resolution::WorkspaceImport { .. }
+        | Resolution::Unresolved => None,
     }
 }
 

@@ -140,6 +140,37 @@ In full, Fatou uses the first source that applies:
 
 Sources are never merged: exactly one file is used.
 
+## Checking standalone scripts
+
+Declare the files you run as independent programs to check undefined names
+across their static includes:
+
+```toml
+[project]
+entry-points = ["scripts/main.jl"]
+
+[lint]
+extend-select = ["undefined-name"]
+```
+
+No Julia package is required. Paths are relative to the configuration file. If
+`main.jl` includes `settings.jl` and `worker.jl`, functions in `worker.jl` can
+use globals defined in `settings.jl`. Misspellings still produce warnings.
+Separate entry points do not share globals, even when they include the same
+helper file. Findings identify the entry point and module where the name is
+undefined.
+
+Run `fatou lint .` to check the discovered Julia files. Running
+`fatou lint scripts/main.jl` reports findings only in that file; its includes
+still supply resolution context. The language server also uses unsaved changes
+in included files.
+
+Fatou never executes Julia to analyze a script. Dynamic includes, `eval`,
+unresolved whole-module imports, and missing or broken dependencies can prevent
+it from proving a name undefined. Those entry points remain conservative; see
+the [project configuration reference](../reference/configuration.md#project) for
+the current limits.
+
 ## Excluding files
 
 `exclude` takes gitignore-style patterns, resolved relative to the directory

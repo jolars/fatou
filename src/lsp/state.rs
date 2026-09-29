@@ -1641,6 +1641,19 @@ impl GlobalState {
     /// Re-derive the open documents' diagnostics after a configuration change
     /// (editor-pushed settings, or a `fatou.toml` event).
     fn on_config_changed(&mut self) {
+        // Pull refreshes do not enqueue analysis, but script configuration must
+        // reach the writer before a new graph can be loaded.
+        if self.pull_diagnostics {
+            let uris: Vec<_> = self
+                .documents
+                .iter()
+                .filter(|(_, doc)| doc.kind == DocumentKind::Julia)
+                .map(|(uri, _)| uri.clone())
+                .collect();
+            for uri in uris {
+                self.send_analysis(uri, None);
+            }
+        }
         self.refresh_open_diagnostics();
     }
 

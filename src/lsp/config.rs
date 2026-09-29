@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use lsp_types::Uri;
 
-use crate::config::{Config, RawConfig};
+use crate::config::{Config, ConfigSource, RawConfig};
 use crate::formatter::FormatStyle;
 
 use super::lint::ServerRules;
@@ -38,8 +38,9 @@ pub(crate) struct ResolvedConfig {
 }
 
 impl ResolvedConfig {
-    fn resolve(config: &Config, warnings: &mut Vec<String>) -> Arc<Self> {
-        let (rules, unknown) = ServerRules::from_config(&config.lint);
+    fn resolve(config: &Config, source: &ConfigSource, warnings: &mut Vec<String>) -> Arc<Self> {
+        let (mut rules, unknown) = ServerRules::from_config(&config.lint);
+        rules.entry_points = config.project.entry_points(source);
         warnings.extend(
             unknown
                 .into_iter()
@@ -71,7 +72,11 @@ impl ConfigStore {
     /// Unparsable or absent options leave the defaults in place.
     pub(crate) fn new(initialization_options: Option<serde_json::Value>) -> (Self, Vec<String>) {
         let mut store = Self {
-            client: ResolvedConfig::resolve(&Config::default(), &mut Vec::new()),
+            client: ResolvedConfig::resolve(
+                &Config::default(),
+                &ConfigSource::None,
+                &mut Vec::new(),
+            ),
             by_dir: HashMap::new(),
         };
         let warnings = match initialization_options {
@@ -102,7 +107,7 @@ impl ConfigStore {
         match serde_json::from_value::<RawConfig>(payload) {
             Ok(raw) => {
                 let (config, mut warnings) = raw.into_config();
-                self.client = ResolvedConfig::resolve(&config, &mut warnings);
+                self.client = ResolvedConfig::resolve(&config, &ConfigSource::None, &mut warnings);
                 warnings
             }
             Err(err) => vec![format!("invalid client settings (kept previous): {err}")],
@@ -140,7 +145,7 @@ impl ConfigStore {
                         .into_iter()
                         .map(|warning| format!("{}: {warning}", path.display())),
                 );
-                ResolvedConfig::resolve(&config, &mut warnings)
+                ResolvedConfig::resolve(&config, &source, &mut warnings)
             }
             // No config file at all: the client settings apply.
             Ok(_) => Arc::clone(&self.client),

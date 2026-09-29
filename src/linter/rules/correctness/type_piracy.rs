@@ -83,7 +83,9 @@ fn classify(res: &Resolution, model: &SemanticModel) -> Ownership {
         Resolution::WorkspaceImport { .. }
         | Resolution::Using { .. }
         | Resolution::System { .. } => Ownership::Foreign,
-        Resolution::Unresolved => Ownership::Unknown,
+        Resolution::Unresolved | Resolution::Script { .. } | Resolution::Ambiguous => {
+            Ownership::Unknown
+        }
     }
 }
 

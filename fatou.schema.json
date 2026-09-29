@@ -175,6 +175,21 @@
       },
       "type": "object"
     },
+    "ProjectConfig": {
+      "additionalProperties": false,
+      "description": "Explicit programs analyzed independently of package entry points.",
+      "properties": {
+        "entry-points": {
+          "default": [],
+          "description": "Script entry files, relative to the containing configuration file.\nIncludes supply resolution context without expanding lint targets.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "RulesConfig": {
       "additionalProperties": false,
       "description": "Options for configurable lint rules under `[lint.rules]`.\n\nEach table name is the rule's public ID. Rules without tunable options have\nno table, and unknown rule tables or option names are rejected.",
@@ -257,6 +272,14 @@
         }
       ],
       "description": "Linter selection, severity, and per-rule settings."
+    },
+    "project": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ProjectConfig"
+        }
+      ],
+      "description": "Explicit script entry points for project analysis."
     }
   },
   "title": "Fatou configuration",

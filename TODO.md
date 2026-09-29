@@ -123,15 +123,12 @@ style remains project policy rather than language correctness.
 
 ## Linter
 
-- [ ] Support explicit, opt-in script entry points for `undefined-name` (#109).
-  Follow static includes through the shared project model and resolver so
-  standalone scripts can resolve globals from included files. Keep each entry
-  point and module context separate: another caller may supply different
-  globals, and merging callers' names can hide errors. Do not assume arbitrary
-  open files are entry points. Retain conservative handling of dynamic
-  includes, `eval`, and unresolved imports. Currently, `extend-select` enables
-  the rule but does not override the guard that skips standalone files with
-  includes.
+- [x] Support explicit, opt-in script entry points for `undefined-name` (#109).
+  `[project] entry-points` follows static includes through shared semantic
+  projections and resolution, keeping entry points and host modules separate.
+  CLI targets retain their diagnostic scope; the LSP honors unsaved buffers
+  and refreshes dependent diagnostics. Dynamic definitions and incomplete
+  include closures remain conservative.
 
 ### Rules
 

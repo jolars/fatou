@@ -35,6 +35,45 @@ exclude = ["vendored/"]
 extend-exclude = ["generated.jl"]
 ```
 
+## `[project]`
+
+  | Key            | Type             | Default | Description                                      |
+  | -------------- | ---------------- | ------- | ------------------------------------------------ |
+  | `entry-points` | array of strings | `[]`    | Script files to analyze as independent programs. |
+
+Paths are literal files, without glob expansion, relative to the containing
+configuration file. This also applies to `--config`, `FATOU_CONFIG`, and global
+configuration files. Duplicate normalized paths are ignored. Configure entry
+points in a file; editor-pushed settings do not establish a project root.
+
+```toml
+[project]
+entry-points = ["scripts/main.jl"]
+
+[lint]
+extend-select = ["undefined-name"]
+```
+
+Entry points provide resolution context; they do not enable rules or expand the
+files selected for linting. Fatou follows static `include("path")` calls and
+resolves global bindings in their host modules. Each entry point and host module
+is analyzed separately. Findings identify the contexts in which a name is
+undefined. Includes may supply names even when their files are excluded from
+diagnostic reporting.
+
+A missing or unreadable entry point fails CLI linting. The language server logs
+the failure and continues checking other entries. Dynamic includes, `eval`,
+unresolved whole-module `using`s, include cycles, and unreadable or unparseable
+dependencies make an entry's undefined-name analysis incomplete and suppress its
+findings. Relative whole-module `using`s remain unresolved. Other independent
+entries still run.
+
+The language server uses unsaved buffers and refreshes dependent diagnostics
+after edits, closes, and watched file changes. Script contexts currently support
+diagnostics; completion and navigation do not use them. Cross-file method-table
+checks (`call-arity` and `function-has-no-methods`) remain disabled for these
+contexts because the script model records names, not method tables.
+
 ## `[format]`
 
   | Key            | Type    | Default  | Description                                         |

@@ -137,6 +137,45 @@ pub struct WorkspaceFiles {
     pub files: Vec<SourceFile>,
 }
 
+/// Availability and membership loaded by the script background worker. Text
+/// stays in ordinary SourceFile inputs so unsaved edits use the same queries.
+#[salsa::input(singleton)]
+pub struct ScriptFiles {
+    #[returns(ref)]
+    pub files: BTreeMap<PathBuf, Option<SourceFile>>,
+    #[returns(ref)]
+    pub entries: BTreeSet<PathBuf>,
+    pub pending: bool,
+}
+
+#[salsa::tracked(returns(ref))]
+pub fn script_file(db: &dyn IncrementalDb, file: SourceFile) -> Arc<project::scripts::ScriptFile> {
+    Arc::new(project::scripts::ScriptFile::project(
+        &parsed_tree_root(db, file),
+        semantic_model(db, file),
+        file.path(db).as_deref().expect("script files have paths"),
+        parse_diagnostics(db, file).is_empty(),
+    ))
+}
+
+#[salsa::tracked(returns(ref))]
+pub fn script_program(
+    db: &dyn IncrementalDb,
+    entry: SourceFile,
+) -> Arc<project::scripts::ScriptProgram> {
+    let inputs = ScriptFiles::try_get(db);
+    Arc::new(project::scripts::ScriptProgram::build(
+        entry
+            .path(db)
+            .as_deref()
+            .expect("script entries have paths"),
+        |path| {
+            let file = inputs?.files(db).get(path).copied().flatten()?;
+            Some(Arc::clone(script_file(db, file)))
+        },
+    ))
+}
+
 /// The cached parse of a file. The `GreenNode` is not `Eq`, so
 /// [`parsed_document`] is `no_eq`: salsa never compares parse outputs and
 /// relies purely on input (text) change detection to invalidate. Sound because
@@ -1292,6 +1331,61 @@ impl IncrementalDatabase {
         Some(file)
     }
 
+    /// Install a completed load without overwriting any live editor buffer.
+    /// Failed reads remove availability even if a stale SourceFile still exists.
+    pub fn set_script_sources(
+        &mut self,
+        entries: &[PathBuf],
+        sources: &project::scripts::ScriptSources,
+        buffers: &BTreeMap<PathBuf, Arc<str>>,
+    ) {
+        let files = sources
+            .iter()
+            .map(|(path, disk)| {
+                let text = buffers.get(path).or_else(|| disk.as_ref().ok());
+                (
+                    path.clone(),
+                    text.map(|text| self.upsert_file(path, Arc::clone(text))),
+                )
+            })
+            .collect();
+        let entries = entries.iter().cloned().collect();
+        match ScriptFiles::try_get(self) {
+            Some(input) => {
+                if *input.files(self) != files {
+                    input.set_files(self).to(files);
+                }
+                if *input.entries(self) != entries {
+                    input.set_entries(self).to(entries);
+                }
+                if *input.pending(self) {
+                    input.set_pending(self).to(false);
+                }
+            }
+            None => {
+                ScriptFiles::new(self, files, entries, false);
+            }
+        }
+    }
+
+    pub(crate) fn set_scripts_pending(&mut self) {
+        match ScriptFiles::try_get(self) {
+            Some(input) if !input.pending(self) => {
+                input.set_pending(self).to(true);
+            }
+            None => {
+                ScriptFiles::new(self, BTreeMap::new(), BTreeSet::new(), true);
+            }
+            _ => {}
+        }
+    }
+
+    /// Loading state is a leaf; checking it must not demand program analysis
+    /// on the writer thread when a background result arrives.
+    pub(crate) fn scripts_pending(&self) -> bool {
+        ScriptFiles::try_get(self).is_none_or(|input| *input.pending(self))
+    }
+
     /// Replace the reverse-index file set (the [`WorkspaceFiles`] singleton),
     /// creating it on first call. Unchanged membership still re-sets, but the
     /// only consumer ([`workspace_reference_index`]) is demanded lazily, so a
@@ -1446,6 +1540,32 @@ impl IncrementalDatabase {
 pub struct Analysis(IncrementalDatabase);
 
 impl Analysis {
+    /// Resolve configured programs against tracked source, never disk. A
+    /// configuration not loaded yet cannot establish absence of a name.
+    pub fn scripts(&self, entries: &[PathBuf]) -> project::scripts::ScriptAnalysis {
+        use project::scripts::{ScriptAnalysis, ScriptProgram};
+        let Some(input) = ScriptFiles::try_get(&self.0) else {
+            return ScriptAnalysis {
+                pending: !entries.is_empty(),
+                ..Default::default()
+            };
+        };
+        let pending = *input.pending(&self.0)
+            || entries
+                .iter()
+                .any(|entry| !input.entries(&self.0).contains(entry));
+        let programs = entries
+            .iter()
+            .map(
+                |entry| match input.files(&self.0).get(entry).copied().flatten() {
+                    Some(file) => Arc::clone(script_program(&self.0, file)),
+                    None => Arc::new(ScriptProgram::build(entry, |_| None)),
+                },
+            )
+            .collect();
+        ScriptAnalysis { programs, pending }
+    }
+
     /// The `SourceFile` input currently tracked for `path`, if any.
     pub fn lookup_file(&self, path: &Path) -> Option<SourceFile> {
         self.0.lookup_file(path)

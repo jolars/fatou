@@ -17,7 +17,8 @@
 //!   (an unharvested package, or a relative `using .M`) — it may export
 //!   anything;
 //! - the file calls `eval`/`@eval` (definitions invisible to the model);
-//! - the file `include`s anything while no workspace context is known, or
+//! - the file `include`s anything while neither workspace nor explicit script
+//!   context is known, or
 //!   `include`s a non-literal path even with one (the harvest cannot follow
 //!   it).
 //!
@@ -29,9 +30,9 @@
 //! Off by default: without project context a bare file may be an `include`d
 //! fragment reading its host's globals. The language server enables the rule
 //! for workspace member files, where the include graph pins the file's host
-//! module and the harvested library answers the remaining tiers; on the CLI
-//! (which resolves against the built-in Base/Core snapshot only) it is
-//! opt-in via `--select`, sound for self-contained scripts.
+//! module and the harvested library answers the remaining tiers. Explicit
+//! `[project] entry-points` provide independent script contexts to both CLI
+//! and LSP callers. Script selection remains opt-in with `extend-select`.
 
 use crate::linter::diagnostic::Diagnostic;
 use crate::linter::rules::{Example, Rule, RuleContext};
@@ -53,22 +54,23 @@ impl Rule for UndefinedName {
         // Sound only with project context: a bare file may be an `include`d
         // fragment reading its host's globals. The language server turns the
         // rule on for workspace member files; CLI users opt in for
-        // self-contained scripts.
+        // self-contained scripts or explicit entry points.
         false
     }
 
     fn description(&self) -> &'static str {
         "Flag an identifier that no resolution tier provides: not a local or \
-         a file binding, not a workspace sibling, not a whole-module \
-         `using`'s export, and not a Base/Core name. Such a read raises \
-         `UndefVarError` at runtime. The whole file is skipped when it \
-         `eval`s, `include`s outside a known workspace, or `using`s a module \
-         the library cannot resolve — in those cases any name may exist; \
-         value reads inside macro calls and quoted code are likewise exempt. \
-         Off by default: the rule needs project context to be sound, so the \
-         language server enables it for workspace member files, while the CLI \
-         (resolving against a built-in Base/Core snapshot) leaves it opt-in \
-         for self-contained scripts."
+         a file binding, not a same-module global from included files, not a \
+         whole-module `using`'s export, and not a Base/Core name. Opt in with \
+         `[lint] extend-select = [\"undefined-name\"]`. For standalone programs, \
+         declare `[project] entry-points = [\"main.jl\"]` to follow static includes \
+         and resolve ordinary global assignments. Each entry point and host \
+         module is checked independently; findings name the failing contexts. \
+         Dynamic includes, `eval`, unresolved whole-module `using`s, and broken \
+         include closures suppress findings for that entry. Value reads inside \
+         macro calls and quoted code remain exempt. Without entry points, \
+         standalone files containing includes are skipped. The language server \
+         also enables this rule for workspace package files."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -82,12 +84,23 @@ impl Rule for UndefinedName {
         // No resolution context, an unresolvable whole-module `using`, `eval`,
         // or an unfollowable `include`: all four leave the file unanswerable
         // (see `RuleContext::trusts_resolution`).
-        if !ctx.trusts_resolution() {
+        if ctx.scripts.is_none() && !ctx.trusts_resolution() {
             return;
         }
         let Some(resolver) = ctx.resolver() else {
             return;
         };
+        let script_contexts = match (ctx.scripts, ctx.path, &ctx.resolution) {
+            (Some(scripts), Some(path), Some(resolution)) if !scripts.pending => scripts
+                .contexts(path)
+                .into_iter()
+                .filter(|context| context.program.complete(resolution.packages))
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        if ctx.scripts.is_some() && script_contexts.is_empty() {
+            return;
+        }
 
         let scan = ctx.file_scan();
         for ident in ctx.model.idents() {
@@ -109,18 +122,35 @@ impl Rule for UndefinedName {
             {
                 continue;
             }
-            if resolver.resolve(&ident.name, ident.range.start(), namespace)
-                == Resolution::Unresolved
-            {
+            let contexts: Vec<_> = script_contexts
+                .iter()
+                .filter(|context| {
+                    resolver.resolve_in_script(&ident.name, ident.range.start(), namespace, context)
+                        == Resolution::Unresolved
+                })
+                .map(|context| context.label())
+                .collect();
+            let undefined = if ctx.scripts.is_some() {
+                !contexts.is_empty()
+            } else {
+                resolver.resolve(&ident.name, ident.range.start(), namespace)
+                    == Resolution::Unresolved
+            };
+            if undefined {
                 let display = if ident.is_macro {
                     format!("@{}", ident.name)
                 } else {
                     ident.name.to_string()
                 };
+                let suffix = if contexts.is_empty() {
+                    String::new()
+                } else {
+                    format!(" in {}", contexts.join(", "))
+                };
                 sink.push(Diagnostic::new(
                     self.id(),
                     ident.range,
-                    format!("`{display}` is not defined"),
+                    format!("`{display}` is not defined{suffix}"),
                 ));
             }
         }

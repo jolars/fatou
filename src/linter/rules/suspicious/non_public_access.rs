@@ -222,6 +222,9 @@ fn module_path(
         // A name the package under development provides — including its own
         // module name, the `MyPkg.internal()` self-access shape.
         Resolution::Workspace { .. } => return None,
+        // A script global may shadow the indexed package, and disagreeing
+        // script contexts cannot establish a single package identity.
+        Resolution::Script { .. } | Resolution::Ambiguous => return None,
         // Base/Core themselves, or a submodule they export (`Sys`, `Iterators`).
         Resolution::System { module, .. } if module != *root => vec![module, root.clone()],
         // A sibling file's import, a `using`'d name, or a name no tier binds:

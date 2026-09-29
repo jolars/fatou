@@ -221,6 +221,8 @@ pub struct RuleContext<'a> {
     /// library (Base/Core at minimum) plus the enclosing workspace package.
     /// `None` leaves resolution-dependent rules (`undefined-name`) silent.
     pub resolution: Option<ResolutionContext<'a>>,
+    /// Explicit programs containing this file, kept separate by entry and host.
+    pub scripts: Option<&'a crate::project::scripts::ScriptAnalysis>,
     /// This file's include-graph problems, precomputed by the lint driver (see
     /// [`crate::linter::include_graph`]). Empty leaves the include-graph rules
     /// (`missing-include-file`, `include-cycle`) silent — the language server
@@ -304,6 +306,7 @@ impl<'a> RuleContext<'a> {
             root,
             model,
             resolution: None,
+            scripts: None,
             includes: &[],
             julia_target: None,
             config: &DEFAULT_RULES_CONFIG,
@@ -317,6 +320,16 @@ impl<'a> RuleContext<'a> {
     #[must_use]
     pub fn with_resolution(mut self, resolution: Option<ResolutionContext<'a>>) -> Self {
         self.resolution = resolution;
+        self
+    }
+
+    #[must_use]
+    pub fn with_scripts(
+        mut self,
+        scripts: Option<&'a crate::project::scripts::ScriptAnalysis>,
+    ) -> Self {
+        self.scripts =
+            scripts.filter(|scripts| self.path.is_some_and(|path| scripts.applies(path)));
         self
     }
 
@@ -369,10 +382,12 @@ impl<'a> RuleContext<'a> {
             .resolver
             .get_or_init(|| {
                 let resolution = self.resolution.as_ref()?;
-                Some(
-                    Resolver::new(self.model, resolution.packages)
-                        .with_workspace(resolution.workspace.clone()),
-                )
+                let mut resolver = Resolver::new(self.model, resolution.packages)
+                    .with_workspace(resolution.workspace.clone());
+                if let (Some(scripts), Some(path)) = (self.scripts, self.path) {
+                    resolver = resolver.with_scripts(scripts.contexts(path));
+                }
+                Some(resolver)
             })
             .as_ref()
     }
@@ -555,6 +570,14 @@ impl<'a> RuleContext<'a> {
             let Some(resolution) = &self.resolution else {
                 return false;
             };
+            if let (Some(scripts), Some(path)) = (self.scripts, self.path) {
+                let contexts = scripts.contexts(path);
+                return !scripts.pending
+                    && !contexts.is_empty()
+                    && contexts
+                        .iter()
+                        .all(|context| context.program.complete(resolution.packages));
+            }
             if self.has_unresolvable_using() {
                 return false;
             }

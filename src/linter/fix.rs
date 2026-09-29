@@ -82,11 +82,23 @@ pub fn fix_source(
     config: &LintConfig,
     include_unsafe: bool,
 ) -> FixOutcome {
+    fix_with(text, include_unsafe, |current| {
+        check_source(path, current, config)
+    })
+}
+
+/// Apply fixes using a caller's project-aware analysis of each intermediate
+/// text. The caller must refresh any projections affected by the replacement.
+pub fn fix_with(
+    text: &str,
+    include_unsafe: bool,
+    mut check: impl FnMut(&str) -> crate::linter::LintFileReport,
+) -> FixOutcome {
     let mut current = text.to_string();
     let mut total = 0usize;
 
     for _ in 0..MAX_PASSES {
-        let report = check_source(path, &current, config);
+        let report = check(&current);
         let Applied { output, applied } =
             apply_fixes(&current, &report.diagnostics, include_unsafe);
         if applied == 0 {
@@ -101,7 +113,7 @@ pub fn fix_source(
     }
 
     // Hit the pass cap: report whatever remains on the settled text.
-    let report = check_source(path, &current, config);
+    let report = check(&current);
     FixOutcome {
         output: current,
         applied: total,

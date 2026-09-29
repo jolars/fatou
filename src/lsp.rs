@@ -68,6 +68,7 @@ mod rename;
 mod rename_files;
 mod render;
 mod result_id;
+mod script_projects;
 mod selection;
 mod semantic_tokens;
 mod server;

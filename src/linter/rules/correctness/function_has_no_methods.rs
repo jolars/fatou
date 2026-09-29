@@ -85,6 +85,11 @@ impl Rule for FunctionHasNoMethods {
     }
 
     fn check_file(&self, ctx: &RuleContext<'_>, sink: &mut Vec<Diagnostic>) {
+        // A script's included files may provide methods for a local declaration;
+        // its name projection does not constitute a complete method table.
+        if ctx.scripts.is_some() {
+            return;
+        }
         // No resolution context, an unresolvable whole-module `using`, `eval`,
         // or an unfollowable `include`: all four leave the file unanswerable
         // (see `RuleContext::trusts_resolution`).

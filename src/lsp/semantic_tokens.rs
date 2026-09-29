@@ -404,7 +404,10 @@ fn classify_free_read<P: PackageSource + ?Sized>(
             library_kind(&packages.package(&module)?.root, &name)
         }
         Resolution::Using { module, name } => using_kind(model, packages, &module, &name),
-        Resolution::WorkspaceImport { .. } | Resolution::Unresolved => None,
+        Resolution::Script { .. }
+        | Resolution::Ambiguous
+        | Resolution::WorkspaceImport { .. }
+        | Resolution::Unresolved => None,
     }
 }
 

@@ -163,6 +163,9 @@ version = "1.6, 1.10 - 1.11"
 #[test]
 fn config_schema_rejects_invalid_configuration() {
     for source in [
+        "[project]\nentry-point = []\n",
+        "[project]\nentry-points = [1]\n",
+        "[project]\nentry-points = \"main.jl\"\n",
         "unknown = true\n",
         "[format]\nline-width = \"wide\"\n",
         "[format]\nline-ending = \"mac\"\n",
@@ -177,4 +180,10 @@ fn config_schema_rejects_invalid_configuration() {
     ] {
         assert_rejects(source);
     }
+}
+
+#[test]
+fn config_schema_accepts_script_entries() {
+    assert_accepts("[project]\nentry-points = [\"scripts/main.jl\", \"other.jl\"]\n");
+    assert_accepts("[project]\nentry-points = []\n");
 }

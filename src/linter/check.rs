@@ -78,6 +78,11 @@ impl std::error::Error for LintError {}
 pub enum ProjectContext<'a> {
     SystemOnly,
     Harvested(&'a crate::index::HarvestedLibrary),
+    /// Explicit script programs, with the environment's library when available.
+    Scripts {
+        library: Option<&'a crate::index::HarvestedLibrary>,
+        scripts: &'a crate::project::scripts::ScriptAnalysis,
+    },
     /// The built-in snapshot plus a declared dependency set, as if the file were
     /// a source file of a package whose `Project.toml` `[deps]` list those
     /// names. The docs generator's stand-in for a real project, so
@@ -97,6 +102,17 @@ impl<'a> ProjectContext<'a> {
     /// gets `None` and leaves `unresolved-import` silent.
     fn resolution_for(self, path: Option<&Path>) -> Option<ResolutionContext<'a>> {
         match self {
+            ProjectContext::Scripts { library, scripts } => {
+                let mut resolution = match library {
+                    Some(lib) => ProjectContext::Harvested(lib).resolution_for(path)?,
+                    None => ProjectContext::SystemOnly.resolution_for(path)?,
+                };
+                if path.is_some_and(|path| scripts.applies(path)) {
+                    resolution.workspace = None;
+                    resolution.declared_deps = None;
+                }
+                Some(resolution)
+            }
             ProjectContext::SystemOnly => Some(ResolutionContext {
                 packages: system_snapshot(),
                 workspace: None,
@@ -249,7 +265,7 @@ pub fn check_source_in_project(
 
 /// Single-file entry: parse, follow the file's own include chains (no lint-set
 /// siblings to seed — used for stdin, docs examples, and tests), then lint.
-fn check_text(
+pub fn check_text(
     path: Option<&Path>,
     text: &str,
     rules: &ResolvedRules,
@@ -314,7 +330,12 @@ fn check_parsed(
     // `undefined-name` is opt-in there), or a harvested project library plus
     // this file's workspace membership, which resolves cross-file names.
     let resolution = project.resolution_for(path);
-    let diagnostics = lint_parsed(path, root, &model, rules, resolution, includes);
+    let scripts = match project {
+        ProjectContext::Scripts { scripts, .. } => Some(scripts),
+        _ => None,
+    };
+    let diagnostics =
+        lint_parsed_with_scripts(path, root, &model, rules, resolution, includes, scripts);
 
     let status = if diagnostics.is_empty() {
         LintStatus::Clean
@@ -334,7 +355,7 @@ fn check_parsed(
 /// The built-in Base/Core export snapshot, built once per process. The
 /// resolution floor for CLI lint runs (and docs generation), where locating
 /// and harvesting a real Julia install would be slow and nondeterministic.
-fn system_snapshot() -> &'static BTreeMap<String, Arc<PackageIndex>> {
+pub(crate) fn system_snapshot() -> &'static BTreeMap<String, Arc<PackageIndex>> {
     static SNAPSHOT: OnceLock<BTreeMap<String, Arc<PackageIndex>>> = OnceLock::new();
     SNAPSHOT.get_or_init(|| build_system_index(None))
 }
@@ -355,9 +376,24 @@ pub fn lint_parsed(
     resolution: Option<ResolutionContext<'_>>,
     includes: &[IncludeProblem],
 ) -> Vec<Diagnostic> {
+    lint_parsed_with_scripts(path, root, model, rules, resolution, includes, None)
+}
+
+/// Project-aware linting without adding another rule traversal or suppression pass.
+#[allow(clippy::too_many_arguments)]
+pub fn lint_parsed_with_scripts(
+    path: Option<&Path>,
+    root: &SyntaxNode,
+    model: &SemanticModel,
+    rules: &ResolvedRules,
+    resolution: Option<ResolutionContext<'_>>,
+    includes: &[IncludeProblem],
+    scripts: Option<&crate::project::scripts::ScriptAnalysis>,
+) -> Vec<Diagnostic> {
     let suppressions = SuppressionMap::build(root);
     let ctx = RuleContext::new(path, root, model)
         .with_resolution(resolution)
+        .with_scripts(scripts)
         .with_includes(includes)
         .with_julia_target(rules.julia_target())
         .with_config(rules.rules_config())

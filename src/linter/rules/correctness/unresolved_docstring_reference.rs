@@ -105,6 +105,16 @@ fn target_is_missing<P: PackageSource + ?Sized>(
 
     let reference = SemanticModel::build(&parsed.cst);
     if let Some(qualified) = reference.qualified_reads().first() {
+        // The package index says nothing about a script global with the same
+        // name, including a shadow present in only some entry points.
+        if qualified.path.first().is_some_and(|root| {
+            matches!(
+                resolver.resolve(root, at, Namespace::Value),
+                Resolution::Script { .. } | Resolution::Ambiguous
+            )
+        }) {
+            return false;
+        }
         let namespace = if qualified.is_macro {
             Namespace::Macro
         } else {

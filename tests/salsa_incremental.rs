@@ -7,6 +7,48 @@ use fatou::incremental::{
 };
 use fatou::parser::{Edit, apply_edits, parse};
 
+#[salsa::tracked(returns(copy))]
+fn probe_script_globals(db: &dyn IncrementalDb, file: SourceFile) -> usize {
+    SCRIPT_PROBE_RUNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    fatou::incremental::script_program(db, file).modules.len()
+}
+
+static SCRIPT_PROBE_RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[test]
+fn script_globals_backdate_across_body_edits_and_forget_deleted_sources() {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("main.jl");
+    let helper = dir.path().join("helper.jl");
+    let mut sources = BTreeMap::from([
+        (entry.clone(), Ok(Arc::from("include(\"helper.jl\")\n"))),
+        (helper.clone(), Ok(Arc::from("f(x) = x + 1\n"))),
+    ]);
+    let mut db = IncrementalDatabase::default();
+    db.set_script_sources(std::slice::from_ref(&entry), &sources, &BTreeMap::new());
+    let file = db.lookup_file(&entry).unwrap();
+    probe_script_globals(&db, file);
+    let before = SCRIPT_PROBE_RUNS.load(Ordering::SeqCst);
+    db.upsert_file(&helper, "f(x) = x + 12345\n");
+    probe_script_globals(&db, file);
+    assert_eq!(SCRIPT_PROBE_RUNS.load(Ordering::SeqCst), before);
+    db.upsert_file(&helper, "g(x) = x + 12345\n");
+    probe_script_globals(&db, file);
+    assert_eq!(SCRIPT_PROBE_RUNS.load(Ordering::SeqCst), before + 1);
+    sources.insert(helper, Err("deleted".into()));
+    db.set_script_sources(std::slice::from_ref(&entry), &sources, &BTreeMap::new());
+    assert!(fatou::incremental::script_program(&db, file).incomplete);
+    assert!(
+        fatou::incremental::script_program(&db, file)
+            .modules
+            .values()
+            .all(|module| module.bindings.is_empty())
+    );
+}
+
 fn edit(range: std::ops::Range<usize>, insert: &str) -> Edit {
     Edit {
         range,

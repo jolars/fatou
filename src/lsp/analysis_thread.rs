@@ -31,6 +31,7 @@ use super::graph_diagnostics::graph_diagnostics;
 use super::lint::{ServerRules, lint_diagnostics_via_db};
 use super::read_jobs::{ReadJob, run_read};
 use super::rename_files::renamed_package_projects;
+use super::script_projects::{Loaded, ScriptProjects};
 use super::server::HarvestSignal;
 use super::state::Outbound;
 use super::task_pool::Spawner;
@@ -131,6 +132,8 @@ pub(crate) fn spawn_analysis_thread(
         .name("fatou-analysis".to_string())
         .spawn(move || {
             let mut worker = AnalysisWorker {
+                scripts: Default::default(),
+                pending_script_load: None,
                 db: IncrementalDatabase::default(),
                 out_tx,
                 done_tx,
@@ -207,6 +210,10 @@ pub(crate) fn decide(
 }
 
 struct AnalysisWorker {
+    scripts: ScriptProjects,
+    /// Installing even a body-only load can write tracked text and cancel
+    /// Salsa readers, so keep the latest load until the analysis slot is free.
+    pending_script_load: Option<Loaded>,
     db: IncrementalDatabase,
     out_tx: Sender<Outbound>,
     /// Read-phase workers signal completion here so the analysis thread can
@@ -249,6 +256,13 @@ impl AnalysisWorker {
     ) {
         loop {
             select! {
+                recv(self.scripts.ready) -> loaded => {
+                    if let Ok(loaded) = loaded {
+                        guard("script install", || {
+                            self.on_scripts_loaded(loaded);
+                        });
+                    }
+                }
                 recv(sync_rx) -> msg => {
                     // A write to a file the analysis pipeline does not own.
                     // Guarded so a panic mid-write can't kill the sole writer.
@@ -347,6 +361,16 @@ impl AnalysisWorker {
         }
     }
 
+    fn on_scripts_loaded(&mut self, loaded: Loaded) {
+        if self.inflight.is_some() {
+            self.pending_script_load = Some(loaded);
+            return;
+        }
+        if self.scripts.install(loaded, &mut self.db) {
+            let _ = self.out_tx.send(Outbound::DiagnosticsRefresh);
+        }
+    }
+
     /// Handle a sync signal: a document was closed, or a watched file changed
     /// with no buffer of its own. Every queued analysis of that path's live
     /// buffer is discarded before the tracked input is reverted to the on-disk
@@ -385,6 +409,7 @@ impl AnalysisWorker {
         }
         let declared_before = self.declared_deps_of(path);
         self.db.revert_file_to_disk(path);
+        self.scripts.closed_or_changed(path, &mut self.db);
         // Closing an unsaved `Project.toml` puts the disk copy back in charge,
         // which can change what the package declares.
         self.refresh_if_declared_deps_changed(path, declared_before);
@@ -437,10 +462,20 @@ impl AnalysisWorker {
     /// sees has to describe the transform from the last *analyzed* text, not
     /// from the last enqueued one.
     fn enqueue(&mut self, mut req: AnalysisRequest) {
+        self.scripts.update(
+            &req.path,
+            req.text.text_arc(),
+            req.version,
+            &req.rules.entry_points,
+            &mut self.db,
+        );
         // Even a stale-version duplicate signals recent activity on this URI.
         self.active = Some(req.uri.clone());
         match self.pending.get_mut(&req.uri) {
             Some(existing) if existing.version >= req.version => {
+                if existing.version == req.version {
+                    existing.rules = Arc::clone(&req.rules);
+                }
                 // Dropping a request whose text differs loses the transform to
                 // it and back, so the chain is no longer a description of how
                 // the pending text was reached. Same text (an `on_config_changed`
@@ -469,6 +504,11 @@ impl AnalysisWorker {
     /// the in-flight analysis only when superseded by a newer edit of the
     /// *same* URI.
     fn try_dispatch(&mut self) {
+        if self.inflight.is_none()
+            && let Some(loaded) = self.pending_script_load.take()
+        {
+            self.on_scripts_loaded(loaded);
+        }
         let versions: HashMap<Uri, i32> = self
             .pending
             .iter()
@@ -622,6 +662,8 @@ mod tests {
             use crate::text::PositionEncoding;
 
             Self {
+                scripts: Default::default(),
+                pending_script_load: None,
                 db: IncrementalDatabase::default(),
                 out_tx: crossbeam_channel::unbounded().0,
                 done_tx: crossbeam_channel::unbounded().0,
@@ -777,6 +819,7 @@ mod tests {
         let (out_tx, _out_rx) = crossbeam_channel::unbounded::<Outbound>();
         let (done_tx, done_rx) = crossbeam_channel::unbounded::<AnalyzeDone>();
         let mut worker = AnalysisWorker {
+            scripts: Default::default(),
             read_spawner: pool.spawner(),
             out_tx,
             done_tx,
@@ -820,6 +863,190 @@ mod tests {
         assert_eq!(done, 2, "both analyses should have signaled done");
     }
 
+    #[test]
+    fn script_body_load_preserves_another_files_inflight_diagnostics() {
+        use std::time::Duration;
+
+        use crate::config::LintConfig;
+        use crate::lsp::task_pool::TaskPool;
+
+        let timeout = Duration::from_secs(5);
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("main.jl");
+        let other = dir.path().join("other.jl");
+        let original = "provided() = 1\ninclude(\"other.jl\")\n";
+        let edited = "provided() = 2\ninclude(\"other.jl\")\n";
+        let other_text = "f() = provided() + typo\n";
+        std::fs::write(&other, other_text).unwrap();
+        let (mut rules, _) = ServerRules::from_config(&LintConfig {
+            select: Some(vec!["undefined-name".into()]),
+            ..Default::default()
+        });
+        rules.entry_points = vec![entry.clone()];
+        let rules = Arc::new(rules);
+        let request = |path: &Path, text: &str, version| AnalysisRequest {
+            uri: super::super::uri::from_path(path).unwrap(),
+            path: path.to_owned(),
+            text: Arc::new(TextBuffer::from(text)),
+            version,
+            rules: Arc::clone(&rules),
+            edits: None,
+        };
+
+        let pool = TaskPool::new("test-script-analysis", 1);
+        let (out_tx, out_rx) = crossbeam_channel::unbounded();
+        let (done_tx, done_rx) = crossbeam_channel::unbounded();
+        let mut worker = AnalysisWorker {
+            read_spawner: pool.spawner(),
+            out_tx,
+            done_tx,
+            ..AnalysisWorker::for_test()
+        };
+        worker.scripts.update(
+            &entry,
+            Arc::from(original),
+            1,
+            &rules.entry_points,
+            &mut worker.db,
+        );
+        let initial = worker.scripts.ready.recv_timeout(timeout).unwrap();
+        worker.on_scripts_loaded(initial);
+        assert!(matches!(
+            out_rx.try_recv(),
+            Ok(Outbound::DiagnosticsRefresh)
+        ));
+
+        // Hold the read pool so the other file's snapshot remains alive when
+        // the script load arrives, independently of thread scheduling speed.
+        let (release_tx, release_rx) = crossbeam_channel::unbounded::<()>();
+        pool.spawner().spawn(move || {
+            let _ = release_rx.recv();
+        });
+        worker.start(request(&other, other_text, 1));
+        worker.enqueue(request(&entry, edited, 2));
+        worker.try_dispatch();
+        let loaded = worker.scripts.ready.recv_timeout(timeout).unwrap();
+
+        let (handled_tx, handled_rx) = crossbeam_channel::unbounded();
+        let writer = std::thread::spawn(move || {
+            worker.on_scripts_loaded(loaded);
+            handled_tx.send(()).unwrap();
+            worker
+        });
+        let handled_before_read = handled_rx.recv_timeout(timeout).is_ok();
+        // Release even on failure so an immediate Salsa write can unwind its
+        // canceled reader and the test can join the writer without deadlocking.
+        drop(release_tx);
+        let mut worker = writer.join().unwrap();
+        let done = done_rx.recv_timeout(timeout).unwrap();
+        assert!(
+            handled_before_read,
+            "script loads must wait without blocking or canceling the active analysis"
+        );
+        let Outbound::Diagnostics {
+            uri,
+            version,
+            diags,
+        } = out_rx.try_recv().unwrap()
+        else {
+            panic!("expected the other file's diagnostics");
+        };
+        assert_eq!(uri, super::super::uri::from_path(&other).unwrap());
+        assert_eq!(version, 1);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(
+            diags[0].code,
+            Some(lsp_types::NumberOrString::String("undefined-name".into()))
+        );
+        assert!(diags[0].message.contains("`typo`"));
+        assert_eq!(
+            worker.db.file_text(worker.db.lookup_file(&entry).unwrap()),
+            original
+        );
+        assert_eq!(done.uri, uri);
+        assert_eq!(done.version, version);
+
+        worker.inflight = None;
+        worker.try_dispatch();
+        assert!(worker.pending_script_load.is_none());
+        let done = done_rx.recv_timeout(timeout).unwrap();
+        assert_eq!(done.uri, super::super::uri::from_path(&entry).unwrap());
+        assert_eq!(done.version, 2);
+        assert_eq!(
+            worker.db.file_text(worker.db.lookup_file(&entry).unwrap()),
+            edited
+        );
+        assert!(
+            out_rx
+                .try_iter()
+                .all(|out| !matches!(out, Outbound::DiagnosticsRefresh))
+        );
+    }
+
+    #[test]
+    fn deferred_script_load_checks_generation_when_analysis_finishes() {
+        use std::time::Duration;
+
+        let timeout = Duration::from_secs(5);
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("main.jl");
+        let entries = vec![entry.clone()];
+        let (out_tx, out_rx) = crossbeam_channel::unbounded();
+        let mut worker = AnalysisWorker {
+            out_tx,
+            ..AnalysisWorker::for_test()
+        };
+        worker.scripts.update(
+            &entry,
+            Arc::from("old() = 1\n"),
+            1,
+            &entries,
+            &mut worker.db,
+        );
+        worker.inflight = Some(InflightAnalyze {
+            uri: super::super::uri::from_path(&dir.path().join("other.jl")).unwrap(),
+            version: 1,
+        });
+        let loaded = worker.scripts.ready.recv_timeout(timeout).unwrap();
+        worker.on_scripts_loaded(loaded);
+        assert!(worker.db.lookup_file(&entry).is_none());
+        assert!(out_rx.try_recv().is_err());
+
+        // A newer edit can invalidate a load while it waits for the active
+        // analysis. Completing that analysis must not install the old result.
+        worker.scripts.update(
+            &entry,
+            Arc::from("fresh() = 2\n"),
+            2,
+            &entries,
+            &mut worker.db,
+        );
+        worker.inflight = None;
+        worker.try_dispatch();
+        assert!(worker.db.lookup_file(&entry).is_none());
+        assert!(out_rx.try_recv().is_err());
+
+        worker.inflight = Some(InflightAnalyze {
+            uri: super::super::uri::from_path(&dir.path().join("other.jl")).unwrap(),
+            version: 2,
+        });
+        let loaded = worker.scripts.ready.recv_timeout(timeout).unwrap();
+        worker.on_scripts_loaded(loaded);
+        assert!(worker.db.lookup_file(&entry).is_none());
+        worker.inflight = None;
+        worker.try_dispatch();
+        assert_eq!(
+            worker.db.file_text(worker.db.lookup_file(&entry).unwrap()),
+            "fresh() = 2\n"
+        );
+        assert!(!worker.db.scripts_pending());
+        assert!(matches!(
+            out_rx.try_recv(),
+            Ok(Outbound::DiagnosticsRefresh)
+        ));
+        assert!(out_rx.try_recv().is_err());
+    }
+
     /// The write phase hands salsa the live buffer's own allocation, never a
     /// copy of it. A `req.text.text().to_string()` here would still type-check
     /// and still be correct — it would just copy the whole document on every
@@ -836,6 +1063,7 @@ mod tests {
         let (out_tx, _out_rx) = crossbeam_channel::unbounded::<Outbound>();
         let (done_tx, _done_rx) = crossbeam_channel::unbounded::<AnalyzeDone>();
         let mut worker = AnalysisWorker {
+            scripts: Default::default(),
             read_spawner: pool.spawner(),
             out_tx,
             done_tx,
@@ -943,6 +1171,7 @@ mod tests {
         let pool = TaskPool::new("test-analysis-read", 1);
         let (analysis_tx, analysis_rx) = crossbeam_channel::unbounded::<AnalysisRequest>();
         let mut worker = AnalysisWorker {
+            scripts: Default::default(),
             read_spawner: pool.spawner(),
             ..AnalysisWorker::for_test()
         };

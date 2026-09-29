@@ -515,7 +515,10 @@ fn free_read_locations<P: PackageSource>(
         }
         // A sibling file's module-level import: navigation to the `import` site
         // is deferred, so no definition location.
-        Resolution::WorkspaceImport { .. } | Resolution::Unresolved => Vec::new(),
+        Resolution::Script { .. }
+        | Resolution::Ambiguous
+        | Resolution::WorkspaceImport { .. }
+        | Resolution::Unresolved => Vec::new(),
     }
 }
 

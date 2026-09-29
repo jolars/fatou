@@ -624,7 +624,10 @@ pub(crate) fn outgoing_calls_via_db(
                     })
                 }
                 // A sibling file's module-level import: def site not recorded.
-                Resolution::WorkspaceImport { .. } | Resolution::Unresolved => None,
+                Resolution::Script { .. }
+                | Resolution::Ambiguous
+                | Resolution::WorkspaceImport { .. }
+                | Resolution::Unresolved => None,
             };
             let Some(target) = target else {
                 continue;

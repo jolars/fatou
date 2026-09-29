@@ -16,5 +16,6 @@ pub mod project;
 pub mod project_files;
 mod registry;
 pub mod resolve;
+pub mod script_loading;
 pub mod semantic;
 pub mod text;

@@ -112,7 +112,7 @@ pub fn has_unresolvable_using(
 /// interpolated path, an unharvested package, or a missing submodule. Shared by
 /// the model-based and harvested `has_unresolvable_using` scans. `S: AsRef<str>`
 /// so it accepts the model's `SmolStr` components and the index's `String`s.
-fn module_path_unresolvable<S: AsRef<str>>(
+pub(crate) fn module_path_unresolvable<S: AsRef<str>>(
     leading_dots: u32,
     components: &[S],
     packages: &dyn PackageSource,
@@ -163,6 +163,10 @@ pub fn module_at<'m>(root: &'m ModuleIndex, path: &[SmolStr]) -> Option<&'m Modu
 /// from an import); the library tiers name the module the symbol came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolution {
+    /// A global supplied by an explicitly configured script program.
+    Script { name: SmolStr },
+    /// The file participates in script contexts with different answers.
+    Ambiguous,
     /// A binding in this file: a local, parameter, global, or explicit import.
     Binding(BindingId),
     /// A top-level symbol of the enclosing workspace package's module, defined
@@ -274,6 +278,7 @@ pub struct Resolver<'a, P: PackageSource + ?Sized> {
     /// [`WorkspaceCtx::host`]) supplies the tier-2 same-module globals. `None`
     /// for a non-member file or a non-package workspace.
     workspace: Option<WorkspaceCtx>,
+    scripts: Option<Vec<crate::project::scripts::ScriptContext<'a>>>,
 }
 
 /// The workspace context of the file being resolved: the enclosing package and
@@ -294,6 +299,7 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
             model,
             packages,
             workspace: None,
+            scripts: None,
         }
     }
 
@@ -302,6 +308,16 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
     /// file's path, via [`PackageSource::workspace_member`].
     pub fn with_workspace(mut self, workspace: Option<(Arc<PackageIndex>, ModulePath)>) -> Self {
         self.workspace = workspace.map(|(pkg, host)| WorkspaceCtx { pkg, host });
+        self
+    }
+
+    /// Attach independent script contexts. A common answer is required by
+    /// consumers that cannot attribute findings to an individual program.
+    pub fn with_scripts(
+        mut self,
+        scripts: Vec<crate::project::scripts::ScriptContext<'a>>,
+    ) -> Self {
+        self.scripts = Some(scripts);
         self
     }
 
@@ -318,11 +334,68 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
     /// Resolve `name` (bare, without `@` even in [`Namespace::Macro`]) as read
     /// at `offset`, walking the four tiers and returning the first hit.
     pub fn resolve(&self, name: &str, offset: TextSize, namespace: Namespace) -> Resolution {
+        if let Some(scripts) = &self.scripts {
+            let mut answers = scripts
+                .iter()
+                .map(|context| self.resolve_in_script(name, offset, namespace, context));
+            let Some(first) = answers.next() else {
+                return Resolution::Ambiguous;
+            };
+            return if answers.all(|answer| answer == first) {
+                first
+            } else {
+                Resolution::Ambiguous
+            };
+        }
+        self.resolve_with_script(name, offset, namespace, None)
+    }
+
+    pub fn resolve_in_script(
+        &self,
+        name: &str,
+        offset: TextSize,
+        namespace: Namespace,
+        context: &crate::project::scripts::ScriptContext<'_>,
+    ) -> Resolution {
+        self.resolve_with_script(name, offset, namespace, Some(context))
+    }
+
+    fn resolve_with_script(
+        &self,
+        name: &str,
+        offset: TextSize,
+        namespace: Namespace,
+        script: Option<&crate::project::scripts::ScriptContext<'_>>,
+    ) -> Resolution {
         let wanted = wanted_name(name, namespace);
 
         // Tiers 1 + 2: a binding in this file.
         if let Some(binding) = self.file_binding(&wanted, offset, namespace) {
             return Resolution::Binding(binding);
+        }
+        let script_module = script.and_then(|context| {
+            let mut path = context.host.clone();
+            path.extend(
+                self.model
+                    .enclosing_module_path(self.model.scope_at(offset)),
+            );
+            context.program.modules.get(&path)
+        });
+        if namespace == Namespace::Value
+            && let Some(context) = script
+        {
+            let mut path = context.host.clone();
+            path.extend(
+                self.model
+                    .enclosing_module_path(self.model.scope_at(offset)),
+            );
+            let own_name = path.last().map(SmolStr::as_str).unwrap_or("Main");
+            if wanted == own_name {
+                return Resolution::Script { name: wanted };
+            }
+        }
+        if script_module.is_some_and(|module| module.bindings.contains(&wanted)) {
+            return Resolution::Script { name: wanted };
         }
         // Tier 2 (cross-file): a same-module sibling top-level symbol of the
         // module enclosing this read (the file's host module plus any file-internal
@@ -332,7 +405,9 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         // `SLOPE`), which no `export`/definition records — Julia scopes only the
         // enclosing module's own name, never an ancestor's, so this matches
         // exactly `wanted == module.name`.
-        if let Some(workspace) = &self.workspace {
+        if let Some(workspace) = &self.workspace
+            && script.is_none()
+        {
             let path = self.full_module_path(workspace, self.model.scope_at(offset));
             if let Some(module) = module_at(&workspace.pkg.root, &path) {
                 if module_defines(module, &wanted, namespace)
@@ -352,10 +427,34 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         }
         // Tier 3: a whole-module `using`'s exports, in source order — this
         // file's, then those a sibling file opened module-wide.
-        if let Some((module, name)) = self.using_export(&wanted, offset) {
+        if script.is_none()
+            && let Some((module, name)) = self.using_export(&wanted, offset)
+        {
             return Resolution::Using { module, name };
         }
+        if let Some(module) = script_module {
+            for using in &module.usings {
+                if using.leading_dots != 0 {
+                    continue;
+                }
+                let Some((head, rest)) = using.components.split_first() else {
+                    continue;
+                };
+                let Some(pkg) = self.packages.package(head) else {
+                    continue;
+                };
+                let path: ModulePath = rest.iter().map(SmolStr::new).collect();
+                if module_at(&pkg.root, &path).is_some_and(|module| module_exports(module, &wanted))
+                {
+                    return Resolution::Using {
+                        module: using.components.join(".").into(),
+                        name: wanted,
+                    };
+                }
+            }
+        }
         if let Some(workspace) = &self.workspace
+            && script.is_none()
             && let Some((module, name)) = self.workspace_using_export(workspace, &wanted, offset)
         {
             return Resolution::Using { module, name };

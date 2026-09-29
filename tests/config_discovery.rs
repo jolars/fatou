@@ -437,6 +437,227 @@ impl Drop for LspProcess {
     }
 }
 
+fn script_uri(path: &Path) -> String {
+    let path = path.to_str().unwrap().replace('\\', "/");
+    let slash = if path.starts_with('/') { "" } else { "/" };
+    let mut uri = format!("file://{slash}");
+    for byte in path.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
+                uri.push(byte as char)
+            }
+            _ => uri.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    uri
+}
+
+fn wait_script_diagnostics(server: &mut LspProcess, uri: &str, expected: &[&str]) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut last = Value::Null;
+    loop {
+        let message = server
+            .messages
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap_or_else(|error| {
+                panic!("waiting for {expected:?}: {error}; last diagnostics: {last}")
+            });
+        if let Message::Notification(note) = message
+            && note.method == "textDocument/publishDiagnostics"
+            && note.params["uri"] == uri
+        {
+            last = note.params["diagnostics"].clone();
+            let findings = last.as_array().unwrap();
+            if findings.len() == expected.len()
+                && expected.iter().all(|name| {
+                    findings.iter().any(|finding| {
+                        finding["message"]
+                            .as_str()
+                            .unwrap()
+                            .contains(&format!("`{name}`"))
+                    })
+                })
+            {
+                return;
+            }
+        }
+    }
+}
+
+#[test]
+fn lsp_script_entry_refreshes_unsaved_siblings_closes_and_deleted_files() {
+    let sandbox = Sandbox::new();
+    let path = sandbox.path();
+    std::fs::write(
+        path.join("fatou.toml"),
+        "[project]\nentry-points = [\"main.jl\"]\n[lint]\nselect = [\"undefined-name\"]\n",
+    )
+    .unwrap();
+    let root_text = "provided = 1\ninclude(\"extra.jl\")\ninclude(\"worker.jl\")\n";
+    std::fs::write(path.join("main.jl"), root_text).unwrap();
+    std::fs::write(path.join("extra.jl"), "extra = 1\n").unwrap();
+    let worker_text = "f(x::Int) = provided + extra + typo + length(x)\n";
+    std::fs::write(path.join("worker.jl"), worker_text).unwrap();
+    let entry = script_uri(&path.join("main.jl"));
+    let worker = script_uri(&path.join("worker.jl"));
+    let extra = script_uri(&path.join("extra.jl"));
+    let mut server = LspProcess::start(sandbox.command(path, &[], &["lsp"]));
+    server.send(
+        json!({"jsonrpc":"2.0", "id":1, "method":"initialize", "params":{"capabilities":{}}}),
+    );
+    server.response(1);
+    server.send(json!({"jsonrpc":"2.0", "method":"initialized", "params":{}}));
+    server.send(
+        json!({"jsonrpc":"2.0", "method":"textDocument/didOpen", "params":{"textDocument":{
+        "uri":worker, "languageId":"julia", "version":1, "text":worker_text}}}),
+    );
+    wait_script_diagnostics(&mut server, &worker, &["typo"]);
+    server.send(json!({"jsonrpc":"2.0", "method":"textDocument/didOpen", "params":{"textDocument":{
+        "uri":entry, "languageId":"julia", "version":1, "text":root_text.replace("provided", "typo")}}}));
+    wait_script_diagnostics(&mut server, &worker, &["provided"]);
+    server.send(
+        json!({"jsonrpc":"2.0", "method":"textDocument/didChange", "params":{
+        "textDocument":{"uri":entry, "version":2}, "contentChanges":[{"text":root_text}]}}),
+    );
+    wait_script_diagnostics(&mut server, &worker, &["typo"]);
+    server.send(json!({"jsonrpc":"2.0", "method":"textDocument/didChange", "params":{
+        "textDocument":{"uri":entry, "version":3}, "contentChanges":[{"text":root_text.replace("provided", "typo")}]}}));
+    wait_script_diagnostics(&mut server, &worker, &["provided"]);
+    server.send(json!({"jsonrpc":"2.0", "method":"textDocument/didClose", "params":{"textDocument":{"uri":entry}}}));
+    wait_script_diagnostics(&mut server, &worker, &["typo"]);
+    std::fs::remove_file(path.join("extra.jl")).unwrap();
+    server.send(json!({"jsonrpc":"2.0", "method":"workspace/didChangeWatchedFiles", "params":{"changes":[{"uri":extra,"type":3}]}}));
+    wait_script_diagnostics(&mut server, &worker, &[]);
+    std::fs::write(path.join("extra.jl"), "extra = 1\n").unwrap();
+    server.send(json!({"jsonrpc":"2.0", "method":"workspace/didChangeWatchedFiles", "params":{"changes":[{"uri":extra,"type":1}]}}));
+    wait_script_diagnostics(&mut server, &worker, &["typo"]);
+    std::fs::remove_file(path.join("main.jl")).unwrap();
+    server.send(json!({"jsonrpc":"2.0", "method":"workspace/didChangeWatchedFiles", "params":{"changes":[{"uri":entry,"type":3}]}}));
+    wait_script_diagnostics(&mut server, &worker, &[]);
+    std::fs::write(path.join("main.jl"), root_text).unwrap();
+    server.send(json!({"jsonrpc":"2.0", "method":"workspace/didChangeWatchedFiles", "params":{"changes":[{"uri":entry,"type":1}]}}));
+    wait_script_diagnostics(&mut server, &worker, &["typo"]);
+    std::fs::write(path.join("fatou.toml"), "[lint]\nselect = []\n").unwrap();
+    server.send(json!({"jsonrpc":"2.0", "method":"workspace/didChangeWatchedFiles", "params":{"changes":[{"uri":script_uri(&path.join("fatou.toml")),"type":2}]}}));
+    wait_script_diagnostics(&mut server, &worker, &[]);
+}
+
+#[test]
+fn script_entry_paths_are_relative_to_the_config_and_duplicates_are_ignored() {
+    let sandbox = Sandbox::new();
+    std::fs::create_dir(sandbox.path().join("scripts")).unwrap();
+    std::fs::write(sandbox.path().join("fatou.toml"), "[project]\nentry-points = [\"scripts/main.jl\", \"scripts/./main.jl\"]\n[lint]\nselect = [\"undefined-name\"]\n").unwrap();
+    std::fs::write(
+        sandbox.path().join("scripts/main.jl"),
+        "include(\"helper.jl\")\n",
+    )
+    .unwrap();
+    std::fs::write(sandbox.path().join("scripts/helper.jl"), "f() = typo\n").unwrap();
+    let output = sandbox.run(
+        &sandbox.path().join("scripts"),
+        &[],
+        &["lint", "--output", "json", "helper.jl"],
+    );
+    let diagnostics: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(diagnostics.len(), 1, "{}", stderr(&output));
+    assert_eq!(
+        diagnostics[0]["message"]["body"]
+            .as_str()
+            .unwrap()
+            .matches("main.jl")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn script_entry_configuration_rejects_unknown_keys_and_missing_entries() {
+    let sandbox = Sandbox::new();
+    for (config, message) in [
+        ("[project]\nentry-point = []\n", "entry-point"),
+        ("[project]\nentry-points = \"main.jl\"\n", "sequence"),
+        (
+            "[project]\nentry-points = [\"missing.jl\"]\n",
+            "cannot read script entry point",
+        ),
+    ] {
+        std::fs::write(sandbox.path().join("fatou.toml"), config).unwrap();
+        let output = sandbox.run(sandbox.path(), &[], &["lint", "input.jl"]);
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains(message), "{}", stderr(&output));
+    }
+}
+
+fn wait_script_refresh(server: &mut LspProcess) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let message = server
+            .messages
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("script diagnostic refresh");
+        if let Message::Request(request) = message
+            && request.method == "workspace/diagnostic/refresh"
+        {
+            server.send(json!({"jsonrpc":"2.0", "id":request.id, "result":null}));
+            return;
+        }
+    }
+}
+
+#[test]
+fn lsp_script_entry_refreshes_pull_diagnostics_after_include_edits() {
+    let sandbox = Sandbox::new();
+    let path = sandbox.path();
+    std::fs::write(
+        path.join("fatou.toml"),
+        "[project]\nentry-points = [\"main.jl\"]\n[lint]\nselect = [\"undefined-name\"]\n",
+    )
+    .unwrap();
+    let initial = "include(\"a.jl\")\ninclude(\"worker.jl\")\n";
+    std::fs::write(path.join("main.jl"), initial).unwrap();
+    std::fs::write(path.join("a.jl"), "provided = 1\n").unwrap();
+    std::fs::write(path.join("b.jl"), "typo = 1\n").unwrap();
+    let text = "f() = provided + typo\n";
+    std::fs::write(path.join("worker.jl"), text).unwrap();
+    let worker = script_uri(&path.join("worker.jl"));
+    let entry = script_uri(&path.join("main.jl"));
+    let mut server = LspProcess::start(sandbox.command(path, &[], &["lsp"]));
+    server.send(
+        json!({"jsonrpc":"2.0", "id":1, "method":"initialize", "params":{"capabilities":{
+        "textDocument":{"diagnostic":{}}, "workspace":{"diagnostic":{"refreshSupport":true}}}}}),
+    );
+    server.response(1);
+    server.send(json!({"jsonrpc":"2.0", "method":"initialized", "params":{}}));
+    server.send(
+        json!({"jsonrpc":"2.0", "method":"textDocument/didOpen", "params":{"textDocument":{
+        "uri":worker, "languageId":"julia", "version":1, "text":text}}}),
+    );
+    wait_script_refresh(&mut server);
+    server.send(json!({"jsonrpc":"2.0", "id":2, "method":"textDocument/diagnostic", "params":{"textDocument":{"uri":worker}}}));
+    let first = server.response(2);
+    assert_eq!(first["items"].as_array().unwrap().len(), 1, "{first}");
+    assert!(
+        first["items"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("`typo`")
+    );
+    server.send(
+        json!({"jsonrpc":"2.0", "method":"textDocument/didOpen", "params":{"textDocument":{
+        "uri":entry, "languageId":"julia", "version":1, "text":initial.replace("a.jl", "b.jl")}}}),
+    );
+    wait_script_refresh(&mut server);
+    server.send(json!({"jsonrpc":"2.0", "id":3, "method":"textDocument/diagnostic", "params":{"textDocument":{"uri":worker}, "previousResultId":first["resultId"]}}));
+    let second = server.response(3);
+    assert_eq!(second["items"].as_array().unwrap().len(), 1, "{second}");
+    assert!(
+        second["items"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("`provided`")
+    );
+}
+
 fn lsp_format(sandbox: &Sandbox, env_config: &str) -> (String, Vec<Notification>) {
     let mut server = LspProcess::start(sandbox.command(
         sandbox.path(),

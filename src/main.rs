@@ -68,6 +68,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                 unsafe_fixes,
                 cli.color,
                 &config,
+                &config.project.entry_points(&source),
                 &filter,
                 julia_target,
             )
@@ -444,6 +445,7 @@ fn run_lint(
     unsafe_fixes: bool,
     color: ColorChoice,
     config: &Config,
+    entry_points: &[PathBuf],
     exclude: &ExcludeFilter,
     julia_target: Option<fatou::julia_version::VersionRange>,
 ) -> Result<ExitCode, String> {
@@ -460,15 +462,17 @@ fn run_lint(
         return Err("lint requires at least one path".to_string());
     }
 
+    let scripts = if entry_points.is_empty() {
+        None
+    } else {
+        Some(fatou::script_loading::analyze(entry_points)?)
+    };
+
     let mode = match output {
         LintOutput::Pretty => OutputMode::Pretty,
         LintOutput::Concise => OutputMode::Concise,
         LintOutput::Json => OutputMode::Json,
     };
-
-    if fix || unsafe_fixes {
-        return run_lint_fix(paths, mode, unsafe_fixes, color, config, exclude);
-    }
 
     let use_color = color_enabled(color, std::io::stderr().is_terminal());
 
@@ -481,9 +485,26 @@ fn run_lint(
     } else {
         None
     };
-    let project = match &library {
-        Some(lib) => linter::ProjectContext::Harvested(lib),
-        None => linter::ProjectContext::SystemOnly,
+    if fix || unsafe_fixes {
+        return run_lint_fix(
+            paths,
+            mode,
+            unsafe_fixes,
+            color,
+            config,
+            exclude,
+            entry_points,
+            library.as_ref(),
+            julia_target,
+        );
+    }
+    let project = match (&scripts, &library) {
+        (Some(scripts), library) => linter::ProjectContext::Scripts {
+            library: library.as_ref(),
+            scripts,
+        },
+        (None, Some(lib)) => linter::ProjectContext::Harvested(lib),
+        (None, None) => linter::ProjectContext::SystemOnly,
     };
 
     let result =
@@ -569,6 +590,7 @@ fn lint_anchor(paths: &[PathBuf]) -> PathBuf {
 
 /// Apply fixes across every discovered file, writing changed files back, then
 /// report whatever findings remain. Exits non-zero if any remain (Ruff-style).
+#[allow(clippy::too_many_arguments)]
 fn run_lint_fix(
     paths: Vec<PathBuf>,
     mode: OutputMode,
@@ -576,12 +598,18 @@ fn run_lint_fix(
     color: ColorChoice,
     config: &Config,
     exclude: &ExcludeFilter,
+    entry_points: &[PathBuf],
+    library: Option<&fatou::index::HarvestedLibrary>,
+    julia_target: Option<fatou::julia_version::VersionRange>,
 ) -> Result<ExitCode, String> {
     let use_color = color_enabled(color, std::io::stderr().is_terminal());
     let (_, unknown_rules) = linter::ResolvedRules::resolve(&config.lint);
     warn_unknown_rules(&unknown_rules);
     let files =
         fatou::file_discovery::collect_julia_files(&paths, exclude).map_err(|e| e.to_string())?;
+    let script_sources = fatou::script_loading::load_sources(entry_points, &Default::default());
+    let (rules, _) = linter::ResolvedRules::resolve(&config.lint);
+    let rules = rules.with_julia_target(julia_target);
 
     // Fix files in parallel; each writes back to its own path. Per-file results
     // are reduced afterward so counts and the `remaining` list stay stable.
@@ -589,7 +617,30 @@ fn run_lint_fix(
         .par_iter()
         .map(|path| {
             let original = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-            let outcome = linter::fix_source(Some(path), &original, &config.lint, unsafe_fixes);
+            let outcome = if entry_points.is_empty() {
+                linter::fix_source(Some(path), &original, &config.lint, unsafe_fixes)
+            } else {
+                let mut sources = script_sources.clone();
+                linter::fix::fix_with(&original, unsafe_fixes, |text| {
+                    sources.insert(
+                        fatou::incremental::normalize_path(path),
+                        Ok(std::sync::Arc::from(text)),
+                    );
+                    let scripts = fatou::project::scripts::ScriptAnalysis::from_sources(
+                        entry_points,
+                        &sources,
+                    );
+                    linter::check::check_text(
+                        Some(path),
+                        text,
+                        &rules,
+                        linter::ProjectContext::Scripts {
+                            library,
+                            scripts: &scripts,
+                        },
+                    )
+                })
+            };
             let changed = outcome.output != original;
             if changed {
                 std::fs::write(path, &outcome.output).map_err(|e| e.to_string())?;
@@ -607,6 +658,24 @@ fn run_lint_fix(
             changed_files += 1;
         }
         remaining.extend(file_remaining);
+    }
+    if !entry_points.is_empty() {
+        let scripts = fatou::script_loading::analyze(entry_points)?;
+        remaining = linter::check_paths_with_config(
+            &paths,
+            &config.lint,
+            exclude,
+            julia_target,
+            linter::ProjectContext::Scripts {
+                library,
+                scripts: &scripts,
+            },
+        )
+        .map_err(|error| error.to_string())?
+        .reports
+        .into_iter()
+        .flat_map(|report| report.diagnostics)
+        .collect();
     }
 
     let rendered =

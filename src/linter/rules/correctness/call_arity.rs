@@ -86,6 +86,11 @@ impl Rule for CallArity {
     }
 
     fn check_file(&self, ctx: &RuleContext<'_>, sink: &mut Vec<Diagnostic>) {
+        // Script globals establish names, not a complete cross-file method
+        // table. An included file may extend a function declared in this one.
+        if ctx.scripts.is_some() {
+            return;
+        }
         // No resolution context, an unresolvable whole-module `using`, `eval`,
         // or an unfollowable `include`: all four leave the file unanswerable
         // (see `RuleContext::trusts_resolution`).
@@ -150,7 +155,9 @@ impl Rule for CallArity {
                 }
                 // A sibling file's module-level import names an external
                 // function whose source module we do not record; skip arity.
-                Resolution::WorkspaceImport { .. } => continue,
+                Resolution::WorkspaceImport { .. }
+                | Resolution::Script { .. }
+                | Resolution::Ambiguous => continue,
                 Resolution::Unresolved => continue, // `undefined-name`'s business
             }
             roots.push(&file_index);

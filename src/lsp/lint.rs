@@ -23,6 +23,7 @@ use crate::linter::docs::rule_doc_url;
 use crate::linter::rules::{RESOLUTION_RULES, ResolutionContext, is_shipped_rule};
 use crate::linter::{self, ResolvedRules, Severity, lint_parsed};
 use crate::parser::parse;
+use crate::resolve::PackageSource;
 use crate::semantic::SemanticModel;
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
@@ -83,7 +84,17 @@ pub(crate) fn lint_findings_via_db(
         // for a workspace member the include graph pins the host module, so
         // sibling and host globals resolve; loose files require an explicit
         // opt-in because they may be fragments whose host we cannot know.
-        let workspace = snapshot.workspace_member(path);
+        let scripts =
+            (!rules.entry_points.is_empty()).then(|| snapshot.scripts(&rules.entry_points));
+        let workspace = if scripts
+            .as_ref()
+            .is_some_and(|scripts| scripts.applies(path))
+        {
+            None
+        } else {
+            snapshot.workspace_member(path)
+        };
+        let script_packages = ScriptPackages(snapshot);
         let rules = rules.get(workspace.is_some());
         // Only a member file loads against the package's own project, so the
         // declared dependency set (and with it `unresolved-import`) rides along
@@ -92,26 +103,43 @@ pub(crate) fn lint_findings_via_db(
             .as_ref()
             .and_then(|(pkg, _)| snapshot.declared_deps(&pkg.name));
         let resolution = Some(ResolutionContext {
-            packages: snapshot,
+            packages: if scripts.is_some() {
+                &script_packages
+            } else {
+                snapshot
+            },
             workspace,
             declared_deps,
         });
         // No include problems: the server publishes its own include-graph
         // diagnostics (see `crate::lsp::graph_diagnostics`), so the
         // include-graph lint rules stay silent here.
-        Some(lint_parsed(
+        Some(crate::linter::check::lint_parsed_with_scripts(
             Some(path),
             &root,
             model,
             rules,
             resolution,
             &[],
+            scripts.as_ref(),
         ))
     }));
     match cached {
         Ok(Some(findings)) => findings,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
         Ok(None) | Err(_) => lint_findings(text, rules),
+    }
+}
+
+/// A standalone editor can have no workspace harvest at all. Scripts still
+/// need the same built-in Base/Core floor as the CLI while indexing catches up.
+struct ScriptPackages<'a>(&'a Analysis);
+
+impl PackageSource for ScriptPackages<'_> {
+    fn package(&self, name: &str) -> Option<Arc<crate::index::PackageIndex>> {
+        self.0
+            .package(name)
+            .or_else(|| crate::linter::check::system_snapshot().get(name).cloned())
     }
 }
 
@@ -141,6 +169,7 @@ const WORKSPACE_MEMBER_RULES: &[&str] = RESOLUTION_RULES;
 /// member files, where the server carries the resolution context that makes
 /// those rules sound.
 pub(crate) struct ServerRules {
+    pub(crate) entry_points: Vec<std::path::PathBuf>,
     plain: ResolvedRules,
     member: ResolvedRules,
 }
@@ -161,7 +190,14 @@ impl ServerRules {
         // Unknown IDs are reported off the plain resolve only: the member
         // config repeats the user's IDs, so its unknowns are duplicates.
         let (member, _) = ResolvedRules::resolve(&member_config);
-        (Self { plain, member }, unknown)
+        (
+            Self {
+                plain,
+                member,
+                entry_points: Vec::new(),
+            },
+            unknown,
+        )
     }
 
     pub(crate) fn get(&self, workspace_member: bool) -> &ResolvedRules {
@@ -238,6 +274,42 @@ fn severity_to_lsp(severity: Severity) -> DiagnosticSeverity {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn script_entry_uses_unsaved_sibling_globals() {
+        use crate::incremental::IncrementalDatabase;
+        use crate::script_loading::load_sources;
+        use std::collections::BTreeMap;
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("main.jl");
+        let helper = dir.path().join("helper.jl");
+        std::fs::write(&entry, "provided = 1\ninclude(\"helper.jl\")\n").unwrap();
+        let text = "f() = provided + typo\n";
+        std::fs::write(&helper, text).unwrap();
+        let entries = vec![entry.clone()];
+        let mut db = IncrementalDatabase::default();
+        db.set_script_sources(
+            &entries,
+            &load_sources(&entries, &BTreeMap::new()),
+            &BTreeMap::new(),
+        );
+        let (mut rules, _) = super::ServerRules::from_config(&crate::config::LintConfig {
+            select: Some(vec!["undefined-name".into()]),
+            ..Default::default()
+        });
+        rules.entry_points = entries;
+        let buffer = crate::text::TextBuffer::new(text);
+        let check = |db: &IncrementalDatabase| {
+            super::lint_findings_via_db(&db.snapshot(), &helper, &buffer, &rules)
+        };
+        let findings = check(&db);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert!(findings[0].message.body.contains("`typo`"));
+        db.upsert_file(&entry, "typo = 1\ninclude(\"helper.jl\")\n");
+        let findings = check(&db);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert!(findings[0].message.body.contains("`provided`"));
+    }
+
     use super::*;
     use crate::incremental::IncrementalDatabase;
     use lsp_types::Position;

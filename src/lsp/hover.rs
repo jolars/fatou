@@ -231,7 +231,10 @@ fn render_free_read<P: PackageSource>(
         Resolution::Using { module, name } => library_from_using(model, packages, &module, &name),
         // A sibling file's module-level import: its source module is not
         // recorded, so nothing to render.
-        Resolution::WorkspaceImport { .. } | Resolution::Unresolved => None,
+        Resolution::Script { .. }
+        | Resolution::Ambiguous
+        | Resolution::WorkspaceImport { .. }
+        | Resolution::Unresolved => None,
     }
 }
 
