@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.22.0](https://github.com/jolars/fatou/compare/v0.21.0...v0.22.0) (2026-09-29)
+
+### Features
+- enable undefined names for script programs ([`e3f49c5`](https://github.com/jolars/fatou/commit/e3f49c5fe76499613503a044be4abaf45610a40c))
+- support explicit script entry points ([`e6115e6`](https://github.com/jolars/fatou/commit/e6115e6bf80d774edfd06d703101895910d3057b)), closes [#109](https://github.com/jolars/fatou/issues/109)
+
+### Bug Fixes
+- **deps:** bump salsa to 0.28.5 ([`d6543dc`](https://github.com/jolars/fatou/commit/d6543dc4eaba2611932b6c05283558ab67081595))
+
+### Dependencies
+- updated crates/fatou-formatter to v0.7.3
+- updated crates/fatou-parser to v0.8.1
+
 ## [0.21.0](https://github.com/jolars/fatou/compare/v0.20.0...v0.21.0) (2026-09-21)
 
 ### Features

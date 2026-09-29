@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.1](https://github.com/jolars/fatou/compare/fatou-parser-v0.8.0...fatou-parser-v0.8.1) (2026-09-29)
+
+### Bug Fixes
+- **parser:** parse radical juxtaposition ([`389213e`](https://github.com/jolars/fatou/commit/389213eedd6115fc3d1aba11a6a06aaadd5d4e5f))
+- **parser:** handle macro loops and split declarations ([`5695c7c`](https://github.com/jolars/fatou/commit/5695c7c5ebee67645add2c0e10da55104172ebff)), fixes [#113](https://github.com/jolars/fatou/issues/113)
+
 ## [0.8.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.7.0...fatou-parser-v0.8.0) (2026-09-15)
 
 ### Breaking changes

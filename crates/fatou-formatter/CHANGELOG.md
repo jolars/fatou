@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.3](https://github.com/jolars/fatou/compare/fatou-formatter-v0.7.2...fatou-formatter-v0.7.3) (2026-09-29)
+
+### Dependencies
+- updated crates/fatou-parser to v0.8.1
+
 ## [0.7.2](https://github.com/jolars/fatou/compare/fatou-formatter-v0.7.1...fatou-formatter-v0.7.2) (2026-09-21)
 
 ### Bug Fixes
