@@ -1369,6 +1369,31 @@ fn undefined_name_respects_locals_params_and_globals() {
 }
 
 #[test]
+fn undefined_name_binds_property_destructuring_assignments() {
+    let src = "struct MyModel\n    x::Float64\n    y::Float64\nend\nmodel = MyModel(1.0, 2.0)\n(; x) = model\naa = (a = 1, b = 2, c = 3)\n(; b, a, c) = aa\nprintln(x, a, b, c)\n";
+    assert_eq!(count("undefined-name", src), 0);
+}
+
+#[test]
+fn undefined_name_binds_property_destructuring_parameters() {
+    let src = "f((; x, y)) = x + y\ng = ((; a, b),) -> a + b\nprintln(f((x = 1, y = 2)), g((a = 3, b = 4)))\n";
+    assert_eq!(count("undefined-name", src), 0);
+}
+
+#[test]
+fn undefined_name_binds_declared_property_destructuring() {
+    let src = "function pick(nt)\n    local (; x) = nt\n    x\nend\nprintln(pick((x = 1,)))\n";
+    assert_eq!(count("undefined-name", src), 0);
+}
+
+#[test]
+fn undefined_name_still_reads_named_tuple_shorthand() {
+    let msgs = findings("undefined-name", "nt = (; never_bound)\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].contains("never_bound"), "{msgs:?}");
+}
+
+#[test]
 fn undefined_name_binds_infix_operator_def_operands_as_params() {
     // `a::T + b = ...` is an operator method definition: the operands are
     // parameters, so the body's reads of them resolve rather than dangle.

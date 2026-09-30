@@ -1124,6 +1124,7 @@ impl Builder {
             }
             SyntaxKind::TUPLE_EXPR
             | SyntaxKind::BARE_TUPLE_EXPR
+            | SyntaxKind::PARAMETERS
             | SyntaxKind::ARG
             | SyntaxKind::SPLAT_EXPR
             | SyntaxKind::PAREN_EXPR => {
@@ -1188,6 +1189,7 @@ impl Builder {
             }
             SyntaxKind::TUPLE_EXPR
             | SyntaxKind::BARE_TUPLE_EXPR
+            | SyntaxKind::PARAMETERS
             | SyntaxKind::ARG
             | SyntaxKind::SPLAT_EXPR
             | SyntaxKind::PAREN_EXPR => {
@@ -1438,6 +1440,7 @@ impl Builder {
             }
             SyntaxKind::TUPLE_EXPR
             | SyntaxKind::BARE_TUPLE_EXPR
+            | SyntaxKind::PARAMETERS
             | SyntaxKind::ARG
             | SyntaxKind::SPLAT_EXPR
             | SyntaxKind::PAREN_EXPR => {
@@ -2199,6 +2202,7 @@ impl Builder {
             }
             SyntaxKind::SPLAT_EXPR
             | SyntaxKind::TUPLE_EXPR
+            | SyntaxKind::PARAMETERS
             | SyntaxKind::ARG
             | SyntaxKind::PAREN_EXPR => {
                 for child in node.children() {
