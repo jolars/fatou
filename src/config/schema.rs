@@ -120,6 +120,7 @@ fn config_schema_uses_the_public_draft_7_identity() {
 #[test]
 fn config_schema_accepts_supported_configuration() {
     assert_accepts("");
+    assert_accepts("extend = \"../shared/fatou.toml\"\n");
     assert_accepts(
         r#"
 exclude = ["vendored/"]
@@ -163,6 +164,7 @@ version = "1.6, 1.10 - 1.11"
 #[test]
 fn config_schema_rejects_invalid_configuration() {
     for source in [
+        "extend = [\"base.toml\"]\n",
         "[project]\nentry-point = []\n",
         "[project]\nentry-points = [1]\n",
         "[project]\nentry-points = \"main.jl\"\n",

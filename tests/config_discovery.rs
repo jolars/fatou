@@ -192,6 +192,27 @@ fn project_config_wins_over_env_without_merging() {
 }
 
 #[test]
+fn project_config_extends_a_shared_file() {
+    let sandbox = Sandbox::new();
+    sandbox.write_config("shared/base.toml", 40);
+    std::fs::write(
+        sandbox.path().join("fatou.toml"),
+        "extend = \"shared/base.toml\"\n",
+    )
+    .unwrap();
+    let output = sandbox.format_check(&[], &[]);
+    assert!(would_reformat(&output), "{}", stderr(&output));
+
+    std::fs::write(
+        sandbox.path().join("fatou.toml"),
+        "extend = \"shared/base.toml\"\n[format]\nline-width = 120\n",
+    )
+    .unwrap();
+    let output = sandbox.format_check(&[], &[]);
+    assert!(output.status.success(), "{}", stderr(&output));
+}
+
+#[test]
 fn explicit_config_overrides_missing_env_config() {
     let sandbox = Sandbox::new();
     sandbox.write_config("explicit.toml", 120);

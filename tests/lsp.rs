@@ -7355,6 +7355,73 @@ fn fatou_toml_edit_invalidates_config() {
     server_thread.join().unwrap();
 }
 
+#[test]
+fn inherited_config_edit_invalidates_config() {
+    let dir = TempDir::new("fatou-lsp-inherited-config-edit");
+    let base = dir.path.join("base.toml");
+    let project = dir.path.join("project");
+    write_file(&base, "[lint]\nignore = [\"unused-binding\"]\n");
+    write_file(&project.join("fatou.toml"), "extend = \"../base.toml\"\n");
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_options(&client, serde_json::Value::Null);
+    let uri = file_uri(&project.join("lint.jl"));
+    open_document(&client, &uri, UNUSED_BINDING_SOURCE);
+    let mut watched_base = false;
+    let mut published = false;
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !watched_base || !published {
+        match client
+            .receiver
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            .unwrap()
+        {
+            Message::Request(request)
+                if request.id.to_string().contains("fatou-inherited-config") =>
+            {
+                let params: RegistrationParams = serde_json::from_value(request.params).unwrap();
+                let options: DidChangeWatchedFilesRegistrationOptions = serde_json::from_value(
+                    params.registrations[0].register_options.clone().unwrap(),
+                )
+                .unwrap();
+                watched_base = matches!(
+                    &options.watchers[0].glob_pattern,
+                    GlobPattern::Relative(pattern)
+                        if matches!(&pattern.base_uri, lsp_types::OneOf::Right(uri) if *uri == file_uri(&dir.path))
+                            && pattern.pattern == "base.toml"
+                );
+            }
+            Message::Notification(notification)
+                if notification.method == "textDocument/publishDiagnostics" =>
+            {
+                let result: PublishDiagnosticsParams =
+                    serde_json::from_value(notification.params).unwrap();
+                if result.uri == uri {
+                    assert!(result.diagnostics.is_empty());
+                    published = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    write_file(&base, "[lint]\n");
+    did_change_watched_files(
+        &client,
+        vec![FileEvent {
+            uri: file_uri(&base),
+            typ: FileChangeType::CHANGED,
+        }],
+    );
+    let republished = recv_publish_for(&client, &uri);
+    assert_eq!(republished.diagnostics.len(), 1, "{republished:?}");
+
+    drop(client);
+    server_thread.join().unwrap();
+}
+
 /// A `[lint.severity]` override in the client settings escalates the
 /// published diagnostic's severity.
 #[test]

@@ -32,11 +32,11 @@ use lsp_types::{
     DocumentFormattingParams, DocumentHighlightParams, DocumentLinkParams,
     DocumentRangeFormattingParams, DocumentSymbolParams, FileSystemWatcher, FoldingRangeParams,
     GlobPattern, GotoDefinitionParams, HoverParams, InlayHintParams, LogMessageParams, MessageType,
-    NumberOrString, PublishDiagnosticsParams, ReferenceParams, Registration, RegistrationParams,
-    RenameFilesParams, RenameParams, SelectionRangeParams, SemanticTokensDeltaParams,
-    SemanticTokensParams, SignatureHelpParams, TextDocumentPositionParams,
-    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
-    WorkspaceSymbolParams,
+    NumberOrString, OneOf, PublishDiagnosticsParams, ReferenceParams, Registration,
+    RegistrationParams, RelativePattern, RenameFilesParams, RenameParams, SelectionRangeParams,
+    SemanticTokensDeltaParams, SemanticTokensParams, SignatureHelpParams,
+    TextDocumentPositionParams, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
+    TypeHierarchySupertypesParams, Uri, WorkspaceSymbolParams,
 };
 
 use crate::config::CONFIG_FILE_NAME;
@@ -1245,6 +1245,7 @@ impl GlobalState {
             uri::to_path(&event.uri).is_some_and(|path| {
                 path.file_name()
                     .is_some_and(|name| name == CONFIG_FILE_NAME)
+                    || self.config.watches_config_path(&path)
             })
         });
         if config_changed {
@@ -1311,6 +1312,7 @@ impl GlobalState {
                 if path
                     .file_name()
                     .is_some_and(|name| name == CONFIG_FILE_NAME)
+                    || self.config.watches_config_path(&path)
                 {
                     config_changed = true;
                 } else if is_environment_file(&path) {
@@ -1634,8 +1636,44 @@ impl GlobalState {
     /// raised (once per load — cache hits are silent).
     fn config_for(&mut self, uri: &Uri) -> Arc<ResolvedConfig> {
         let (config, warnings) = self.config.for_uri(uri);
+        for path in self.config.take_pending_watches() {
+            self.register_inherited_config_watcher(&path);
+        }
         self.log_warnings(warnings);
         config
+    }
+
+    fn register_inherited_config_watcher(&self, path: &std::path::Path) {
+        let Some(parent) = path.parent().and_then(uri::from_path) else {
+            return;
+        };
+        let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
+            return;
+        };
+        let id = format!("fatou-inherited-config:{}", path.display());
+        let params = RegistrationParams {
+            registrations: vec![Registration {
+                id: id.clone(),
+                method: DidChangeWatchedFiles::METHOD.to_string(),
+                register_options: Some(
+                    serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
+                        watchers: vec![FileSystemWatcher {
+                            glob_pattern: GlobPattern::Relative(RelativePattern {
+                                base_uri: OneOf::Right(parent),
+                                pattern: filename.to_string(),
+                            }),
+                            kind: None,
+                        }],
+                    })
+                    .expect("watcher registration options serialize"),
+                ),
+            }],
+        };
+        let _ = self.sender.send(Message::Request(Request {
+            id: RequestId::from(id),
+            method: RegisterCapability::METHOD.to_string(),
+            params: serde_json::to_value(params).expect("registration params serialize"),
+        }));
     }
 
     /// Re-derive the open documents' diagnostics after a configuration change

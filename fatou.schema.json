@@ -241,6 +241,13 @@
       },
       "type": "array"
     },
+    "extend": {
+      "description": "Another configuration file to inherit, relative to this file.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "extend-exclude": {
       "default": [],
       "description": "Gitignore-style patterns appended to `exclude`.",

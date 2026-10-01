@@ -327,6 +327,8 @@ impl std::error::Error for ConfigError {}
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawConfig {
+    /// Another configuration file to inherit, relative to this file.
+    extend: Option<String>,
     /// Explicit script entry points for project analysis.
     #[serde(default)]
     project: ProjectConfig,
@@ -534,6 +536,44 @@ impl Config {
     }
 
     fn load(path: &Path) -> Result<(Self, Vec<String>), ConfigError> {
+        let mut stack = Vec::new();
+        let table = load_merged_table(path, &mut stack, &mut Vec::new())?;
+        let raw: RawConfig =
+            toml::Value::Table(table)
+                .try_into()
+                .map_err(|err: toml::de::Error| ConfigError::Parse {
+                    path: path.to_path_buf(),
+                    message: err.to_string(),
+                })?;
+        Ok(raw.into_config())
+    }
+
+    /// Files inherited by `path`, for language-server change tracking.
+    pub(crate) fn extended_paths(path: &Path) -> Result<Vec<PathBuf>, ConfigError> {
+        let mut visited = Vec::new();
+        load_merged_table(path, &mut Vec::new(), &mut visited)?;
+        Ok(visited.into_iter().skip(1).collect())
+    }
+}
+
+fn load_merged_table(
+    path: &Path,
+    stack: &mut Vec<PathBuf>,
+    visited: &mut Vec<PathBuf>,
+) -> Result<toml::Table, ConfigError> {
+    let identity = path.canonicalize().map_err(|err| ConfigError::Read {
+        path: path.to_path_buf(),
+        message: err.to_string(),
+    })?;
+    if stack.contains(&identity) {
+        return Err(ConfigError::Parse {
+            path: path.to_path_buf(),
+            message: format!("configuration extend cycle at {}", identity.display()),
+        });
+    }
+    stack.push(identity.clone());
+    visited.push(identity);
+    let result = (|| {
         let text = std::fs::read_to_string(path).map_err(|err| ConfigError::Read {
             path: path.to_path_buf(),
             message: err.to_string(),
@@ -542,7 +582,91 @@ impl Config {
             path: path.to_path_buf(),
             message: err.to_string(),
         })?;
-        Ok(raw.into_config())
+        let mut table: toml::Table = toml::from_str(&text).map_err(|err| ConfigError::Parse {
+            path: path.to_path_buf(),
+            message: err.to_string(),
+        })?;
+        table.remove("extend");
+        if stack.len() > 1 {
+            rebase_entry_points(&mut table, stack.last().expect("current path is on stack"));
+        }
+        let Some(extend) = raw.extend else {
+            return Ok(table);
+        };
+        let expanded = if extend == "~" {
+            home_dir().unwrap_or_else(|| PathBuf::from(&extend))
+        } else if let Some(rest) = extend.strip_prefix("~/") {
+            home_dir()
+                .map(|home| home.join(rest))
+                .unwrap_or_else(|| PathBuf::from(&extend))
+        } else {
+            PathBuf::from(&extend)
+        };
+        let base = if expanded.is_absolute() {
+            expanded
+        } else {
+            path.parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(expanded)
+        };
+        let mut inherited = load_merged_table(&base, stack, visited)?;
+        merge_config_tables(&mut inherited, table);
+        Ok(inherited)
+    })();
+    stack.pop();
+    result
+}
+
+fn rebase_entry_points(table: &mut toml::Table, path: &Path) {
+    let Some(points) = table
+        .get_mut("project")
+        .and_then(toml::Value::as_table_mut)
+        .and_then(|project| project.get_mut("entry-points"))
+        .and_then(toml::Value::as_array_mut)
+    else {
+        return;
+    };
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    for point in points {
+        if let Some(name) = point.as_str()
+            && !Path::new(name).is_absolute()
+        {
+            *point = toml::Value::String(base.join(name).to_string_lossy().into_owned());
+        }
+    }
+}
+
+fn merge_config_tables(base: &mut toml::Table, child: toml::Table) {
+    for (key, value) in child {
+        match (base.get_mut(&key), value) {
+            (Some(toml::Value::Table(existing)), toml::Value::Table(incoming)) => {
+                if key == "functions" {
+                    *existing = incoming;
+                } else {
+                    if key == "format" {
+                        for (canonical, legacy) in [
+                            ("line-width", "line_width"),
+                            ("indent-width", "indent_width"),
+                        ] {
+                            if incoming.contains_key(canonical) {
+                                existing.remove(legacy);
+                            } else if incoming.contains_key(legacy) {
+                                existing.remove(canonical);
+                            }
+                        }
+                    }
+                    merge_config_tables(existing, incoming);
+                }
+            }
+            (Some(toml::Value::Array(existing)), toml::Value::Array(incoming))
+                if matches!(key.as_str(), "extend-exclude" | "extend-select") =>
+            {
+                existing.extend(incoming);
+            }
+            (_, value) => {
+                base.insert(key, value);
+            }
+        }
     }
 }
 
@@ -723,6 +847,126 @@ fn home_dir() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extending_config_merges_sections_and_additive_options() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("base.toml"),
+            "exclude = [\"base/\"]\nextend-exclude = [\"one/\"]\n[format]\nline-width = 40\nindent-width = 2\n[lint]\nselect = [\"unused-binding\"]\nextend-select = [\"undefined-name\"]\n[lint.severity]\nunused-binding = \"error\"\n[lint.rules.discouraged-function]\nextend-functions = { sleep = \"base\" }\n",
+        ).unwrap();
+        std::fs::write(
+            dir.path().join("fatou.toml"),
+            "extend = \"base.toml\"\nexclude = [\"child/\"]\nextend-exclude = [\"two/\"]\n[format]\nline-width = 80\n[lint]\nextend-select = [\"call-arity\"]\n[lint.severity]\nundefined-name = \"warning\"\n[lint.rules.discouraged-function]\nextend-functions = { exit = \"child\" }\n",
+        ).unwrap();
+        let (config, _, _) =
+            Config::resolve(Some(&dir.path().join("fatou.toml")), false, dir.path()).unwrap();
+        assert_eq!(config.format.line_width, 80);
+        assert_eq!(config.format.indent_width, 2);
+        assert_eq!(config.exclude, ["child/"]);
+        assert_eq!(config.extend_exclude, ["one/", "two/"]);
+        assert_eq!(config.lint.select, Some(vec!["unused-binding".into()]));
+        assert_eq!(config.lint.extend_select, ["undefined-name", "call-arity"]);
+        assert_eq!(config.lint.severity.len(), 2);
+        assert_eq!(
+            config.lint.rules.discouraged_function.lookup("sleep"),
+            Some("base")
+        );
+        assert_eq!(
+            config.lint.rules.discouraged_function.lookup("exit"),
+            Some("child")
+        );
+    }
+
+    #[test]
+    fn extend_resolves_relative_to_each_file_and_detects_cycles() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("nested")).unwrap();
+        std::fs::write(dir.path().join("base.toml"), "[format]\nindent-width = 2\n").unwrap();
+        std::fs::write(
+            dir.path().join("nested/middle.toml"),
+            "extend = \"../base.toml\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("fatou.toml"),
+            "extend = \"nested/middle.toml\"\n",
+        )
+        .unwrap();
+        let leaf = dir.path().join("fatou.toml");
+        assert_eq!(
+            Config::resolve(Some(&leaf), false, dir.path())
+                .unwrap()
+                .0
+                .format
+                .indent_width,
+            2
+        );
+        std::fs::write(dir.path().join("base.toml"), "extend = \"fatou.toml\"\n").unwrap();
+        let error = Config::resolve(Some(&leaf), false, dir.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("cycle"), "{error}");
+    }
+
+    #[test]
+    fn extend_reports_missing_or_invalid_base_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let leaf = dir.path().join("fatou.toml");
+        std::fs::write(&leaf, "extend = \"missing.toml\"\n").unwrap();
+        let error = Config::resolve(Some(&leaf), false, dir.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("missing.toml"), "{error}");
+        std::fs::write(dir.path().join("missing.toml"), "unknown = true\n").unwrap();
+        let error = Config::resolve(Some(&leaf), false, dir.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("missing.toml"), "{error}");
+        assert!(error.contains("unknown"), "{error}");
+    }
+
+    #[test]
+    fn inherited_entry_points_keep_their_declaring_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("shared")).unwrap();
+        std::fs::write(
+            dir.path().join("shared/base.toml"),
+            "[project]\nentry-points = [\"scripts/main.jl\"]\n",
+        )
+        .unwrap();
+        let leaf = dir.path().join("fatou.toml");
+        std::fs::write(&leaf, "extend = \"shared/base.toml\"\n").unwrap();
+        let (config, source, _) = Config::resolve(Some(&leaf), false, dir.path()).unwrap();
+        assert_eq!(
+            config.project.entry_points(&source),
+            [dir.path().join("shared/scripts/main.jl")]
+        );
+    }
+
+    #[test]
+    fn extend_replaces_function_list_and_legacy_format_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("base.toml"),
+            "[format]\nline-width = 40\n[lint.rules.discouraged-function]\nfunctions = { sleep = \"base\" }\n",
+        )
+        .unwrap();
+        let leaf = dir.path().join("fatou.toml");
+        std::fs::write(
+            &leaf,
+            "extend = \"base.toml\"\n[format]\nline_width = 80\n[lint.rules.discouraged-function]\nfunctions = {}\n",
+        )
+        .unwrap();
+        let (config, _, warnings) = Config::resolve(Some(&leaf), false, dir.path()).unwrap();
+        assert_eq!(config.format.line_width, 80);
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("line_width"))
+        );
+        assert!(config.lint.rules.discouraged_function.functions.is_empty());
+    }
 
     #[test]
     fn defaults_are_julia_conventions() {

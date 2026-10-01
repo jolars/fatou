@@ -18,8 +18,8 @@
 //! directory and invalidated wholesale when any `fatou.toml` changes or the
 //! client pushes new settings.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lsp_types::Uri;
@@ -64,6 +64,10 @@ pub(crate) struct ConfigStore {
     /// so the ancestor walk and file reads run once per directory, not per
     /// keystroke. Cleared wholesale on any invalidation.
     by_dir: HashMap<PathBuf, Arc<ResolvedConfig>>,
+    /// Keep paths after invalidation so a deleted base can trigger a reload
+    /// when it is recreated.
+    inherited_files: HashSet<PathBuf>,
+    pending_watches: Vec<PathBuf>,
 }
 
 impl ConfigStore {
@@ -78,6 +82,8 @@ impl ConfigStore {
                 &mut Vec::new(),
             ),
             by_dir: HashMap::new(),
+            inherited_files: HashSet::new(),
+            pending_watches: Vec::new(),
         };
         let warnings = match initialization_options {
             Some(options) => store.set_client_settings(options),
@@ -120,6 +126,17 @@ impl ConfigStore {
         self.by_dir.clear();
     }
 
+    pub(crate) fn watches_config_path(&self, path: &Path) -> bool {
+        let normalized = path
+            .canonicalize()
+            .unwrap_or_else(|_| crate::incremental::normalize_path(path));
+        self.inherited_files.contains(&normalized)
+    }
+
+    pub(crate) fn take_pending_watches(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.pending_watches)
+    }
+
     /// Resolve the configuration for a document: discover a `fatou.toml` from
     /// the document's directory, falling back to `$FATOU_CONFIG` and the global
     /// user config (`~/.config/fatou/fatou.toml`), then to the client settings
@@ -140,6 +157,13 @@ impl ConfigStore {
         let resolved = match Config::resolve(None, false, &dir) {
             Ok((config, source, deprecations)) if source.path().is_some() => {
                 let path = source.path().expect("source has a path");
+                if let Ok(paths) = Config::extended_paths(path) {
+                    for path in paths {
+                        if self.inherited_files.insert(path.clone()) {
+                            self.pending_watches.push(path);
+                        }
+                    }
+                }
                 warnings.extend(
                     deprecations
                         .into_iter()
@@ -169,6 +193,22 @@ mod tests {
 
     fn uri_for(path: &std::path::Path) -> Uri {
         uri::from_path(path).unwrap()
+    }
+
+    #[test]
+    fn inherited_config_is_tracked_for_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("base.toml");
+        std::fs::write(&base, "[format]\nindent-width = 2\n").unwrap();
+        std::fs::write(dir.path().join("fatou.toml"), "extend = \"base.toml\"\n").unwrap();
+        let (mut store, _) = ConfigStore::new(None);
+        let uri = uri_for(&dir.path().join("a.jl"));
+        assert_eq!(store.for_uri(&uri).0.style.indent_width, 2);
+        assert!(store.watches_config_path(&base));
+        assert_eq!(store.take_pending_watches(), [base.canonicalize().unwrap()]);
+        std::fs::write(&base, "[format]\nindent-width = 7\n").unwrap();
+        store.invalidate_discovered();
+        assert_eq!(store.for_uri(&uri).0.style.indent_width, 7);
     }
 
     fn store_with(settings: serde_json::Value) -> (ConfigStore, Vec<String>) {

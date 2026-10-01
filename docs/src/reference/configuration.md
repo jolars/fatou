@@ -19,12 +19,20 @@ Defaults](../guide/configuration.md#user-wide-defaults) for an example.
 
   | Key              | Type             | Default | Description                                 |
   | ---------------- | ---------------- | ------- | ------------------------------------------- |
+  | `extend`         | string           | unset   | Path to another config file to inherit.     |
   | `exclude`        | array of strings | `[]`    | Patterns to exclude from file discovery.    |
   | `extend-exclude` | array of strings | `[]`    | Additional patterns, appended to `exclude`. |
 
-Both keys take gitignore-style patterns, resolved relative to the directory
-containing `fatou.toml` (or, for a `FATOU_CONFIG` or global config, the working
-directory). Excluded directories are pruned during discovery.
+`exclude` and `extend-exclude` take gitignore-style patterns, resolved relative
+to the directory containing `fatou.toml` (or, for a `FATOU_CONFIG` or global
+config, the working directory). Excluded directories are pruned during
+discovery.
+
+`extend` resolves relative to the file that declares it. Absolute paths and `~/`
+paths also work. The extending file overrides inherited values, while tables
+merge by key. `extend-exclude` and `extend-select` accumulate across the chain.
+Missing files and cycles are errors. See [Extending Another
+Config](../guide/configuration.md#extending-another-config).
 
 Files named explicitly on the command line are processed even when they match a
 pattern, unless `--force-exclude` is passed. Extra patterns can be added per run

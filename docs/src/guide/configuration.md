@@ -103,15 +103,41 @@ A missing or malformed config file makes the CLI fail. The language server logs
 a configuration warning in the Fatou output channel and uses editor settings or
 built-in defaults. Fix the file and restart the server to apply it.
 
-`FATOU_CONFIG` and global configs are whole-file fallbacks, never merged with a
-project config: as soon as a project `fatou.toml` is found, it is the only file
-that applies. Relative `exclude` patterns in a `FATOU_CONFIG` or global file
-resolve against the working directory (on the command line) or the document's
-directory (in the language server) rather than the config file's own directory.
+`FATOU_CONFIG` and global configs are whole-file fallbacks. A project config
+inherits another file only when it explicitly uses `extend`. Relative `exclude`
+patterns in a `FATOU_CONFIG` or global file resolve against the working
+directory (on the command line) or the document's directory (in the language
+server) rather than the config file's own directory.
+
+### Extending Another Config
+
+Use `extend` to inherit settings from a shared file and override only the keys
+this project needs:
+
+```toml
+extend = "../shared/fatou.toml"
+
+[format]
+line-width = 100
+```
+
+The path is relative to the file that declares it. Absolute paths and `~/` paths
+also work. Chains may cross a repository's `.git` boundary. A missing file or an
+inheritance cycle is a configuration error.
+
+Sections merge key by key. Values in the extending file win, including lists
+such as `exclude`, `select`, and `ignore`. `extend-exclude` and `extend-select`
+lists accumulate across the chain, with inherited entries first. Inherited
+`[project] entry-points` remain relative to the file that declares them. Exclude
+patterns in an inherited file apply relative to the extending config's
+directory, or to the working or document directory for an environment or global
+config. The language server reloads a project config when a watched inherited
+TOML file changes.
 
 The language server uses the same resolution, so either file is a convenient way
-to set editor-wide defaults. Only project files are watched, so an edit to a
-global or `FATOU_CONFIG` file is picked up when the server restarts.
+to set editor-wide defaults. It watches project `fatou.toml` files and files
+reached through `extend`. An edit to the primary global or `FATOU_CONFIG` file
+is picked up when the server restarts.
 
 ### Bypassing Discovery
 
