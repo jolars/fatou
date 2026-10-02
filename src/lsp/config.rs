@@ -235,7 +235,8 @@ mod tests {
         let uri = uri_for(&dir.path().join("a.jl"));
         assert_eq!(store.for_uri(&uri).0.style.indent_width, 2);
         let aliased_base = dir.path().join("alias/base.toml");
-        assert_eq!(store.take_pending_watches(), [aliased_base.clone()]);
+        let watched = store.take_pending_watches();
+        assert_eq!(watched.as_slice(), std::slice::from_ref(&aliased_base));
         assert!(store.watches_config_path(&base));
         std::fs::remove_file(&base).unwrap();
         assert!(store.watches_config_path(&aliased_base));
