@@ -588,7 +588,7 @@ fn load_merged_table(
         })?;
         table.remove("extend");
         if stack.len() > 1 {
-            rebase_entry_points(&mut table, stack.last().expect("current path is on stack"));
+            rebase_entry_points(&mut table, path);
         }
         let Some(extend) = raw.extend else {
             return Ok(table);
@@ -940,7 +940,32 @@ mod tests {
         let (config, source, _) = Config::resolve(Some(&leaf), false, dir.path()).unwrap();
         assert_eq!(
             config.project.entry_points(&source),
-            [dir.path().join("shared/scripts/main.jl")]
+            [crate::incremental::normalize_path(
+                &dir.path().join("shared/scripts/main.jl")
+            )]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inherited_entry_points_preserve_the_config_path_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("shared")).unwrap();
+        std::fs::write(
+            dir.path().join("shared/base.toml"),
+            "[project]\nentry-points = [\"scripts/main.jl\"]\n",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(dir.path().join("shared"), dir.path().join("alias")).unwrap();
+        let leaf = dir.path().join("fatou.toml");
+        std::fs::write(&leaf, "extend = \"alias/base.toml\"\n").unwrap();
+
+        let (config, source, _) = Config::resolve(Some(&leaf), false, dir.path()).unwrap();
+        assert_eq!(
+            config.project.entry_points(&source),
+            [crate::incremental::normalize_path(
+                &dir.path().join("alias/scripts/main.jl")
+            )]
         );
     }
 
