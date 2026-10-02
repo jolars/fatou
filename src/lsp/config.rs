@@ -64,8 +64,8 @@ pub(crate) struct ConfigStore {
     /// so the ancestor walk and file reads run once per directory, not per
     /// keystroke. Cleared wholesale on any invalidation.
     by_dir: HashMap<PathBuf, Arc<ResolvedConfig>>,
-    /// Keep paths after invalidation so a deleted base can trigger a reload
-    /// when it is recreated.
+    /// Keep both lexical and canonical paths so edits through aliases and
+    /// deletions of inherited files can invalidate the cache.
     inherited_files: HashSet<PathBuf>,
     pending_watches: Vec<PathBuf>,
 }
@@ -160,7 +160,10 @@ impl ConfigStore {
                 if let Ok(paths) = Config::extended_paths(path) {
                     for path in paths {
                         if self.inherited_files.insert(path.clone()) {
-                            self.pending_watches.push(path);
+                            self.pending_watches.push(path.clone());
+                        }
+                        if let Ok(canonical) = path.canonicalize() {
+                            self.inherited_files.insert(canonical);
                         }
                     }
                 }
@@ -205,10 +208,37 @@ mod tests {
         let uri = uri_for(&dir.path().join("a.jl"));
         assert_eq!(store.for_uri(&uri).0.style.indent_width, 2);
         assert!(store.watches_config_path(&base));
-        assert_eq!(store.take_pending_watches(), [base.canonicalize().unwrap()]);
+        assert_eq!(
+            store.take_pending_watches(),
+            [crate::incremental::normalize_path(&base)]
+        );
         std::fs::write(&base, "[format]\nindent-width = 7\n").unwrap();
         store.invalidate_discovered();
         assert_eq!(store.for_uri(&uri).0.style.indent_width, 7);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inherited_config_watcher_preserves_the_extended_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("shared")).unwrap();
+        let base = dir.path().join("shared/base.toml");
+        std::fs::write(&base, "[format]\nindent-width = 2\n").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("shared"), dir.path().join("alias")).unwrap();
+        std::fs::write(
+            dir.path().join("fatou.toml"),
+            "extend = \"alias/base.toml\"\n",
+        )
+        .unwrap();
+
+        let (mut store, _) = ConfigStore::new(None);
+        let uri = uri_for(&dir.path().join("a.jl"));
+        assert_eq!(store.for_uri(&uri).0.style.indent_width, 2);
+        let aliased_base = dir.path().join("alias/base.toml");
+        assert_eq!(store.take_pending_watches(), [aliased_base.clone()]);
+        assert!(store.watches_config_path(&base));
+        std::fs::remove_file(&base).unwrap();
+        assert!(store.watches_config_path(&aliased_base));
     }
 
     fn store_with(settings: serde_json::Value) -> (ConfigStore, Vec<String>) {

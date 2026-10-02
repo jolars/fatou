@@ -571,8 +571,8 @@ fn load_merged_table(
             message: format!("configuration extend cycle at {}", identity.display()),
         });
     }
-    stack.push(identity.clone());
-    visited.push(identity);
+    stack.push(identity);
+    visited.push(crate::incremental::normalize_path(path));
     let result = (|| {
         let text = std::fs::read_to_string(path).map_err(|err| ConfigError::Read {
             path: path.to_path_buf(),
