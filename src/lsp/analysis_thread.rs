@@ -27,7 +27,7 @@ use crate::parser::Edit;
 use crate::text::{PositionEncoding, TextBuffer};
 
 use super::format::parse_diagnostics_to_lsp;
-use super::graph_diagnostics::graph_diagnostics;
+use super::graph_diagnostics::{GraphSource, graph_diagnostics};
 use super::lint::{ServerRules, lint_diagnostics_via_db};
 use super::read_jobs::{ReadJob, run_read};
 use super::rename_files::renamed_package_projects;
@@ -132,7 +132,7 @@ pub(crate) fn spawn_analysis_thread(
         .name("fatou-analysis".to_string())
         .spawn(move || {
             let mut worker = AnalysisWorker {
-                scripts: Default::default(),
+                scripts: ScriptProjects::new(encoding),
                 pending_script_load: None,
                 db: IncrementalDatabase::default(),
                 out_tx,
@@ -144,6 +144,7 @@ pub(crate) fn spawn_analysis_thread(
                 encoding,
                 push_diagnostics,
                 published_graph_files: HashSet::new(),
+                package_graph_diags: BTreeMap::new(),
             };
             worker.run(&analysis_rx, &read_rx, &library_rx, &sync_rx, &done_rx);
         })
@@ -243,6 +244,7 @@ struct AnalysisWorker {
     /// The URIs that carried include-graph diagnostics at the last re-harvest, so
     /// a file whose problems are fixed gets an explicit empty publish to clear it.
     published_graph_files: HashSet<Uri>,
+    package_graph_diags: BTreeMap<PathBuf, Vec<Diagnostic>>,
 }
 
 impl AnalysisWorker {
@@ -367,7 +369,7 @@ impl AnalysisWorker {
             return;
         }
         if self.scripts.install(loaded, &mut self.db) {
-            let _ = self.out_tx.send(Outbound::DiagnosticsRefresh);
+            self.publish_graph_diagnostics();
         }
     }
 
@@ -464,7 +466,7 @@ impl AnalysisWorker {
     fn enqueue(&mut self, mut req: AnalysisRequest) {
         self.scripts.update(
             &req.path,
-            req.text.text_arc(),
+            Arc::clone(&req.text),
             req.version,
             &req.rules.entry_points,
             &mut self.db,
@@ -617,14 +619,23 @@ impl AnalysisWorker {
                 ))
             })
         };
+        self.package_graph_diags = updates;
+        self.publish_graph_diagnostics();
+    }
 
+    fn publish_graph_diagnostics(&mut self) {
+        let updates = self
+            .scripts
+            .graph_diagnostics(self.package_graph_diags.clone());
         let mut now = HashSet::new();
         for (path, diags) in updates {
             if let Some(uri) = super::uri::from_path(&path) {
                 now.insert(uri.clone());
-                let _ = self
-                    .out_tx
-                    .send(Outbound::ProjectDiagnostics { uri, diags });
+                let _ = self.out_tx.send(Outbound::ProjectDiagnostics {
+                    uri,
+                    diags,
+                    source: self.scripts.diagnostic_source(&path),
+                });
             }
         }
         // A file that had diagnostics last time but none now needs an explicit
@@ -633,6 +644,7 @@ impl AnalysisWorker {
             let _ = self.out_tx.send(Outbound::ProjectDiagnostics {
                 uri: uri.clone(),
                 diags: Vec::new(),
+                source: GraphSource::Package,
             });
         }
         self.published_graph_files = now;
@@ -674,6 +686,7 @@ mod tests {
                 encoding: PositionEncoding::Utf16,
                 push_diagnostics: true,
                 published_graph_files: HashSet::new(),
+                package_graph_diags: BTreeMap::new(),
             }
         }
     }
@@ -904,7 +917,7 @@ mod tests {
         };
         worker.scripts.update(
             &entry,
-            Arc::from(original),
+            Arc::new(TextBuffer::new(original)),
             1,
             &rules.entry_points,
             &mut worker.db,
@@ -998,7 +1011,7 @@ mod tests {
         };
         worker.scripts.update(
             &entry,
-            Arc::from("old() = 1\n"),
+            Arc::new(TextBuffer::new("old() = 1\n")),
             1,
             &entries,
             &mut worker.db,
@@ -1016,7 +1029,7 @@ mod tests {
         // analysis. Completing that analysis must not install the old result.
         worker.scripts.update(
             &entry,
-            Arc::from("fresh() = 2\n"),
+            Arc::new(TextBuffer::new("fresh() = 2\n")),
             2,
             &entries,
             &mut worker.db,

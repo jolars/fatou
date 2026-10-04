@@ -146,6 +146,14 @@ impl ScriptFile {
     }
 }
 
+/// A source that has loaded, failed to load, or has not been attempted yet.
+#[derive(Debug, Clone)]
+pub(crate) enum ScriptFileState {
+    Available(Arc<ScriptFile>),
+    Failed,
+    Pending,
+}
+
 /// One program's globals. Membership deliberately includes the host module.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScriptProgram {
@@ -153,10 +161,25 @@ pub struct ScriptProgram {
     pub modules: BTreeMap<ModulePath, ScriptModule>,
     pub members: BTreeMap<PathBuf, BTreeSet<ModulePath>>,
     pub incomplete: bool,
+    /// Confirmed failed reads, keyed by the file containing each include.
+    /// Paths are decoded literals, so consumers recover spans from current text.
+    pub failed_includes: BTreeMap<PathBuf, BTreeSet<String>>,
 }
 
 impl ScriptProgram {
+    /// Build from known projections. An absent projection leaves analysis
+    /// incomplete, without asserting that a filesystem read has failed.
     pub fn build(entry: &Path, mut file: impl FnMut(&Path) -> Option<Arc<ScriptFile>>) -> Self {
+        Self::build_with_availability(entry, |path| match file(path) {
+            Some(file) => ScriptFileState::Available(file),
+            None => ScriptFileState::Pending,
+        })
+    }
+
+    pub(crate) fn build_with_availability(
+        entry: &Path,
+        mut file: impl FnMut(&Path) -> ScriptFileState,
+    ) -> Self {
         let mut out = Self {
             entry: normalize_path(entry),
             ..Self::default()
@@ -170,25 +193,34 @@ impl ScriptProgram {
         &mut self,
         path: &Path,
         host: &ModulePath,
-        file: &mut impl FnMut(&Path) -> Option<Arc<ScriptFile>>,
+        file: &mut impl FnMut(&Path) -> ScriptFileState,
         active: &mut BTreeSet<PathBuf>,
-    ) {
+    ) -> bool {
         if active.contains(path) {
             self.incomplete = true;
-            return;
+            return true;
         }
-        if !self
+        let first_visit = self
             .members
             .entry(path.to_path_buf())
             .or_default()
-            .insert(host.clone())
-        {
-            return;
-        }
-        let Some(projection) = file(path) else {
-            self.incomplete = true;
-            return;
+            .insert(host.clone());
+        // Check availability even on repeated visits: every include of a failed
+        // source needs its own diagnostic, including diamond-shaped graphs.
+        let projection = match file(path) {
+            ScriptFileState::Available(projection) => projection,
+            ScriptFileState::Failed => {
+                self.incomplete = true;
+                return false;
+            }
+            ScriptFileState::Pending => {
+                self.incomplete = true;
+                return true;
+            }
         };
+        if !first_visit {
+            return true;
+        }
         active.insert(path.to_path_buf());
         self.incomplete |= projection.incomplete;
         for (suffix, module) in &projection.modules {
@@ -216,9 +248,15 @@ impl ScriptProgram {
             };
             let mut child_host = host.clone();
             child_host.extend(edge.host_suffix.iter().map(SmolStr::new));
-            self.visit(&normalize_path(target), &child_host, file, active);
+            if !self.visit(&normalize_path(target), &child_host, file, active) {
+                self.failed_includes
+                    .entry(path.to_path_buf())
+                    .or_default()
+                    .insert(edge.path.clone());
+            }
         }
         active.remove(path);
+        true
     }
 
     pub fn complete(&self, packages: &dyn PackageSource) -> bool {
@@ -256,6 +294,22 @@ pub struct ScriptAnalysis {
 }
 
 impl ScriptAnalysis {
+    /// Confirmed failures only; an unfinished load is not evidence of absence.
+    pub fn failed_includes(&self) -> BTreeMap<PathBuf, BTreeSet<String>> {
+        let mut failures = BTreeMap::<_, BTreeSet<_>>::new();
+        if !self.pending {
+            for program in &self.programs {
+                for (from, paths) in &program.failed_includes {
+                    failures
+                        .entry(from.clone())
+                        .or_default()
+                        .extend(paths.iter().cloned());
+                }
+            }
+        }
+        failures
+    }
+
     pub fn contexts(&self, path: &Path) -> Vec<ScriptContext<'_>> {
         let path = normalize_path(path);
         self.programs
@@ -287,16 +341,22 @@ impl ScriptAnalysis {
     pub fn from_sources(entries: &[PathBuf], sources: &ScriptSources) -> Self {
         let files: BTreeMap<_, _> = sources
             .iter()
-            .filter_map(|(path, text)| {
-                text.as_ref()
-                    .ok()
-                    .map(|text| (path.clone(), Arc::new(ScriptFile::parse(path, text))))
+            .map(|(path, text)| {
+                let state = match text {
+                    Ok(text) => ScriptFileState::Available(Arc::new(ScriptFile::parse(path, text))),
+                    Err(_) => ScriptFileState::Failed,
+                };
+                (path.clone(), state)
             })
             .collect();
         Self {
             programs: entries
                 .iter()
-                .map(|entry| Arc::new(ScriptProgram::build(entry, |path| files.get(path).cloned())))
+                .map(|entry| {
+                    Arc::new(ScriptProgram::build_with_availability(entry, |path| {
+                        files.get(path).cloned().unwrap_or(ScriptFileState::Pending)
+                    }))
+                })
                 .collect(),
             pending: false,
         }

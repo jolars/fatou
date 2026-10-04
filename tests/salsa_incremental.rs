@@ -16,6 +16,47 @@ fn probe_script_globals(db: &dyn IncrementalDb, file: SourceFile) -> usize {
 static SCRIPT_PROBE_RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 #[test]
+fn script_include_failures_distinguish_pending_failed_and_repaired_sources() {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("main.jl");
+    let target = dir.path().join("new.jl");
+    let entries = [entry.clone()];
+    let mut sources = BTreeMap::from([(entry.clone(), Ok(Arc::from("f() = 1\n")))]);
+    let mut db = IncrementalDatabase::default();
+    db.set_script_sources(&entries, &sources, &BTreeMap::new());
+    let file = db.upsert_file(&entry, "include(\"new.jl\")\nf() = 1\n");
+    let pending = fatou::incremental::script_program(&db, file);
+    assert!(pending.incomplete);
+    assert!(pending.failed_includes.is_empty());
+
+    sources.insert(
+        entry.clone(),
+        Ok(Arc::from("include(\"new.jl\")\nf() = 1\n")),
+    );
+    sources.insert(target.clone(), Err("permission denied".into()));
+    db.set_script_sources(&entries, &sources, &BTreeMap::new());
+    let failed = fatou::incremental::script_program(&db, file);
+    assert_eq!(
+        failed.failed_includes[&entry],
+        ["new.jl".to_string()].into()
+    );
+    let failed = Arc::clone(failed);
+    db.upsert_file(&entry, "\ninclude(\"new.jl\")\nf() = 123\n");
+    assert!(Arc::ptr_eq(
+        &failed,
+        fatou::incremental::script_program(&db, file)
+    ));
+
+    sources.insert(target, Ok(Arc::from("provided = 1\n")));
+    db.set_script_sources(&entries, &sources, &BTreeMap::new());
+    let repaired = fatou::incremental::script_program(&db, file);
+    assert!(!repaired.incomplete);
+    assert!(repaired.failed_includes.is_empty());
+}
+
+#[test]
 fn script_globals_backdate_across_body_edits_and_forget_deleted_sources() {
     use std::collections::BTreeMap;
     use std::sync::Arc;

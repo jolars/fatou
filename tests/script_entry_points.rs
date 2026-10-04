@@ -69,6 +69,43 @@ fn script_entries_enable_undefined_names_by_default() {
 }
 
 #[test]
+fn script_failed_includes_report_errors_without_cascading_name_warnings() {
+    let dir = project(&["main.jl", "good.jl"]);
+    write(
+        dir.path(),
+        "fatou.toml",
+        "[project]\nentry-points = [\"main.jl\", \"good.jl\"]\n",
+    );
+    write(dir.path(), "good.jl", "g() = independent_typo\n");
+    std::fs::create_dir(dir.path().join("directory")).unwrap();
+    std::fs::write(dir.path().join("unreadable.jl"), [0xff]).unwrap();
+    for target in ["", "missing.jl", "directory", "unreadable.jl"] {
+        write(
+            dir.path(),
+            "main.jl",
+            &format!("include(\"{target}\")\nf() = uncertain\n"),
+        );
+        let findings = lint(dir.path(), &["main.jl", "good.jl"]);
+        assert_eq!(findings.len(), 2, "{target:?}: {findings:#?}");
+        assert!(
+            findings
+                .iter()
+                .any(|d| d["rule"] == "missing-include-file" && d["severity"] == "error")
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|d| d.to_string().contains("`independent_typo`"))
+        );
+        assert!(
+            !findings
+                .iter()
+                .any(|d| d.to_string().contains("`uncertain`"))
+        );
+    }
+}
+
+#[test]
 fn script_globals_and_transitive_includes_resolve() {
     let dir = project(&["main.jl"]);
     write(

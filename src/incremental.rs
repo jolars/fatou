@@ -164,14 +164,18 @@ pub fn script_program(
     entry: SourceFile,
 ) -> Arc<project::scripts::ScriptProgram> {
     let inputs = ScriptFiles::try_get(db);
-    Arc::new(project::scripts::ScriptProgram::build(
+    Arc::new(project::scripts::ScriptProgram::build_with_availability(
         entry
             .path(db)
             .as_deref()
             .expect("script entries have paths"),
         |path| {
-            let file = inputs?.files(db).get(path).copied().flatten()?;
-            Some(Arc::clone(script_file(db, file)))
+            use project::scripts::ScriptFileState;
+            match inputs.and_then(|input| input.files(db).get(path)) {
+                Some(Some(file)) => ScriptFileState::Available(Arc::clone(script_file(db, *file))),
+                Some(None) => ScriptFileState::Failed,
+                None => ScriptFileState::Pending,
+            }
         },
     ))
 }

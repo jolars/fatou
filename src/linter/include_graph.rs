@@ -17,6 +17,7 @@
 //! - **Missing**: the resolved target is not a file on disk (this also covers
 //!   StaticLint's `IncludePathContainsNULL` — a path holding a NUL escape
 //!   never names a file).
+//! - **Unreadable**: the target exists but cannot be read as source text.
 //! - **Cycle**: the target transitively includes the seed again, the
 //!   self-include being the smallest case.
 //! - **Duplicate**: an earlier `include` of the seed, from the same host
@@ -59,6 +60,8 @@ pub struct IncludeProblem {
 pub enum IncludeProblemKind {
     /// The resolved target is not a file on disk.
     Missing,
+    /// The target exists but could not be read as source text.
+    Unreadable,
     /// The target transitively `include`s the seed file again.
     Cycle,
     /// An earlier `include` in the same file and the same host module already
@@ -136,6 +139,12 @@ pub fn include_problems(seeds: &[(PathBuf, SyntaxNode)]) -> BTreeMap<PathBuf, Ve
                     path: edge.path.clone(),
                     edge: index,
                     kind: IncludeProblemKind::Missing,
+                });
+            } else if store.targets(&target).is_none() {
+                problems.push(IncludeProblem {
+                    path: edge.path.clone(),
+                    edge: index,
+                    kind: IncludeProblemKind::Unreadable,
                 });
             } else if reaches(&mut store, &target, &norm) {
                 problems.push(IncludeProblem {

@@ -331,7 +331,7 @@ warning: unused-type-parameter
 
 ## `missing-include-file`
 
-Flag a static `include("path")` whose target does not exist on disk (relative paths resolve against the including file's directory). Running the file would throw a `SystemError`. Only statically resolvable includes are checked: dynamic (`include(f)`), interpolated (`include("$dir/a.jl")`), qualified (`M.include(...)`), and two-argument forms cannot be resolved without running the code and are never flagged.
+Flag a static `include("path")` whose target is missing or unreadable (relative paths resolve against the including file's directory). Missing files throw a `SystemError` at runtime. Only statically resolvable includes are checked: dynamic (`include(f)`), interpolated (`include("$dir/a.jl")`), qualified (`M.include(...)`), and two-argument forms cannot be resolved without running the code and are never flagged.
 
 Including a file that does not exist:
 

@@ -1,6 +1,5 @@
 //! `missing-include-file`: a static `include("path")` whose resolved target is
-//! not a file on disk. Running the file throws a `SystemError`, so the finding
-//! defaults to an error.
+//! missing or unreadable as source text. The finding defaults to an error.
 //!
 //! The check is driven by the include problems the lint driver precomputes
 //! (see [`crate::linter::include_graph`]): the rule itself only matches each
@@ -37,9 +36,9 @@ impl Rule for MissingIncludeFile {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a static `include(\"path\")` whose target does not exist on disk \
+        "Flag a static `include(\"path\")` whose target is missing or unreadable \
          (relative paths resolve against the including file's directory). \
-         Running the file would throw a `SystemError`. Only statically \
+         Missing files throw a `SystemError` at runtime. Only statically \
          resolvable includes are checked: dynamic (`include(f)`), interpolated \
          (`include(\"$dir/a.jl\")`), qualified (`M.include(...)`), and \
          two-argument forms cannot be resolved without running the code and \
@@ -67,15 +66,22 @@ impl Rule for MissingIncludeFile {
         let Some(path) = literal_path(&literal) else {
             return;
         };
-        let missing = ctx
-            .includes
-            .iter()
-            .any(|problem| problem.kind == IncludeProblemKind::Missing && problem.path == path);
-        if missing {
+        let problem = ctx.includes.iter().find(|problem| {
+            matches!(
+                problem.kind,
+                IncludeProblemKind::Missing | IncludeProblemKind::Unreadable
+            ) && problem.path == path
+        });
+        if let Some(problem) = problem {
+            let reason = if problem.kind == IncludeProblemKind::Unreadable {
+                "could not be read"
+            } else {
+                "does not exist"
+            };
             sink.push(Diagnostic::new(
                 self.id(),
                 literal.syntax().text_range(),
-                format!("included file \"{path}\" does not exist"),
+                format!("included file \"{path}\" {reason}"),
             ));
         }
     }

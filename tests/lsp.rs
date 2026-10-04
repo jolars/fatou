@@ -7080,6 +7080,121 @@ fn script_entry_points_enable_default_diagnostics_after_loading() {
     server_thread.join().unwrap();
 }
 
+#[test]
+fn script_include_errors_follow_live_edits_and_unopened_dependencies() {
+    let dir = TempDir::new("fatou-script-include-errors");
+    write_file(
+        &dir.path.join("fatou.toml"),
+        "[project]\nentry-points = [\"main.jl\"]\n",
+    );
+    write_file(&dir.path.join("main.jl"), "include(\"helper.jl\")\n");
+    write_file(
+        &dir.path.join("helper.jl"),
+        "include(\"\")\nf() = uncertain\n",
+    );
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_options(&client, serde_json::Value::Null);
+    let main = file_uri(&dir.path.join("main.jl"));
+    let helper = file_uri(&dir.path.join("helper.jl"));
+    open_document(&client, &main, "include(\"helper.jl\")\n");
+    let diagnostics = recv_publish_for(&client, &helper).diagnostics;
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::ERROR));
+    assert_eq!(diagnostics[0].range.start.line, 0);
+
+    open_document(&client, &helper, "\ninclude(\"\")\nf() = uncertain\n");
+    loop {
+        let published = recv_publish_for(&client, &helper);
+        if published.version == Some(1)
+            && published
+                .diagnostics
+                .first()
+                .is_some_and(|d| d.range.start.line == 1)
+        {
+            assert_eq!(published.diagnostics.len(), 1);
+            break;
+        }
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didChange".into(),
+            params: serde_json::json!({"textDocument": {"uri": helper, "version": 2},
+            "contentChanges": [{"text": "f() = typo\n"}]}),
+        }))
+        .unwrap();
+    loop {
+        let published = recv_publish_for(&client, &helper);
+        if published.version == Some(2)
+            && published
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("`typo`"))
+        {
+            assert_eq!(published.diagnostics.len(), 1, "{published:?}");
+            break;
+        }
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didClose".into(),
+            params: serde_json::json!({"textDocument": {"uri": helper}}),
+        }))
+        .unwrap();
+    loop {
+        let published = recv_publish_for(&client, &helper);
+        if published
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        {
+            assert_eq!(published.diagnostics[0].range.start.line, 0);
+            break;
+        }
+    }
+    write_file(&dir.path.join("helper.jl"), "f() = 1\n");
+    did_change_watched_files(
+        &client,
+        vec![FileEvent {
+            uri: helper.clone(),
+            typ: FileChangeType::CHANGED,
+        }],
+    );
+    assert!(recv_publish_for(&client, &helper).diagnostics.is_empty());
+    write_file(&dir.path.join("helper.jl"), "include(\"new.jl\")\n");
+    did_change_watched_files(
+        &client,
+        vec![FileEvent {
+            uri: helper.clone(),
+            typ: FileChangeType::CHANGED,
+        }],
+    );
+    assert_eq!(recv_publish_for(&client, &helper).diagnostics.len(), 1);
+    let added = file_uri(&dir.path.join("new.jl"));
+    write_file(&dir.path.join("new.jl"), "provided = 1\n");
+    did_change_watched_files(
+        &client,
+        vec![FileEvent {
+            uri: added.clone(),
+            typ: FileChangeType::CREATED,
+        }],
+    );
+    assert!(recv_publish_for(&client, &helper).diagnostics.is_empty());
+    fs::remove_file(dir.path.join("new.jl")).unwrap();
+    did_change_watched_files(
+        &client,
+        vec![FileEvent {
+            uri: added,
+            typ: FileChangeType::DELETED,
+        }],
+    );
+    assert_eq!(recv_publish_for(&client, &helper).diagnostics.len(), 1);
+    drop(client);
+    thread.join().unwrap();
+}
+
 /// Request full-document formatting and return the raw edits (`None` when the
 /// server answers `null`, as it does for a document it will not format).
 fn format_document(client: &Connection, uri: &Uri, id: i32) -> Option<Vec<TextEdit>> {

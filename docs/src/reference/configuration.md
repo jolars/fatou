@@ -78,6 +78,11 @@ dependencies make an entry's undefined-name analysis incomplete and suppress its
 findings. Relative whole-module `using`s remain unresolved. Other independent
 entries still run.
 
+Missing or unreadable static include targets produce errors at their include
+calls, including empty paths and directory targets. The CLI reports errors in
+the files selected for linting. The language server also reports include errors
+in unopened dependencies and clears them when the include is repaired.
+
 The language server uses unsaved buffers and refreshes dependent diagnostics
 after edits, closes, and watched file changes. Script contexts currently support
 diagnostics; completion and navigation do not use them. Cross-file method-table

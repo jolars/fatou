@@ -122,18 +122,23 @@ pub(crate) enum Outbound {
         diags: Vec<Diagnostic>,
     },
     /// Project-level include-graph diagnostics (unresolved includes, cycles) for
-    /// `uri`. Version-free: they attach to a member file that need not be open,
-    /// and an empty list clears a file that no longer has any. Merged with the
+    /// `uri`. Script results track whether the file was closed or the version
+    /// of its open buffer; package results follow the harvest. An empty list
+    /// clears a file that no longer has any. Merged with the
     /// file's parse diagnostics before publishing (a single `publishDiagnostics`
     /// replaces *all* diagnostics for a URI).
-    ProjectDiagnostics { uri: Uri, diags: Vec<Diagnostic> },
+    ProjectDiagnostics {
+        uri: Uri,
+        diags: Vec<Diagnostic>,
+        source: super::graph_diagnostics::GraphSource,
+    },
     /// Diagnostics on an *environment file* itself (`Project.toml`,
     /// `Manifest.toml`): TOML syntax failures and the checks over a resolved
     /// environment. Produced by the workspace harvester rather than the
     /// analysis thread — the resolved `Environment`, and the resolve failure,
     /// exist only there.
     ///
-    /// Version-free like [`ProjectDiagnostics`](Self::ProjectDiagnostics), and
+    /// Version-free like harvested package diagnostics, and
     /// an empty list clears. Unlike it, these have **no pull twin**: a pull
     /// report is served only for an open document, and an open environment
     /// file has no Julia analysis to carry them. So they always push, and a
@@ -237,6 +242,7 @@ pub(crate) struct GlobalState {
     /// update can republish the union. Set/cleared by the analysis thread on each
     /// re-harvest.
     graph_diags: HashMap<Uri, Vec<Diagnostic>>,
+    graph_versions: HashMap<Uri, Option<i32>>,
     /// The latest environment-file diagnostics per file, kept so any other
     /// update republishes the union. Set/cleared by the workspace harvester on
     /// each re-resolve.
@@ -279,6 +285,7 @@ impl GlobalState {
             documents: HashMap::new(),
             parse_diags: HashMap::new(),
             graph_diags: HashMap::new(),
+            graph_versions: HashMap::new(),
             env_diags: HashMap::new(),
             buffer_diags: HashMap::new(),
             sender,
@@ -1419,7 +1426,15 @@ impl GlobalState {
                 self.parse_diags.insert(uri.clone(), diags);
                 self.publish_merged(uri, Some(version));
             }
-            Outbound::ProjectDiagnostics { uri, diags } => {
+            Outbound::ProjectDiagnostics { uri, diags, source } => {
+                if let super::graph_diagnostics::GraphSource::Script { version } = source {
+                    if self.documents.get(&uri).map(|doc| doc.version) != version {
+                        return;
+                    }
+                    self.graph_versions.insert(uri.clone(), version);
+                } else {
+                    self.graph_versions.remove(&uri);
+                }
                 if diags.is_empty() {
                     self.graph_diags.remove(&uri);
                 } else {
@@ -1529,10 +1544,12 @@ impl GlobalState {
             .buffer_diags
             .get(&uri)
             .or_else(|| self.env_diags.get(&uri));
-        for source in [self.graph_diags.get(&uri), environment]
-            .into_iter()
-            .flatten()
-        {
+        let graph = self.graph_diags.get(&uri).filter(|_| {
+            self.graph_versions
+                .get(&uri)
+                .is_none_or(|expected| *expected == version)
+        });
+        for source in [graph, environment].into_iter().flatten() {
             diagnostics.extend(source.iter().cloned());
         }
         self.publish(uri, diagnostics, version);
@@ -1904,6 +1921,44 @@ mod tests {
                 kind: DocumentKind::of(uri),
             },
         );
+    }
+
+    #[test]
+    fn script_graph_results_are_gated_by_buffer_lifetime_and_version() {
+        use super::super::graph_diagnostics::GraphSource;
+        let dir = tempfile::tempdir().unwrap();
+        let uri = super::super::uri::from_path(&dir.path().join("main.jl")).unwrap();
+        let (mut state, rx) = test_state();
+        let result = |version| Outbound::ProjectDiagnostics {
+            uri: uri.clone(),
+            diags: vec![Diagnostic::new_simple(
+                Default::default(),
+                "failed include".into(),
+            )],
+            source: GraphSource::Script { version },
+        };
+        open(&mut state, &uri, 2);
+        state.on_outbound(result(None));
+        state.on_outbound(result(Some(1)));
+        assert!(state.graph_diags.is_empty());
+        assert!(rx.is_empty());
+        state.on_outbound(result(Some(2)));
+        assert_eq!(state.graph_diags[&uri].len(), 1);
+        rx.try_recv().unwrap();
+
+        open(&mut state, &uri, 3);
+        state.publish_merged(uri.clone(), Some(3));
+        let Message::Notification(note) = rx.try_recv().unwrap() else {
+            panic!("expected publish");
+        };
+        assert_eq!(note.params["diagnostics"], serde_json::json!([]));
+        state.on_outbound(result(Some(2)));
+        assert!(rx.is_empty());
+        state.documents.remove(&uri);
+        state.on_outbound(result(Some(3)));
+        assert!(rx.is_empty());
+        state.on_outbound(result(None));
+        assert!(!rx.is_empty());
     }
 
     fn ok_reply(id: i32) -> Message {

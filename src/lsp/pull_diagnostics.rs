@@ -21,7 +21,9 @@ use crate::parser::parse;
 use crate::text::{PositionEncoding, TextBuffer};
 
 use super::format::parse_diagnostics_to_lsp;
-use super::graph_diagnostics::graph_diagnostics;
+use super::graph_diagnostics::{
+    graph_diagnostics, merge_script_diagnostics, script_graph_diagnostics,
+};
 use super::lint::{ServerRules, lint_diagnostics_via_db};
 
 /// The full diagnostic report for one document: parse diagnostics, lint
@@ -59,7 +61,7 @@ pub(crate) fn document_diagnostics_via_db(
             snapshot, path, text, encoding, rules,
         ));
     }
-    diags.extend(graph_diagnostics_for(snapshot, path, encoding));
+    diags.extend(graph_diagnostics_for(snapshot, path, text, encoding, rules));
     diags
 }
 
@@ -69,19 +71,43 @@ pub(crate) fn document_diagnostics_via_db(
 fn graph_diagnostics_for(
     snapshot: &Analysis,
     path: &Path,
+    text: &TextBuffer,
     encoding: PositionEncoding,
+    rules: &ServerRules,
 ) -> Vec<Diagnostic> {
     let computed = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let graph = snapshot.project_graph();
-        graph_diagnostics(graph, encoding, |member| {
+        let package = graph_diagnostics(graph, encoding, |member| {
+            if member != path {
+                return None;
+            }
             let file = snapshot.lookup_file(member)?;
             Some((
                 snapshot.file_text_of(file).to_string(),
                 snapshot.parsed_tree(file),
             ))
-        })
-        .remove(&normalize_path(path))
-        .unwrap_or_default()
+        });
+        let scripts = snapshot.scripts(&rules.entry_points);
+        let script = script_graph_diagnostics(&scripts, encoding, |member| {
+            if member != path {
+                return None;
+            }
+            let file = snapshot.lookup_file(member)?;
+            (snapshot.file_text(file) == text.text()).then(|| {
+                (
+                    std::sync::Arc::new(text.clone()),
+                    snapshot.parsed_tree(file),
+                )
+            })
+        });
+        let sources = scripts
+            .programs
+            .iter()
+            .flat_map(|p| p.members.keys().cloned())
+            .collect();
+        merge_script_diagnostics(package, &script, &sources)
+            .remove(&normalize_path(path))
+            .unwrap_or_default()
     }));
     // A racing write: the client will re-pull on the edit that caused it.
     computed.unwrap_or_default()
@@ -93,6 +119,53 @@ mod tests {
     use crate::incremental::IncrementalDatabase;
     use lsp_types::{DiagnosticSeverity, NumberOrString};
     use std::path::PathBuf;
+
+    #[test]
+    fn script_include_failures_are_reported_until_repaired() {
+        use std::collections::BTreeMap;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("main.jl");
+        let helper = dir.path().join("helper.jl");
+        let mut db = IncrementalDatabase::default();
+        let (mut rules, _) = ServerRules::from_config(&Default::default());
+        rules.entry_points = vec![entry.clone()];
+        for target in ["", "missing.jl", "helper.jl"] {
+            let text = TextBuffer::new(format!("include(\"{target}\")\nf() = typo\n"));
+            let sources = BTreeMap::from([
+                (entry.clone(), Ok(text.text_arc())),
+                (dir.path().join(target), Err("unreadable".into())),
+            ]);
+            db.set_script_sources(&rules.entry_points, &sources, &Default::default());
+            let diagnostics = document_diagnostics_via_db(
+                &db.snapshot(),
+                &entry,
+                &text,
+                PositionEncoding::Utf16,
+                &rules,
+            );
+            assert_eq!(diagnostics.len(), 1, "{target:?}: {diagnostics:?}");
+            assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::ERROR));
+            assert_eq!(diagnostics[0].range.start.line, 0);
+            assert!(diagnostics[0].message.contains("include"));
+        }
+        let text = TextBuffer::new("include(\"helper.jl\")\nf() = provided + typo\n");
+        let sources = BTreeMap::from([
+            (entry.clone(), Ok(text.text_arc())),
+            (helper, Ok(Arc::from("provided = 1\n"))),
+        ]);
+        db.set_script_sources(&rules.entry_points, &sources, &Default::default());
+        let diagnostics = document_diagnostics_via_db(
+            &db.snapshot(),
+            &entry,
+            &text,
+            PositionEncoding::Utf16,
+            &rules,
+        );
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0].message.contains("`typo`"));
+    }
 
     fn report_for(text: &str) -> Vec<Diagnostic> {
         let path = PathBuf::from("/work/a.jl");

@@ -199,6 +199,12 @@ it from proving a name undefined. Those entry points remain conservative; see
 the [project configuration reference](../reference/configuration.md#project) for
 the current limits.
 
+A static include whose target is missing or unreadable produces an error at the
+include call. This includes `include("")`, which does not name a source file.
+The language server reports these errors even in included files you have not
+opened. Undefined-name checking resumes when the entry point's dependencies can
+be analyzed again.
+
 ## Excluding files
 
 `exclude` takes gitignore-style patterns, resolved relative to the directory
