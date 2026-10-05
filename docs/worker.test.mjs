@@ -61,3 +61,38 @@ test("falls back to origin HTML when a Markdown page is absent", async () => {
   assert.equal(await response.text(), "<h1>Page</h1>");
   assert.equal(response.headers.get("Vary"), "Accept-Encoding, Accept");
 });
+
+test("advertises the homepage Markdown in Link response headers", async () => {
+  globalThis.fetch = async () =>
+    new Response("Fatou", {
+      headers: { Link: '<https://fatou.dev/>; rel="canonical"' },
+    });
+
+  for (const method of ["GET", "HEAD"]) {
+    const response = await worker.fetch(
+      new Request("https://fatou.dev/", { method }),
+    );
+    assert.equal(
+      response.headers.get("Link"),
+      '<https://fatou.dev/>; rel="canonical", </index.md>; rel="describedby"; type="text/markdown"',
+    );
+  }
+
+  const markdown = await worker.fetch(
+    new Request("https://fatou.dev/", {
+      headers: { Accept: "text/markdown" },
+    }),
+  );
+  assert.match(
+    markdown.headers.get("Link"),
+    /<\/index\.md>; rel="describedby"; type="text\/markdown"/,
+  );
+
+  const other = await worker.fetch(
+    new Request("https://fatou.dev/guide/editors.html"),
+  );
+  assert.equal(
+    other.headers.get("Link"),
+    '<https://fatou.dev/>; rel="canonical"',
+  );
+});

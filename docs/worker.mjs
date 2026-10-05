@@ -1,4 +1,5 @@
 const PAGE_PATH = /^\/$|^\/.*\.html$|^\/.*\/$/;
+const HOMEPAGE_LINK = '</index.md>; rel="describedby"; type="text/markdown"';
 
 export function acceptsMarkdown(accept) {
   return (
@@ -21,6 +22,13 @@ function varyAccept(headers) {
   }
 }
 
+function pageHeaders(response, pathname) {
+  const headers = new Headers(response.headers);
+  varyAccept(headers);
+  if (pathname === "/" && response.ok) headers.append("Link", HOMEPAGE_LINK);
+  return headers;
+}
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -38,9 +46,8 @@ export default {
       markdownRequest.headers.delete("Accept");
       const markdown = await fetch(markdownRequest);
       if (markdown.ok) {
-        const headers = new Headers(markdown.headers);
+        const headers = pageHeaders(markdown, url.pathname);
         headers.set("Content-Type", "text/markdown; charset=utf-8");
-        varyAccept(headers);
         return new Response(markdown.body, {
           status: markdown.status,
           headers,
@@ -50,8 +57,7 @@ export default {
 
     const html = await fetch(request);
     if (!PAGE_PATH.test(url.pathname)) return html;
-    const headers = new Headers(html.headers);
-    varyAccept(headers);
+    const headers = pageHeaders(html, url.pathname);
     return new Response(html.body, { status: html.status, headers });
   },
 };
