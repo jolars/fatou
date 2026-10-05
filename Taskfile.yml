@@ -87,9 +87,10 @@ tasks:
       - mdbook serve docs --open
 
   docs-build:
-    desc: Build the docs site into docs/book with canonical links and sitemap
+    desc: Build HTML and Markdown docs with canonical links and sitemap
     cmds:
       - mdbook build docs
+      - bash scripts/prepare-docs-site.sh
       - task: docs-canonical
       - task: docs-sitemap
 

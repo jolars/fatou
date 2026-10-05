@@ -29,6 +29,8 @@ enable = true
 "/getting-started.html" = "guide/getting-started.html"
 "/performance.html" = "guide/performance.html"
 
+[output.markdown]
+
 [preprocessor.doc-utils]
 command = "cargo run --quiet --manifest-path doc-utils/Cargo.toml"
 optional = true

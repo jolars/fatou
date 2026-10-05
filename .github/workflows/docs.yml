@@ -32,6 +32,8 @@ jobs:
           mdbook-version: latest
       - name: Build mdBook
         run: mdbook build docs
+      - name: Prepare HTML and Markdown pages
+        run: bash scripts/prepare-docs-site.sh
       - name: Inject canonical links
         run: cargo run --quiet --example canonical -- docs/book https://fatou.dev/
       - name: Generate sitemap

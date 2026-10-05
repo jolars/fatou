@@ -1,0 +1,7 @@
+name = "fatou-docs-markdown"
+main = "worker.mjs"
+compatibility_date = "2026-10-05"
+
+[[routes]]
+pattern = "fatou.dev/*"
+zone_name = "fatou.dev"
