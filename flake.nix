@@ -21,7 +21,7 @@
 
         fatou = pkgs.rustPlatform.buildRustPackage {
           pname = "fatou";
-          version = "0.22.0";
+          version = "0.23.0";
 
           src = ./.;
 

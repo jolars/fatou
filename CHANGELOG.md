@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.23.0](https://github.com/jolars/fatou/compare/v0.22.0...v0.23.0) (2026-10-06)
+
+### Features
+
+- serve docs as Markdown on request ([`aa17d8f`](https://github.com/jolars/fatou/commit/aa17d8fda7ae78770a736050390129969399c9a2))
+- **config:** support extending another config ([`2adadc7`](https://github.com/jolars/fatou/commit/2adadc7f99a37e28972548a3c8773556ab3e8e89))
+
+### Bug Fixes
+
+- advertise homepage Markdown with Link header ([`9020fd5`](https://github.com/jolars/fatou/commit/9020fd5184b65aa42ae33af6ca02b6fa4f9361c7))
+- report failed includes in script entry points ([`0ab5fa9`](https://github.com/jolars/fatou/commit/0ab5fa953869d84acdb1cba1cbcabbee299986f3)), fixes [#119](https://github.com/jolars/fatou/issues/119)
+- **lsp:** watch inherited config via source path ([`3f4aad4`](https://github.com/jolars/fatou/commit/3f4aad48aed5b6e4bf8c00f86680fcb554062302))
+- **config:** preserve inherited entry path spelling ([`2600ad9`](https://github.com/jolars/fatou/commit/2600ad9f5ffe847271fa0cd2feeb8bb48508d78a))
+- update yanked yoke-derive lock entry ([`601e293`](https://github.com/jolars/fatou/commit/601e293c45863e3133b6e41e2e4411b13ea87999))
+- bind property destructuring names ([`d0f4164`](https://github.com/jolars/fatou/commit/d0f416484651ae76bfe005a469ff7ec00877f13d)), fixes [#116](https://github.com/jolars/fatou/issues/116)
+
 ## [0.22.0](https://github.com/jolars/fatou/compare/v0.21.0...v0.22.0) (2026-09-29)
 
 ### Features
