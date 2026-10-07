@@ -67,7 +67,7 @@ pub struct FixOutcome {
     /// Total fixes applied across all passes.
     pub applied: usize,
     /// Diagnostics still present after the last pass (nothing left to fix, or
-    /// unfixable / opted-out findings).
+    /// unfixable / opted-out findings), including informational analysis notices.
     pub remaining: Vec<Diagnostic>,
 }
 

@@ -199,6 +199,13 @@ it from proving a name undefined. Those entry points remain conservative; see
 the [project configuration reference](../reference/configuration.md#project) for
 the current limits.
 
+If you enable `undefined-name` for a file containing includes outside a known
+package or script program, Fatou reports an informational `analysis-incomplete`
+notice at the first include. It explains why checking was skipped and points to
+`entry-points`. Notices do not count as lint findings or make `fatou lint` or
+`fatou lint --fix` fail. Disabling or ignoring `undefined-name`, including with
+a file-wide suppression, also silences the notice.
+
 A static include whose target is missing or unreadable produces an error at the
 include call. This includes `include("")`, which does not name a source file.
 The language server reports these errors even in included files you have not

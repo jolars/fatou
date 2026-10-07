@@ -5,6 +5,9 @@ use std::path::PathBuf;
 use rowan::TextRange;
 use serde::{Deserialize, Serialize};
 
+/// The diagnostic code for an analysis notice, rather than a lint finding.
+pub const ANALYSIS_INCOMPLETE: &str = "analysis-incomplete";
+
 /// Severity assigned to a lint diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
@@ -75,10 +78,10 @@ impl ViolationData {
     }
 }
 
-/// A lint finding anchored to a source range.
+/// A lint finding or informational analysis notice anchored to a source range.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Diagnostic {
-    /// Static rule ID (e.g. `"unused-binding"`).
+    /// Static rule ID (e.g. `"unused-binding"`) or an analysis diagnostic code.
     pub rule: &'static str,
     pub severity: Severity,
     pub path: Option<PathBuf>,
@@ -101,6 +104,14 @@ fn serialize_text_range<S: serde::Serializer>(
 }
 
 impl Diagnostic {
+    /// Whether this diagnostic explains skipped analysis. Notices appear in
+    /// reports but do not count as lint findings or cause a failing CLI exit.
+    /// Informational lint findings still count; severity alone does not
+    /// distinguish a notice from a finding.
+    pub fn is_notice(&self) -> bool {
+        self.rule == ANALYSIS_INCOMPLETE
+    }
+
     /// A finding for `rule` spanning `range`, with `message` as the violation
     /// body (the name defaults to the rule ID). `path` and `severity` are
     /// stamped centrally by the engine after the rule runs (see

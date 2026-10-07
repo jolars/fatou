@@ -28,15 +28,23 @@ pub const PARSE_ERROR_RULE: &str = "parse-error";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LintStatus {
+    /// No lint findings. Informational analysis notices may still be present.
     Clean,
-    Findings { count: usize },
-    ParseDiagnostics { count: usize },
+    Findings {
+        count: usize,
+    },
+    ParseDiagnostics {
+        count: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub struct LintFileReport {
     pub path: Option<PathBuf>,
+    /// Counts parse errors or lint findings; analysis notices do not affect it.
     pub status: LintStatus,
+    /// Findings and informational analysis notices. Use [`Diagnostic::is_notice`]
+    /// to distinguish notices, which do not count toward the status.
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -351,12 +359,11 @@ fn check_parsed(
     let diagnostics =
         lint_parsed_with_scripts(path, root, &model, rules, resolution, includes, scripts);
 
-    let status = if diagnostics.is_empty() {
+    let count = diagnostics.iter().filter(|d| !d.is_notice()).count();
+    let status = if count == 0 {
         LintStatus::Clean
     } else {
-        LintStatus::Findings {
-            count: diagnostics.len(),
-        }
+        LintStatus::Findings { count }
     };
 
     LintFileReport {

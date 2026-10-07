@@ -68,7 +68,7 @@ use crate::ast::{AstToken, CallExpr, Expr};
 use crate::config::{LintConfig, RulesConfig};
 use crate::index::{DeclaredDeps, PackageIndex};
 use crate::julia_version::VersionRange;
-use crate::linter::diagnostic::{Diagnostic, Severity};
+use crate::linter::diagnostic::{ANALYSIS_INCOMPLETE, Diagnostic, Severity};
 use crate::linter::include_graph::IncludeProblem;
 use crate::linter::suppression::{DirectiveUsage, SuppressionMap};
 use crate::resolve::{
@@ -884,8 +884,9 @@ impl ResolvedRules {
     }
 
     /// Run every configured rule against `ctx` in one shared CST traversal,
-    /// dropping the findings `ctx.suppressions` covers. Diagnostics carry
-    /// `ctx.path` and are stably sorted by `(start, end, rule)`.
+    /// dropping the findings `ctx.suppressions` covers and adding informational
+    /// notices about missing analysis context. Diagnostics carry `ctx.path`
+    /// and are stably sorted by `(start, end, rule)`.
     ///
     /// Suppression is filtered *here*, not by the caller, for two reasons: the
     /// directive list has to reach rules on [`RuleContext`], and the
@@ -938,6 +939,12 @@ impl ResolvedRules {
             all.append(&mut post);
         }
 
+        if self.enabled.contains("undefined-name")
+            && let Some(notice) = include_context_notice(ctx)
+        {
+            all.push(notice);
+        }
+
         // Stamp the file path onto every finding centrally; rules leave it
         // `None`.
         if let Some(path) = ctx.path {
@@ -953,6 +960,31 @@ impl ResolvedRules {
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
+}
+
+/// A missing host context is actionable configuration, not a Julia violation.
+/// Wait for a resolution context so a cold LSP fallback does not flash notices.
+fn include_context_notice(ctx: &RuleContext<'_>) -> Option<Diagnostic> {
+    if ctx.scripts.is_some()
+        || ctx.resolution.as_ref()?.workspace.is_some()
+        || ctx
+            .suppressions
+            .is_suppressed("undefined-name", ctx.root.text_range())
+    {
+        return None;
+    }
+    let range = ctx.file_scan().first_include?;
+    Some(Diagnostic {
+        severity: Severity::Info,
+        ..Diagnostic::new(
+            ANALYSIS_INCOMPLETE,
+            range,
+            "`undefined-name` checking was skipped because includes have no known \
+             package or script context. For a standalone script, declare \
+             `[project] entry-points` in `fatou.toml` and use static \
+             `include(\"path\")` calls.",
+        )
+    })
 }
 
 /// Stamp `severity` onto the findings a rule just pushed. Severity is an

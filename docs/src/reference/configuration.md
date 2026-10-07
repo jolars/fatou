@@ -71,6 +71,14 @@ separately. Findings identify the contexts in which a name is undefined.
 Includes may supply names even when their files are excluded from diagnostic
 reporting.
 
+An enabled `undefined-name` rule reports an informational `analysis-incomplete`
+notice when a file contains includes but belongs to no known package or script
+program. The notice appears once per file at its first include and recommends
+declaring entry points and using static include paths. It does not count as a
+lint finding or cause a failing CLI exit code. Rule severity overrides do not
+change notice severity; disabling, ignoring, or suppressing the rule file-wide
+silences the notice.
+
 A missing or unreadable entry point fails CLI linting. The language server logs
 the failure and continues checking other entries. Dynamic includes, `eval`,
 unresolved whole-module `using`s, include cycles, and unreadable or unparseable

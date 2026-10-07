@@ -319,6 +319,58 @@ mod tests {
     const UNUSED_LOCAL: &str = "function f(x)\n    tmp = x + 1\n    return x\nend\n";
 
     #[test]
+    fn explicitly_enabled_undefined_names_explain_includes_without_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.jl");
+        let mut db = IncrementalDatabase::default();
+        let config = LintConfig {
+            select: Some(vec!["undefined-name".into()]),
+            severity: [("undefined-name".into(), Severity::Error)].into(),
+            ..Default::default()
+        };
+        let (rules, _) = ServerRules::from_config(&config);
+        let text = TextBuffer::from("include()\nf() = typo\n");
+        db.upsert_file(&path, text.text_arc());
+        let diagnostics = lint_diagnostics_via_db(
+            &db.snapshot(),
+            &path,
+            &text,
+            PositionEncoding::Utf16,
+            &rules,
+        );
+        let [notice] = &diagnostics[..] else {
+            panic!("expected one notice: {diagnostics:?}");
+        };
+        assert_eq!(notice.severity, Some(DiagnosticSeverity::INFORMATION));
+        assert_eq!(
+            notice.code,
+            Some(NumberOrString::String("analysis-incomplete".into()))
+        );
+        assert_eq!(
+            notice.range,
+            Range::new(Position::new(0, 0), Position::new(0, 9))
+        );
+        assert!(notice.message.contains("entry-points"));
+        assert!(notice.code_description.is_none());
+        assert!(lint_findings(text.text(), &rules).is_empty());
+
+        let repaired = TextBuffer::from("f() = typo\n");
+        db.upsert_file(&path, repaired.text_arc());
+        let diagnostics = lint_diagnostics_via_db(
+            &db.snapshot(),
+            &path,
+            &repaired,
+            PositionEncoding::Utf16,
+            &rules,
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].code,
+            Some(NumberOrString::String("undefined-name".into()))
+        );
+    }
+
+    #[test]
     fn script_defaults_honor_selection_ignore_and_severity() {
         let dir = tempfile::tempdir().unwrap();
         let entry = dir.path().join("main.jl");

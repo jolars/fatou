@@ -24,7 +24,8 @@ pub struct DefinitionEffects {
 }
 
 impl DefinitionEffects {
-    pub(crate) fn observe(&mut self, node: &SyntaxNode) {
+    /// Record definition effects and report whether this node is an include.
+    pub(crate) fn observe(&mut self, node: &SyntaxNode) -> bool {
         if let Some(call) = MacroCall::cast(node.clone()) {
             if call
                 .name()
@@ -37,21 +38,27 @@ impl DefinitionEffects {
             if let Some(callee) = call.callee_ident() {
                 match callee.text() {
                     "eval" => self.calls_eval = true,
-                    "include" if include_target(&call).is_some() => self.literal_include = true,
-                    "include" => self.dynamic_include = true,
+                    "include" if include_target(&call).is_some() => {
+                        self.literal_include = true;
+                        return true;
+                    }
+                    "include" => {
+                        self.dynamic_include = true;
+                        return true;
+                    }
                     _ => {}
                 }
-            } else if call.callee().is_some_and(|callee| {
+            } else if let Some(callee) = call.callee()
+                && let Some(token) = callee.syntax().last_token()
+                && matches!(token.text(), "include" | "eval")
+            {
                 // Qualified and computed include/eval calls have no supported
                 // static target; treating them as absent would invent findings.
-                callee
-                    .syntax()
-                    .last_token()
-                    .is_some_and(|token| matches!(token.text(), "include" | "eval"))
-            }) {
                 self.dynamic_include = true;
+                return token.text() == "include";
             }
         }
+        false
     }
 }
 

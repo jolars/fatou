@@ -33,6 +33,8 @@ pub(crate) struct FileScan {
     pub(crate) literal_include: bool,
     /// The file `include`s a computed path, which no harvest can follow.
     pub(crate) dynamic_include: bool,
+    /// The first include that can leave name resolution incomplete.
+    pub(crate) first_include: Option<TextRange>,
 }
 
 impl FileScan {
@@ -43,10 +45,13 @@ impl FileScan {
             calls_eval: false,
             literal_include: false,
             dynamic_include: false,
+            first_include: None,
         };
         let mut effects = DefinitionEffects::default();
         for node in root.descendants() {
-            effects.observe(&node);
+            if effects.observe(&node) && scan.first_include.is_none() {
+                scan.first_include = Some(node.text_range());
+            }
             match node.kind() {
                 SyntaxKind::MACRO_CALL => scan.macro_calls.push(node.text_range()),
                 SyntaxKind::QUOTE_EXPR | SyntaxKind::QUOTE_SYM => {

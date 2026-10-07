@@ -530,7 +530,14 @@ fn run_lint(
     if result.total_findings > 0 || has_parse_errors {
         Ok(ExitCode::FAILURE)
     } else {
-        eprintln!("checked {} file(s): clean", result.checked_files);
+        if diagnostics.iter().any(linter::Diagnostic::is_notice) {
+            eprintln!(
+                "checked {} file(s): no findings (analysis incomplete)",
+                result.checked_files
+            );
+        } else {
+            eprintln!("checked {} file(s): clean", result.checked_files);
+        }
         Ok(ExitCode::SUCCESS)
     }
 }
@@ -581,7 +588,8 @@ fn lint_anchor(paths: &[PathBuf]) -> PathBuf {
 }
 
 /// Apply fixes across every discovered file, writing changed files back, then
-/// report whatever findings remain. Exits non-zero if any remain (Ruff-style).
+/// report the remaining diagnostics. Exits non-zero if lint findings or parse
+/// errors remain; informational analysis notices do not fail the command.
 #[allow(clippy::too_many_arguments)]
 fn run_lint_fix(
     paths: Vec<PathBuf>,
@@ -687,7 +695,7 @@ fn run_lint_fix(
         eprintln!("fixed {applied} issue(s) in {changed_files} file(s)");
     }
 
-    if remaining.is_empty() {
+    if remaining.iter().all(linter::Diagnostic::is_notice) {
         Ok(ExitCode::SUCCESS)
     } else {
         Ok(ExitCode::FAILURE)
