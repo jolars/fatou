@@ -1,5 +1,123 @@
 # Integrations
 
+Use Fatou in CI, Git hooks, and other formatting tools. For editor setup, see
+[Editor Setup](editors.md).
+
+## GitHub Actions
+
+Use [`fatou-action`](https://github.com/jolars/fatou-action) to check formatting
+and lint Julia code in CI. It installs and caches a prebuilt Fatou binary on
+GitHub-hosted Linux, macOS, and Windows runners.
+
+Create `.github/workflows/fatou.yml`:
+
+```yaml
+name: Fatou
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fatou:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jolars/fatou-action@v1
+        with:
+          version: v0.23.0
+```
+
+By default, the action runs `fatou format --check` and `fatou lint` from the
+repository root. It checks `.jl` files without changing them; formatting
+differences or lint findings fail the check. Directory walks honor `.gitignore`
+and the exclusions in `fatou.toml`. It uses the same [configuration
+discovery](configuration.md#where-fatou-looks-for-a-config) as the CLI.
+
+The action's `@v1` tag selects the action version; the `version` input selects
+the Fatou CLI version. Keep the latter aligned with your pre-commit revision and
+local installation for consistent results. Omitting `version` selects the latest
+Fatou release with a binary for the runner.
+
+Set inputs under `with` to customize the check:
+
+  | Input    | Purpose                                               | Default             |
+  | -------- | ----------------------------------------------------- | ------------------- |
+  | `path`   | File or directory to check                            | `.`                 |
+  | `format` | Run the formatting check                              | `"true"`            |
+  | `lint`   | Run the lint check                                    | `"true"`            |
+  | `config` | Load an explicit `fatou.toml` path                    | Automatic discovery |
+  | `quiet`  | List files needing formatting without printing a diff | `"false"`           |
+
+For example, to check only formatting under `src/`:
+
+```yaml
+- uses: jolars/fatou-action@v1
+  with:
+    version: v0.23.0
+    path: src/
+    lint: "false"
+```
+
+Set `format: "false"` to run only linting. See the [action
+reference](https://github.com/jolars/fatou-action#inputs) for all inputs and
+outputs.
+
+## pre-commit
+
+Run Fatou on staged Julia files with
+[`fatou-pre-commit`](https://github.com/jolars/fatou-pre-commit). The hooks
+install the Fatou binary from PyPI in an environment managed by pre-commit, so
+you do not need to install Fatou, Rust, or Julia separately.
+
+[Install pre-commit](https://pre-commit.com/#installation), then add this entry
+to your `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/jolars/fatou-pre-commit
+    rev: v0.23.0
+    hooks:
+      - id: fatou-lint
+      - id: fatou-format
+```
+
+Install the Git hook and run it once over all tracked files:
+
+```bash
+pre-commit install
+pre-commit run --all-files
+```
+
+On subsequent commits, the hooks run on staged `.jl` files. `fatou-lint` reports
+lint findings, and `fatou-format` formats files in place. When a hook changes a
+file, review and stage the changes, then commit again.
+
+To apply safe lint fixes, add `--fix` to the lint hook. Keep it before the
+formatter so formatting runs after the rewrites:
+
+```yaml
+hooks:
+  - id: fatou-lint
+    args: [--fix]
+  - id: fatou-format
+```
+
+To check formatting without changing files, add `args: [--check]` to
+`fatou-format`.
+
+Both hooks pass `--force-exclude`, so `exclude` and `extend-exclude` in your
+`fatou.toml` apply even though pre-commit supplies filenames explicitly. See
+[excluding files](configuration.md#excluding-files) for details.
+
+The `rev` selects the Fatou version: `v0.23.0` installs Fatou 0.23.0. Run
+`pre-commit autoupdate` to update configured hook revisions, then review and
+commit the changes to `.pre-commit-config.yaml`.
+
 ## dprint
 
 Format Julia files alongside other languages with [dprint](https://dprint.dev)
@@ -96,116 +214,29 @@ use releases with the same `fatou-formatter` version and equivalent settings.
 The plugin provides formatting. For linting and the full language server, use
 the [Fatou CLI](getting-started.md) and [editor integration](editors.md).
 
-## pre-commit
+## Using with Panache
 
-Run Fatou on staged Julia files with
-[`fatou-pre-commit`](https://github.com/jolars/fatou-pre-commit). The hooks
-install the Fatou binary from PyPI in an environment managed by pre-commit, so
-you do not need to install Fatou, Rust, or Julia separately.
+[Panache](https://panache.bz) can format and lint Julia code blocks inside
+Markdown and Quarto documents. Install both CLIs on your `PATH`, then add this
+to the document project's `panache.toml`:
 
-[Install pre-commit](https://pre-commit.com/#installation), then add this entry
-to your `.pre-commit-config.yaml`:
+```toml
+[formatters]
+julia = "fatou"
 
-```yaml
-repos:
-  - repo: https://github.com/jolars/fatou-pre-commit
-    rev: v0.18.0
-    hooks:
-      - id: fatou-lint
-      - id: fatou-format
+[linters]
+julia = "fatou"
 ```
 
-Install the Git hook and run it once over all tracked files:
+Run `panache format document.qmd` to format the document and its Julia blocks,
+or `panache lint document.qmd` to report findings without changing files. The
+linter also runs through Panache's language server. To apply safe fixes before
+formatting, run `panache lint --fix document.qmd`, then format the document.
 
-```bash
-pre-commit install
-pre-commit run --all-files
-```
-
-On subsequent commits, the hooks run on staged `.jl` files. `fatou-lint` reports
-lint findings, and `fatou-format` formats files in place. When a hook changes a
-file, review and stage the changes, then commit again.
-
-To apply safe lint fixes, add `--fix` to the lint hook. Keep it before the
-formatter so formatting runs after the rewrites:
-
-```yaml
-hooks:
-  - id: fatou-lint
-    args: [--fix]
-  - id: fatou-format
-```
-
-To check formatting without changing files, add `args: [--check]` to
-`fatou-format`.
-
-Both hooks pass `--force-exclude`, so `exclude` and `extend-exclude` in your
-`fatou.toml` apply even though pre-commit supplies filenames explicitly. See
-[excluding files](configuration.md#excluding-files) for details.
-
-The `rev` selects the Fatou version: `v0.18.0` installs Fatou 0.18.0. Run
-`pre-commit autoupdate` to update configured hook revisions, then review and
-commit the changes to `.pre-commit-config.yaml`.
-
-## GitHub Actions
-
-Use [`fatou-action`](https://github.com/jolars/fatou-action) to check formatting
-and lint Julia code in CI. It installs and caches a prebuilt Fatou binary on
-GitHub-hosted Linux, macOS, and Windows runners.
-
-Create `.github/workflows/fatou.yml`:
-
-```yaml
-name: Fatou
-
-on:
-  pull_request:
-  push:
-    branches: [main]
-
-permissions:
-  contents: read
-
-jobs:
-  fatou:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: jolars/fatou-action@v1
-        with:
-          version: v0.18.0
-```
-
-By default, the action runs `fatou format --check` and `fatou lint` from the
-repository root. Formatting differences or lint findings fail the check. It uses
-the same [configuration
-discovery](configuration.md#where-fatou-looks-for-a-config) as the CLI.
-
-The action's `@v1` tag selects the action version; the `version` input selects
-the Fatou CLI version. Keep the latter aligned with your pre-commit revision and
-local installation for consistent results. Omitting `version` selects the latest
-Fatou release with a binary for the runner.
-
-Set inputs under `with` to customize the check:
-
-  | Input    | Purpose                                               | Default             |
-  | -------- | ----------------------------------------------------- | ------------------- |
-  | `path`   | File or directory to check                            | `.`                 |
-  | `format` | Run the formatting check                              | `"true"`            |
-  | `lint`   | Run the lint check                                    | `"true"`            |
-  | `config` | Load an explicit `fatou.toml` path                    | Automatic discovery |
-  | `quiet`  | List files needing formatting without printing a diff | `"false"`           |
-
-For example, to check only formatting under `src/`:
-
-```yaml
-- uses: jolars/fatou-action@v1
-  with:
-    version: v0.18.0
-    path: src/
-    lint: "false"
-```
-
-Set `format: "false"` to run only linting. See the [action
-reference](https://github.com/jolars/fatou-action#inputs) for all inputs and
-outputs.
+Panache's Fatou linter preset passes `--no-config`, so it does not load
+`fatou.toml` and uses Fatou's default lint configuration. The formatter preset
+runs separately and retains its CLI configuration behavior. See Panache's
+[formatter preset](https://panache.bz/reference/formatter-presets.html#fatou),
+[linter preset](https://panache.bz/reference/linter-presets.html#fatou), and
+[external-tool
+configuration](https://panache.bz/guide/configuration.html#external-code-linters).

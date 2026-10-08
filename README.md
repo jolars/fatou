@@ -38,6 +38,8 @@ Fatou is available from several sources:
 - **npm**: `npm install -g fatou-cli` (bundles a prebuilt binary)
 - **PyPI**: `uv tool install fatou`/`pipx install fatou`
 - **AUR** (Arch Linux): `paru -S fatou-bin` (or any other AUR helper)
+- **mise/Aqua**: see the [installation
+  guide](https://fatou.dev/guide/getting-started.html#mise-and-aqua)
 - **NixOS**: the `fatou` package is available in the Nixpkgs repository
 - **Prebuilt binaries**: from the [releases
   page](https://github.com/jolars/fatou/releases)
@@ -156,8 +158,7 @@ Run Fatou through [pre-commit](https://pre-commit.com) hooks with
 ```yaml
 repos:
   - repo: https://github.com/jolars/fatou-pre-commit
-    # fatou version
-    rev: v0.18.0
+    rev: v0.23.0
     hooks:
       - id: fatou-lint
       - id: fatou-format

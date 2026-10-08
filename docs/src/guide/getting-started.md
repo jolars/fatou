@@ -13,6 +13,14 @@ Install from [crates.io](https://crates.io/crates/fatou) with Cargo:
 cargo install fatou
 ```
 
+### Homebrew
+
+On macOS or Linux:
+
+```bash
+brew install jolars/tap/fatou
+```
+
 ### npm
 
 The `fatou-cli` package bundles a prebuilt binary:
@@ -39,6 +47,56 @@ helper:
 
 ```bash
 paru -S fatou-bin
+```
+
+### Nix
+
+Fatou is available as `fatou` in
+[Nixpkgs](https://search.nixos.org/packages?channel=unstable&show=fatou). For a
+shell with Fatou available:
+
+```bash
+nix shell nixpkgs#fatou
+```
+
+For a persistent NixOS installation, add `pkgs.fatou` to
+`environment.systemPackages`.
+
+### mise and Aqua
+
+[mise](https://mise.jdx.dev/dev-tools/backends/aqua.html) can install Fatou
+through its Aqua backend:
+
+```bash
+mise use aqua:jolars/fatou
+```
+
+Commit the resulting `mise.toml` to share the selected version. With
+[Aqua](https://aquaproj.github.io/docs/tutorial/) directly, run `aqua init` if
+the project has no `aqua.yaml`, then add and install Fatou:
+
+```bash
+aqua g -i jolars/fatou
+aqua install
+```
+
+Commit `aqua.yaml` to share the selected version. Both tools use the
+[`jolars/fatou` registry
+entry](https://github.com/aquaproj/aqua-registry/tree/main/pkgs/jolars/fatou).
+
+### Install script
+
+The installer selects the release for your platform and installs to a user-local
+directory. On macOS or Linux:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://fatou.dev/install | sh
+```
+
+On Windows, run this in PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://fatou.dev/install.ps1 | iex"
 ```
 
 ### Prebuilt binaries
