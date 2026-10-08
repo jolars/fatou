@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.24.0](https://github.com/jolars/fatou/compare/v0.23.0...v0.24.0) (2026-10-08)
+
+### Features
+
+- **linter:** explain skipped name checks ([`84b27b9`](https://github.com/jolars/fatou/commit/84b27b90fc5412e9597b2c353419e784ed1a9683)), refs [#119](https://github.com/jolars/fatou/issues/119)
+
 ## [0.23.0](https://github.com/jolars/fatou/compare/v0.22.0...v0.23.0) (2026-10-06)
 
 ### Features
