@@ -239,4 +239,4 @@ runs separately and retains its CLI configuration behavior. See Panache's
 [formatter preset](https://panache.bz/reference/formatter-presets.html#fatou),
 [linter preset](https://panache.bz/reference/linter-presets.html#fatou), and
 [external-tool
-configuration](https://panache.bz/guide/configuration.html#external-code-linters).
+configuration](https://panache.bz/reference/configuration.html#external-code-linters).

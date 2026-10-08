@@ -163,6 +163,8 @@ Run the language server over stdio (for editor integration):
 fatou lsp
 ```
 
-See the [CLI Reference](../reference/cli.md) for the full set of commands and
-options, and [Editor Setup](editors.md) to wire the language server into your
-editor.
+Continue with [Formatting](formatting.md), [Linting](linting.md), or
+[Configuration](configuration.md) for day-to-day use. See [Editor
+Setup](editors.md) for your editor, [Integrations](integrations.md) for
+automation, and the [CLI Reference](../reference/cli.md) for all commands and
+options.

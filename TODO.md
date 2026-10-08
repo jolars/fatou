@@ -248,3 +248,16 @@ style remains project policy rather than language correctness.
   pipeline.
 
 ## Tooling
+
+## Documentation site
+
+- [ ] Shorten `docs/src/guide/configuration.md` by consolidating exhaustive
+  resolution rules and option details in `docs/src/reference/configuration.md`.
+  Retain practical project setup and standalone-script recipes in the guide,
+  and preserve existing anchors when moving content.
+- [ ] Split `docs/src/guide/editors.md` into focused editor recipes and a short
+  overview, separating capability lookup from setup instructions. Preserve
+  published URLs and anchors.
+- [ ] Reduce duplicated usage examples across `README.md`, Getting Started,
+  Formatting, and Linting. Keep introductory examples short and link to the
+  detailed workflow instead of maintaining multiple explanations.

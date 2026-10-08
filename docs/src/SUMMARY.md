@@ -5,16 +5,18 @@
 # Guide
 
 - [Getting Started](guide/getting-started.md)
+- [Formatting](guide/formatting.md)
+- [Linting](guide/linting.md)
+- [Configuration](guide/configuration.md)
 - [Editor Setup](guide/editors.md)
 - [Integrations](guide/integrations.md)
-- [Configuration](guide/configuration.md)
-- [Comparison](guide/comparison.md)
 - [Performance](guide/performance.md)
+- [Comparison](guide/comparison.md)
 
 # Reference
 
-- [Configuration Reference](reference/configuration.md)
 - [CLI Reference](reference/cli.md)
+- [Configuration Reference](reference/configuration.md)
 - [Lint Rules](reference/rules.md)
 
 # Development
