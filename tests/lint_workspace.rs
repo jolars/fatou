@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use fatou::config::LintConfig;
 use fatou::file_discovery::ExcludeFilter;
-use fatou::index::{HarvestedLibrary, harvest_package_named};
+use fatou::index::{HarvestedLibrary, build_system_index, harvest_package_named};
 use fatou::linter::{ProjectContext, check_paths_with_config};
 
 struct TempDir {
@@ -118,6 +118,127 @@ fn cli_still_flags_a_genuine_typo() {
     let findings = undefined_in_b(&pkg, &library);
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert!(findings[0].contains("SparseMatrixCSX"), "{findings:?}");
+}
+
+#[test]
+fn generated_imported_constructors_remain_types_in_sibling_files() {
+    let dep = TempDir::new();
+    write(
+        &dep.path().join("src/SparseArrays.jl"),
+        "module SparseArrays\nexport SparseMatrixCSC\nstruct SparseMatrixCSC end\n\
+         module Types\nexport NestedType\nstruct NestedType end\nend\nend\n",
+    );
+    let dep_index = Arc::new(harvest_package_named(dep.path(), "SparseArrays"));
+    for (import, name) in [
+        ("import Base.Int", "Int"),
+        ("import Base: Int", "Int"),
+        ("import Base: Int as ImportedInt", "ImportedInt"),
+        ("", "Int"),
+        ("using Base", "BigInt"),
+        ("using SparseArrays", "SparseMatrixCSC"),
+        ("using SparseArrays.Types", "NestedType"),
+    ] {
+        let pkg = TempDir::new();
+        write(
+            &pkg.path().join("src/M.jl"),
+            "module M\ninclude(\"a.jl\")\ninclude(\"b.jl\")\nend\n",
+        );
+        write(
+            &pkg.path().join("src/a.jl"),
+            &format!(
+                "{import}\nstruct MyType end\nhelper(x) = x\n\
+                 for T in (:{name}, :helper)\n    @eval ($T)(x::MyType) = 1\nend\n"
+            ),
+        );
+        write(
+            &pkg.path().join("src/b.jl"),
+            &format!("g(x::{name}) = x\nh(x::helper) = x\n"),
+        );
+        let index = harvest_package_named(pkg.path(), "M");
+        assert!(index.diagnostics.is_empty(), "{:?}", index.diagnostics);
+        let constructor = index
+            .root
+            .functions
+            .iter()
+            .find(|group| group.name == name)
+            .expect("generated constructor is harvested");
+        assert!(constructor.methods[0].is_generated);
+        let mut packages = build_system_index(None);
+        packages.insert("SparseArrays".into(), Arc::clone(&dep_index));
+        packages.insert("M".into(), Arc::new(index));
+        let library = HarvestedLibrary {
+            packages,
+            roots: BTreeMap::from([("M".into(), pkg.path().to_path_buf())]),
+            workspaces: vec!["M".into()],
+            ..Default::default()
+        };
+        let config = LintConfig {
+            select: Some(vec!["invalid-type-declaration".into()]),
+            ..Default::default()
+        };
+        let result = check_paths_with_config(
+            &[pkg.path().join("src/b.jl")],
+            &config,
+            &ExcludeFilter::none(),
+            None,
+            ProjectContext::Harvested(&library),
+        )
+        .expect("lint succeeds");
+        let diagnostics = &result.reports[0].diagnostics;
+        assert_eq!(diagnostics.len(), 1, "{import}: {diagnostics:?}");
+        assert_eq!(diagnostics[0].rule, "invalid-type-declaration");
+        assert!(diagnostics[0].message.body.contains("`helper`"));
+    }
+}
+
+#[test]
+fn generated_only_groups_do_not_establish_non_type_identity() {
+    let pkg = TempDir::new();
+    write(
+        &pkg.path().join("src/M.jl"),
+        "module M\ninclude(\"a.jl\")\ninclude(\"b.jl\")\nend\n",
+    );
+    write(
+        &pkg.path().join("src/a.jl"),
+        "begin\nstruct WrappedType end\nend\nhelper(x) = x\n\
+         for op in (:WrappedType, :helper, :generated_only)\n\
+             @eval ($op)(x::Int) = x\nend\n",
+    );
+    write(
+        &pkg.path().join("src/b.jl"),
+        "f(x::WrappedType) = x\ng(x::helper) = x\nh(x::generated_only) = x\n",
+    );
+    let index = harvest_package_named(pkg.path(), "M");
+    assert!(index.diagnostics.is_empty(), "{:?}", index.diagnostics);
+    let constructor = index
+        .root
+        .functions
+        .iter()
+        .find(|group| group.name == "WrappedType")
+        .expect("generated constructor is harvested");
+    assert!(constructor.methods.iter().all(|method| method.is_generated));
+    let library = HarvestedLibrary {
+        packages: BTreeMap::from([("M".into(), Arc::new(index))]),
+        roots: BTreeMap::from([("M".into(), pkg.path().to_path_buf())]),
+        workspaces: vec!["M".into()],
+        ..Default::default()
+    };
+    let config = LintConfig {
+        select: Some(vec!["invalid-type-declaration".into()]),
+        ..Default::default()
+    };
+    let result = check_paths_with_config(
+        &[pkg.path().join("src/b.jl")],
+        &config,
+        &ExcludeFilter::none(),
+        None,
+        ProjectContext::Harvested(&library),
+    )
+    .expect("lint succeeds");
+    let diagnostics = &result.reports[0].diagnostics;
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].rule, "invalid-type-declaration");
+    assert!(diagnostics[0].message.body.contains("`helper`"));
 }
 
 /// A workspace package `M` declaring `SparseArrays` in its `Project.toml`

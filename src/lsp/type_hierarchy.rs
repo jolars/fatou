@@ -49,7 +49,7 @@ use crate::syntax::{SyntaxKind, SyntaxNode};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 use super::cross_file;
-use super::definition::{library_def_site, using_def_site};
+use super::definition::{library_type_def_site, using_type_def_site};
 use super::references::binding_at_cursor;
 use super::symbols::{head_name, signature_detail, signature_expr, token_at};
 use super::uri::{from_path, to_path};
@@ -421,10 +421,10 @@ pub(crate) fn supertypes_via_db(
                 )
             }),
             Resolution::System { module, name } => snapshot.package(&module).and_then(|pkg| {
-                library_def_site(snapshot, &pkg, &pkg.root, &name)
+                library_type_def_site(snapshot, &pkg, &pkg.root, &name)
                     .and_then(|(abs, span)| library_type_item(&abs, span, &name, encoding))
             }),
-            Resolution::Using { module, name } => using_def_site(model, snapshot, &module, &name)
+            Resolution::Using { module, name } => using_type_def_site(snapshot, &module, &name)
                 .and_then(|(abs, span)| library_type_item(&abs, span, &name, encoding)),
             Resolution::Script { .. }
             | Resolution::Ambiguous
@@ -814,6 +814,239 @@ mod tests {
         assert_eq!(supers[0].selection_range.start, Position::new(2, 14));
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn supertypes_resolve_library_type_aliases() {
+        use std::collections::BTreeMap;
+        use std::sync::Arc;
+
+        for (package, load, nested) in [
+            ("Creatures", "using Creatures\n", false),
+            ("Creatures", "using Creatures.Types\n", true),
+            ("Base", "", false),
+            ("Core", "", false),
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let entry = tmp.path().join("src").join(format!("{package}.jl"));
+            std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
+            let (open, close) = if nested {
+                ("module Types\n", "end\n")
+            } else {
+                ("", "")
+            };
+            std::fs::write(
+                &entry,
+                format!(
+                    "module {package}\n{open}export VectorAlias\n\
+                     const VectorAlias = AbstractArray{{T,1}} where T\n{close}end\n"
+                ),
+            )
+            .unwrap();
+            let pkg = crate::index::harvest_package_named(tmp.path(), package);
+            assert!(pkg.diagnostics.is_empty(), "{:?}", pkg.diagnostics);
+
+            let (src, position) =
+                cursor(&format!("{load}struct V|{{T}} <: VectorAlias{{T}}\nend\n"));
+            let path = tmp.path().join("consumer.jl");
+            let uri = from_path(&path).unwrap();
+            let mut db = IncrementalDatabase::default();
+            db.upsert_file(&path, src.clone());
+            let mut packages = crate::index::build_system_index(None);
+            packages.insert(package.to_string(), Arc::new(pkg));
+            db.set_library(
+                packages,
+                BTreeMap::from([(package.to_string(), tmp.path().to_path_buf())]),
+                Vec::new(),
+            );
+            let snapshot = db.snapshot();
+            let item = prepare_type_hierarchy_via_db(
+                &snapshot,
+                &uri,
+                &path,
+                &TextBuffer::new(src),
+                position,
+                Utf16,
+            )
+            .unwrap()
+            .remove(0);
+
+            let supers = supertypes_via_db(&snapshot, &item, Utf16).unwrap();
+            assert_eq!(supers.len(), 1, "{package}, {load}: {supers:#?}");
+            assert_eq!(supers[0].name, "VectorAlias");
+            assert_eq!(to_path(&supers[0].uri), Some(entry));
+            assert_eq!(
+                supers[0].selection_range,
+                Range::new(
+                    Position::new(if nested { 3 } else { 2 }, 6),
+                    Position::new(if nested { 3 } else { 2 }, 17),
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_constructors_preserve_imported_type_metadata() {
+        use std::collections::BTreeMap;
+        use std::sync::Arc;
+
+        let library = tempfile::tempdir().unwrap();
+        let library_entry = library.path().join("src").join("Creatures.jl");
+        std::fs::create_dir_all(library_entry.parent().unwrap()).unwrap();
+        std::fs::write(
+            &library_entry,
+            "module Creatures\nexport Animal\n\"An animal.\"\nabstract type Animal end\nend\n",
+        )
+        .unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let workspace_src = workspace.path().join("src");
+        std::fs::create_dir(&workspace_src).unwrap();
+        std::fs::write(
+            workspace_src.join("MyPkg.jl"),
+            "module MyPkg\nusing Creatures\ninclude(\"constructors.jl\")\ninclude(\"consumer.jl\")\nend\n",
+        )
+        .unwrap();
+        std::fs::write(
+            workspace_src.join("constructors.jl"),
+            "for op in (:Animal,)\n    @eval ($op)(x::Int) = x\nend\n",
+        )
+        .unwrap();
+        let (src, position) = cursor("struct Do|g <: Animal\nend\n");
+        let consumer = workspace_src.join("consumer.jl");
+        std::fs::write(&consumer, &src).unwrap();
+        let mut packages = crate::index::build_system_index(None);
+        for (name, root) in [("Creatures", library.path()), ("MyPkg", workspace.path())] {
+            let package = crate::index::harvest_package_named(root, name);
+            assert!(package.diagnostics.is_empty(), "{:?}", package.diagnostics);
+            packages.insert(name.into(), Arc::new(package));
+        }
+        let mut db = IncrementalDatabase::default();
+        db.set_library(
+            packages,
+            BTreeMap::from([
+                ("Creatures".into(), library.path().to_path_buf()),
+                ("MyPkg".into(), workspace.path().to_path_buf()),
+            ]),
+            vec!["MyPkg".into()],
+        );
+        db.seed_workspace_members();
+        let snapshot = db.snapshot();
+        let uri = from_path(&consumer).unwrap();
+        let buffer = TextBuffer::new(src);
+        let item =
+            prepare_type_hierarchy_via_db(&snapshot, &uri, &consumer, &buffer, position, Utf16)
+                .unwrap()
+                .remove(0);
+        let supers = supertypes_via_db(&snapshot, &item, Utf16).unwrap();
+        assert_eq!(supers.len(), 1, "{supers:#?}");
+        assert_eq!(supers[0].name, "Animal");
+        assert_eq!(to_path(&supers[0].uri), Some(library_entry.clone()));
+        assert_eq!(supers[0].selection_range.start, Position::new(3, 14));
+
+        let animal = Position::new(0, 17);
+        let hover = super::super::hover::hover_via_db(&snapshot, &consumer, &buffer, animal, Utf16)
+            .unwrap();
+        let lsp_types::HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected markdown hover");
+        };
+        assert!(markup.value.contains("abstract type Animal"), "{markup:?}");
+        assert!(markup.value.contains("An animal."), "{markup:?}");
+        let definitions = super::super::definition::definition_via_db(
+            &snapshot, &uri, &consumer, &buffer, animal, Utf16,
+        );
+        assert_eq!(definitions.len(), 1, "{definitions:#?}");
+        assert_eq!(to_path(&definitions[0].uri), Some(library_entry));
+        assert_eq!(definitions[0].range.start, Position::new(3, 14));
+        let completion = super::super::completion::completion_via_db(
+            &snapshot, &consumer, &buffer, animal, Utf16,
+        )
+        .into_iter()
+        .find(|item| item.label == "Animal")
+        .unwrap();
+        let completion = super::super::completion::resolve_completion(&snapshot, completion);
+        assert_eq!(completion.detail.as_deref(), Some("abstract type Animal"));
+        let Some(lsp_types::Documentation::MarkupContent(doc)) = completion.documentation else {
+            panic!("expected type documentation");
+        };
+        assert_eq!(doc.value, "An animal.");
+    }
+
+    #[test]
+    fn supertypes_use_library_type_declarations_with_constructors() {
+        use std::collections::BTreeMap;
+        use std::sync::Arc;
+
+        for constructor in [
+            "for op in (:Animal,)\n    @eval ($op)(x::Int) = x\nend\n",
+            "Animal(x::Int) = x\n",
+        ] {
+            for (package, load, nested) in [
+                ("Creatures", "using Creatures\n", false),
+                ("Creatures", "using Creatures.Types\n", true),
+                ("Base", "", false),
+                ("Core", "", false),
+            ] {
+                let tmp = tempfile::tempdir().unwrap();
+                let entry = tmp.path().join("src").join(format!("{package}.jl"));
+                std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
+                let (open, close) = if nested {
+                    ("module Types\n", "end\n")
+                } else {
+                    ("", "")
+                };
+                std::fs::write(
+                    &entry,
+                    format!(
+                        "module {package}\n{open}export Animal\nabstract type Animal end\n\
+                         {constructor}{close}end\n"
+                    ),
+                )
+                .unwrap();
+                let pkg = crate::index::harvest_package_named(tmp.path(), package);
+                assert!(pkg.diagnostics.is_empty(), "{:?}", pkg.diagnostics);
+
+                let (src, position) = cursor(&format!("{load}struct Do|g <: Animal\nend\n"));
+                let path = tmp.path().join("consumer.jl");
+                let uri = from_path(&path).unwrap();
+                let mut db = IncrementalDatabase::default();
+                db.upsert_file(&path, src.clone());
+                let mut packages = crate::index::build_system_index(None);
+                packages.insert(package.to_string(), Arc::new(pkg));
+                db.set_library(
+                    packages,
+                    BTreeMap::from([(package.to_string(), tmp.path().to_path_buf())]),
+                    Vec::new(),
+                );
+                let snapshot = db.snapshot();
+                let item = prepare_type_hierarchy_via_db(
+                    &snapshot,
+                    &uri,
+                    &path,
+                    &TextBuffer::new(src),
+                    position,
+                    Utf16,
+                )
+                .unwrap()
+                .remove(0);
+
+                let supers = supertypes_via_db(&snapshot, &item, Utf16).unwrap();
+                assert_eq!(
+                    supers.len(),
+                    1,
+                    "{package}, {load}, {constructor}: {supers:#?}"
+                );
+                assert_eq!(supers[0].name, "Animal");
+                assert_eq!(supers[0].kind, SymbolKind::INTERFACE, "{supers:#?}");
+                assert_eq!(to_path(&supers[0].uri), Some(entry));
+                assert_eq!(
+                    supers[0].selection_range,
+                    Range::new(
+                        Position::new(if nested { 3 } else { 2 }, 14),
+                        Position::new(if nested { 3 } else { 2 }, 20),
+                    )
+                );
+            }
+        }
     }
 
     #[test]

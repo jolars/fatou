@@ -753,7 +753,8 @@ fn member_completions<P: PackageSource>(
     member_items(module, receiver, macro_member)
 }
 
-/// The items for a resolved module's defined names.
+/// The items for a resolved module's defined names, preferring type and alias
+/// declarations over constructor groups.
 fn member_items(module: &ModuleIndex, path: &[String], macro_member: bool) -> Vec<CompletionItem> {
     let mut items = Vec::new();
     if macro_member {
@@ -762,20 +763,27 @@ fn member_items(module: &ModuleIndex, path: &[String], macro_member: bool) -> Ve
         }
         return items;
     }
+    let mut seen = std::collections::HashSet::new();
+    for t in &module.types {
+        if seen.insert(t.name.as_str()) {
+            items.push(member_item(&t.name, CompletionItemKind::CLASS, path));
+        }
+    }
+    for c in &module.consts {
+        if seen.insert(c.name.as_str()) {
+            items.push(member_item(&c.name, CompletionItemKind::CONSTANT, path));
+        }
+    }
     for f in &module.functions {
         // A qualified extension (`Base.show`) is not a name of this module.
-        if f.owner.is_none() {
+        if f.owner.is_none() && seen.insert(f.name.as_str()) {
             items.push(member_item(&f.name, CompletionItemKind::FUNCTION, path));
         }
     }
-    for t in &module.types {
-        items.push(member_item(&t.name, CompletionItemKind::CLASS, path));
-    }
-    for c in &module.consts {
-        items.push(member_item(&c.name, CompletionItemKind::CONSTANT, path));
-    }
     for s in &module.submodules {
-        items.push(member_item(&s.name, CompletionItemKind::MODULE, path));
+        if seen.insert(s.name.as_str()) {
+            items.push(member_item(&s.name, CompletionItemKind::MODULE, path));
+        }
     }
     items
 }
@@ -821,17 +829,12 @@ fn resolve_completion_with(
 // Signature and type rendering moved to `super::render`, shared with hover.
 
 /// Fill `item`'s signature detail and documentation from the definition of
-/// `name` in `module`, searching functions, types, consts, then macros.
+/// `name` in `module`, preferring type and alias metadata over constructor groups.
 fn enrich(item: &mut CompletionItem, module: &ModuleIndex, name: &str) {
     if name.starts_with('@') {
         if let Some(m) = module.macros.iter().find(|m| m.name == name) {
             set_doc(item, m.doc.as_ref().map(|d| d.text.as_str()));
         }
-        return;
-    }
-    if let Some(f) = module.functions.iter().find(|f| f.name == name) {
-        item.detail = Some(function_detail(f));
-        set_doc(item, f.doc.as_ref().map(|d| d.text.as_str()));
         return;
     }
     if let Some(t) = module.types.iter().find(|t| t.name == name) {
@@ -844,6 +847,11 @@ fn enrich(item: &mut CompletionItem, module: &ModuleIndex, name: &str) {
             item.detail = Some(format!("{name} = {repr}"));
         }
         set_doc(item, c.doc.as_ref().map(|d| d.text.as_str()));
+        return;
+    }
+    if let Some(f) = module.functions.iter().find(|f| f.name == name) {
+        item.detail = Some(function_detail(f));
+        set_doc(item, f.doc.as_ref().map(|d| d.text.as_str()));
     }
 }
 
@@ -1233,6 +1241,43 @@ mod tests {
     }
 
     #[test]
+    fn member_context_preserves_declarations_with_constructors() {
+        for definitions in [
+            concat!(
+                "for op in (:Animal, :Alias, :greet)\n",
+                "    @eval ($op)(x::Int) = x\n",
+                "end\n",
+            ),
+            "Animal(x::Int) = x\nAlias(x::Int) = x\ngreet(x::Int) = x\n",
+        ] {
+            let parsed = parse(&format!(
+                "abstract type Animal end\nconst Alias = Vector{{Int}}\n{definitions}"
+            ));
+            assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+            let mut creatures = crate::index::harvest_tree(&parsed.cst);
+            assert_eq!(creatures.functions.len(), 3);
+            creatures.name = "Creatures".into();
+            let lib = library(vec![package(creatures)]);
+
+            let items = completions_at("Creatures.", "Creatures.", &lib);
+            let mut members: Vec<_> = items
+                .iter()
+                .map(|item| (item.label.as_str(), item.kind))
+                .collect();
+            members.sort_by_key(|&(name, _)| name);
+            assert_eq!(
+                members,
+                vec![
+                    ("Alias", Some(CompletionItemKind::CONSTANT)),
+                    ("Animal", Some(CompletionItemKind::CLASS)),
+                    ("greet", Some(CompletionItemKind::FUNCTION)),
+                ],
+                "{definitions}",
+            );
+        }
+    }
+
+    #[test]
     fn member_context_walks_a_submodule_chain() {
         let mut inner = module("B", &[]);
         inner.functions.push(func("deep"));
@@ -1265,6 +1310,63 @@ mod tests {
     }
 
     #[test]
+    fn resolve_preserves_type_metadata_with_generated_constructors() {
+        let parsed = parse(concat!(
+            "export Animal\n",
+            "\"An animal.\"\n",
+            "abstract type Animal end\n",
+            "for op in (:Animal,)\n",
+            "    @eval ($op)(x::Int) = x\n",
+            "end\n",
+        ));
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        let mut creatures = crate::index::harvest_tree(&parsed.cst);
+        creatures.name = "Creatures".into();
+        let pkg = (*package(creatures)).clone();
+        let item = CompletionItem {
+            label: "Animal".into(),
+            data: resolve_data(&["Creatures".into()], "Animal"),
+            ..Default::default()
+        };
+        let resolved =
+            resolve_completion_with(&|name| (name == "Creatures").then(|| pkg.clone()), item);
+        assert_eq!(resolved.detail.as_deref(), Some("abstract type Animal"));
+        match resolved.documentation {
+            Some(Documentation::MarkupContent(m)) => assert_eq!(m.value, "An animal."),
+            other => panic!("expected type documentation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_preserves_alias_metadata_with_generated_constructors() {
+        let parsed = parse(concat!(
+            "export Alias\n",
+            "\"An integer vector.\"\n",
+            "const Alias = Vector{Int}\n",
+            "for op in (:Alias,)\n",
+            "    @eval ($op)(x::Int) = x\n",
+            "end\n",
+        ));
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        let mut aliases = crate::index::harvest_tree(&parsed.cst);
+        assert_eq!(aliases.functions.len(), 1);
+        aliases.name = "Aliases".into();
+        let pkg = (*package(aliases)).clone();
+        let item = CompletionItem {
+            label: "Alias".into(),
+            data: resolve_data(&["Aliases".into()], "Alias"),
+            ..Default::default()
+        };
+        let resolved =
+            resolve_completion_with(&|name| (name == "Aliases").then(|| pkg.clone()), item);
+        assert_eq!(resolved.detail.as_deref(), Some("Alias = Vector{Int}"));
+        match resolved.documentation {
+            Some(Documentation::MarkupContent(m)) => assert_eq!(m.value, "An integer vector."),
+            other => panic!("expected alias documentation, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn resolve_fills_docs_and_signature() {
         let mut root = module("A", &[]);
         let mut group = func("foo");
@@ -1287,6 +1389,7 @@ mod tests {
             where_clauses: Vec::new(),
             return_type: None,
             has_body: true,
+            is_generated: false,
             doc: None,
             loc: loc(),
         });

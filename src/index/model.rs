@@ -79,7 +79,7 @@ pub struct ModuleIndex {
     pub doc: Option<Docstring>,
     /// `export`/`public` names, in source order.
     pub exports: Vec<ExportedName>,
-    /// Functions grouped by `(owner, name)`; each group holds every method.
+    /// Functions grouped by `(owner, name)`; each group holds the recovered methods.
     pub functions: Vec<FunctionGroup>,
     pub types: Vec<TypeDef>,
     pub consts: Vec<ConstDef>,
@@ -212,6 +212,10 @@ pub struct Method {
     pub return_type: Option<TypeExpr>,
     /// `false` for a bodyless `function f end` method placeholder.
     pub has_body: bool,
+    /// Recovered from an `@eval` template. Its location points to the template's
+    /// interpolation, not an editable declaration of this name. Other generated
+    /// overloads may remain unharvested, so its group is not exhaustive.
+    pub is_generated: bool,
     pub doc: Option<Docstring>,
     pub loc: DefLocation,
 }

@@ -229,6 +229,7 @@ mod tests {
             where_clauses: Vec::new(),
             return_type: None,
             has_body,
+            is_generated: false,
             doc: None,
             loc: loc(),
         }

@@ -25,6 +25,8 @@ use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use super::model::*;
 use super::typeexpr::{TypeExpr, lower_type, lower_type_args, lower_type_params, normalized_text};
 
+mod generated;
+
 /// Harvest the package rooted at `source_root` (the directory containing
 /// `src/`), taking the package name from the directory's file name.
 pub fn harvest_package(source_root: &Path) -> PackageIndex {
@@ -265,6 +267,21 @@ impl Harvester {
                 }
             }
             SyntaxKind::MODULE_DEF => self.handle_module(node, file, dest, at_root, pending_doc),
+            SyntaxKind::FOR_EXPR => {
+                if let Some(methods) = generated::literal_eval_loop(node) {
+                    for (signature, range) in methods.signatures {
+                        for name in &methods.names {
+                            self.add_method(
+                                signature.clone(),
+                                file,
+                                dest,
+                                None,
+                                Some((name, range)),
+                            );
+                        }
+                    }
+                }
+            }
             SyntaxKind::EXPORT_STMT | SyntaxKind::PUBLIC_STMT => {
                 self.handle_name_list(node, file, dest);
             }
@@ -402,7 +419,7 @@ impl Harvester {
         let Some(start) = signature_start(node) else {
             return;
         };
-        self.add_method(start, file, dest, doc);
+        self.add_method(start, file, dest, doc, None);
     }
 
     fn handle_short_form(
@@ -416,17 +433,19 @@ impl Harvester {
         let Some(lhs) = node.children().next() else {
             return;
         };
-        self.add_method(lhs, file, dest, doc);
+        self.add_method(lhs, file, dest, doc, None);
     }
 
     /// Build a [`Method`] from a signature-position node and file it under its
-    /// `(owner, name)` group in `dest`.
+    /// `(owner, name)` group in `dest`. A generated name keeps the template's
+    /// original interpolation range for navigation.
     fn add_method(
         &mut self,
         start: SyntaxNode,
         file: &Path,
         dest: &mut ModuleIndex,
         doc: Option<Docstring>,
+        generated_name: Option<(&str, TextRange)>,
     ) {
         let (core, wheres, return_ty) = peel_signature(start);
         let Some(core) = core else {
@@ -438,7 +457,11 @@ impl Harvester {
         let type_args = signature_type_args(&core);
         let (name, owner, name_range, params, keyword_params, has_body) = match core.kind() {
             SyntaxKind::CALL_EXPR => {
-                let Some((name, owner, name_range)) = callee_name(&core) else {
+                let callee = match generated_name {
+                    Some((name, range)) => Some((name.to_string(), None, range)),
+                    None => callee_name(&core),
+                };
+                let Some((name, owner, name_range)) = callee else {
                     return;
                 };
                 let (params, keyword_params) = extract_params(&core);
@@ -461,6 +484,7 @@ impl Harvester {
             where_clauses,
             return_type,
             has_body,
+            is_generated: generated_name.is_some(),
             doc,
             loc: self.loc(file, name_range),
         };
@@ -1396,6 +1420,61 @@ mod tests {
                 methods[0].params[0].type_annotation,
                 methods[1].params[0].type_annotation,
             );
+        }
+    }
+
+    #[test]
+    fn literal_eval_loop_preserves_static_signatures() {
+        for annotation in ["@eval", "Base.@eval", "@Base.eval"] {
+            for definition in [
+                "($op)(x::Int, y=2; flag=true)::Bool = flag",
+                "function ($op)(x::Int, y=2; flag=true)::Bool\nflag\nend",
+            ] {
+                let source = format!("for op in (:f, :g)\n{annotation} {definition}\nend");
+                let parsed = crate::parser::parse(&source);
+                assert!(parsed.diagnostics.is_empty(), "{source}");
+                let m = harvest_tree(&parsed.cst);
+                assert_eq!(m.functions.len(), 2, "{source}");
+                for (group, name) in m.functions.iter().zip(["f", "g"]) {
+                    assert_eq!(group.name, name);
+                    let method = &group.methods[0];
+                    assert_eq!(
+                        name_of(&method.params[0].type_annotation),
+                        Some(vec!["Int"])
+                    );
+                    assert_eq!(method.params[1].default.as_deref(), Some("2"));
+                    assert_eq!(method.keyword_params[0].name.as_deref(), Some("flag"));
+                    assert_eq!(method.keyword_params[0].default.as_deref(), Some("true"));
+                    assert_eq!(name_of(&method.return_type), Some(vec!["Bool"]));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn eval_loops_with_dynamic_shapes_are_not_harvested() {
+        for source in [
+            "for op in names\n@eval ($op)(xs...) = xs\nend",
+            "for op in (:f, computed())\n@eval ($op)(xs...) = xs\nend",
+            "for op in (:f,), other in (:g,)\n@eval ($op)(xs...) = xs\nend",
+            "for op in (:f,)\nop = :g\n@eval ($op)(xs...) = xs\nend",
+            "for op in (:f,)\nCustom.@eval ($op)(xs...) = xs\nend",
+            "for op in (:f,)\n@eval Other ($op)(xs...) = xs\nend",
+            "for op in (:f,)\n@eval ($other)(xs...) = xs\nend",
+            "for op in (:f,)\n@eval ($op)(x::$T) = x\nend",
+            "for op in (:f,)\n@eval ($op)(x) = $(op = :g)\nend",
+            "for op in (:f,)\n@eval begin\nif condition\n($op)(xs...) = xs\nend\nend\nend",
+            "for op in (:f,)\n@eval begin\n($op)(x) = x\n$(unknown_code)\nend\nend",
+            "for op in (:f,)\n($op)(xs...) = xs\nend",
+        ] {
+            let parsed = crate::parser::parse(source);
+            assert!(
+                parsed.diagnostics.is_empty(),
+                "{source}: {:?}",
+                parsed.diagnostics
+            );
+            let m = harvest_tree(&parsed.cst);
+            assert!(m.functions.is_empty(), "{source}: {:?}", m.functions);
         }
     }
 

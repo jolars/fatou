@@ -71,6 +71,50 @@ fn single_file_package() {
     assert!(index.diagnostics.is_empty(), "{:?}", index.diagnostics);
 }
 
+#[test]
+fn literal_symbol_eval_loop_harvests_method_templates() {
+    let tmp = TempDir::new();
+    let source = r#"module Pkg
+min(x, y) = x
+max(x, y) = y
+for op in (:+, :min, :max, :kron)
+    @eval begin
+        ($op)(a, b, c, xs...) = foldl($op, xs; init=a)
+    end
+end
+end
+"#;
+    write(&tmp.path().join("src/Pkg.jl"), source);
+    let index = harvest_package_named(tmp.path(), "Pkg");
+    assert!(index.diagnostics.is_empty(), "{:?}", index.diagnostics);
+    for name in ["+", "min", "max", "kron"] {
+        let group = index
+            .root
+            .functions
+            .iter()
+            .find(|g| g.name == name)
+            .unwrap();
+        let generated = group.methods.last().unwrap();
+        assert!(generated.is_generated, "{name}");
+        assert_eq!(generated.params.len(), 4, "{name}");
+        assert!(generated.params[3].is_vararg, "{name}");
+        assert_eq!(generated.params[3].name.as_deref(), Some("xs"));
+        assert_eq!(generated.loc.file, Path::new("src/Pkg.jl"));
+        let span = generated.loc.range;
+        assert_eq!(&source[span.start as usize..span.end as usize], "$op");
+    }
+    for name in ["min", "max"] {
+        let group = index
+            .root
+            .functions
+            .iter()
+            .find(|g| g.name == name)
+            .unwrap();
+        assert_eq!(group.methods.len(), 2, "{name}");
+        assert!(!group.methods[0].is_generated, "{name}");
+    }
+}
+
 /// Julia binds every module's own name inside it and includes it in `names(M)`,
 /// though no `export <Self>` statement ever appears. The harvest, which reads
 /// `export`/`public` statements, adds the self-name so a qualified read like

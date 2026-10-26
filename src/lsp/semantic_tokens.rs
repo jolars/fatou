@@ -40,9 +40,9 @@ use crate::incremental::Analysis;
 use crate::index::{ModuleIndex, PackageIndex};
 use crate::parser::parse;
 use crate::resolve::{
-    ModulePath, Namespace, PackageSource, Resolution, Resolver, module_at, resolve_submodule,
+    ModulePath, Namespace, PackageSource, Resolution, Resolver, module_at, resolve_module,
 };
-use crate::semantic::{BindingKind, LoadKind, SemanticModel};
+use crate::semantic::{BindingKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 use fatou_parser::documentation::ast::CodeBlock;
@@ -403,49 +403,15 @@ fn classify_free_read<P: PackageSource + ?Sized>(
         Resolution::System { module, name } => {
             library_kind(&packages.package(&module)?.root, &name)
         }
-        Resolution::Using { module, name } => using_kind(model, packages, &module, &name),
+        Resolution::Using { module, name } => {
+            let target = resolve_module(packages, &module)?;
+            library_kind(&target, &name)
+        }
         Resolution::Script { .. }
         | Resolution::Ambiguous
         | Resolution::WorkspaceImport { .. }
         | Resolution::Unresolved => None,
     }
-}
-
-/// Find the module a whole-module `using` brings in and classify `name` from
-/// it. `module` is the clause's display name (its last component): a plain
-/// `using LinearAlgebra` names the package directly; a `using A.B` needs the
-/// clause walked from its package root. Mirrors hover's `library_from_using`.
-fn using_kind<P: PackageSource + ?Sized>(
-    model: &SemanticModel,
-    packages: &P,
-    module: &str,
-    name: &str,
-) -> Option<HighlightKind> {
-    if let Some(pkg) = packages.package(module)
-        && let Some(kind) = library_kind(&pkg.root, name)
-    {
-        return Some(kind);
-    }
-    for load in model.module_loads() {
-        if load.kind != LoadKind::Using || load.items.is_some() {
-            continue;
-        }
-        let comps = &load.path.components;
-        if comps.last().map(|c| c.as_str()) != Some(module) {
-            continue;
-        }
-        let Some(first) = comps.first() else { continue };
-        let Some(pkg) = packages.package(first.as_str()) else {
-            continue;
-        };
-        let rest: Vec<&str> = comps[1..].iter().map(|c| c.as_str()).collect();
-        if let Some(m) = resolve_submodule(&pkg.root, &rest)
-            && let Some(kind) = library_kind(m, name)
-        {
-            return Some(kind);
-        }
-    }
-    None
 }
 
 /// Look `name` up among `module`'s defined symbols and map it to a highlight
@@ -459,11 +425,14 @@ fn library_kind(module: &ModuleIndex, name: &str) -> Option<HighlightKind> {
             .any(|m| m.name == name)
             .then_some(HighlightKind::Macro);
     }
-    if module.functions.iter().any(|f| f.name == name) {
-        return Some(HighlightKind::Function);
-    }
     if module.types.iter().any(|t| t.name == name) {
         return Some(HighlightKind::Type);
+    }
+    if module.consts.iter().any(|c| c.name == name) {
+        return None;
+    }
+    if module.functions.iter().any(|f| f.name == name) {
+        return Some(HighlightKind::Function);
     }
     if module.submodules.iter().any(|m| m.name == name) {
         return Some(HighlightKind::Module);
@@ -959,6 +928,69 @@ mod tests {
                 ("1", HighlightKind::Number),
             ]),
         );
+    }
+
+    #[test]
+    fn library_types_keep_their_paint_with_constructors() {
+        for constructor in [
+            "for op in (:Animal,)\n    @eval ($op)(x::Int) = x\nend\n",
+            "Animal(x::Int) = x\n",
+        ] {
+            let parsed = parse(&format!(
+                "export Animal\nabstract type Animal end\n{constructor}"
+            ));
+            assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+            let mut creatures = crate::index::harvest_tree(&parsed.cst);
+            assert_eq!(creatures.functions.len(), 1);
+            creatures.name = "Creatures".into();
+            let lib = library(vec![package(creatures)]);
+
+            assert_eq!(
+                painted(
+                    "using Creatures\nx::Animal\nx::Creatures.Animal\nAnimal(1)\n",
+                    &lib,
+                ),
+                expect(&[
+                    ("using", HighlightKind::Keyword),
+                    ("Animal", HighlightKind::Type),
+                    ("Creatures", HighlightKind::Module),
+                    ("Animal", HighlightKind::Type),
+                    ("Animal", HighlightKind::Type),
+                    ("1", HighlightKind::Number),
+                ]),
+                "{constructor}",
+            );
+        }
+    }
+
+    #[test]
+    fn library_aliases_stay_plain_with_constructors() {
+        for constructor in [
+            "for op in (:Alias,)\n    @eval ($op)(x::Int) = x\nend\n",
+            "Alias(x::Int) = x\n",
+        ] {
+            let parsed = parse(&format!(
+                "export Alias\nconst Alias = Vector{{Int}}\n{constructor}"
+            ));
+            assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+            let mut aliases = crate::index::harvest_tree(&parsed.cst);
+            assert_eq!(aliases.functions.len(), 1);
+            aliases.name = "Aliases".into();
+            let lib = library(vec![package(aliases)]);
+
+            assert_eq!(
+                painted(
+                    "using Aliases\nx::Alias\nx::Aliases.Alias\nAlias(1)\n",
+                    &lib,
+                ),
+                expect(&[
+                    ("using", HighlightKind::Keyword),
+                    ("Aliases", HighlightKind::Module),
+                    ("1", HighlightKind::Number),
+                ]),
+                "{constructor}",
+            );
+        }
     }
 
     #[test]

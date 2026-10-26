@@ -186,6 +186,7 @@ pub enum Resolution {
     /// `@`-prefixed for a macro.
     WorkspaceImport { name: SmolStr },
     /// An `export`ed name brought in by a whole-module `using` (tier 3).
+    /// `module` is the full path from the package root, such as `A.B.C`.
     Using { module: SmolStr, name: SmolStr },
     /// An implicitly available Base/Core name (tier 4).
     System { module: SmolStr, name: SmolStr },
@@ -410,7 +411,7 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         {
             let path = self.full_module_path(workspace, self.model.scope_at(offset));
             if let Some(module) = module_at(&workspace.pkg.root, &path) {
-                if module_defines(module, &wanted, namespace)
+                if self.workspace_defines(module, &wanted, offset, namespace)
                     || (namespace == Namespace::Value && module.name == wanted.as_str())
                 {
                     return Resolution::Workspace {
@@ -428,9 +429,12 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         // Tier 3: a whole-module `using`'s exports, in source order — this
         // file's, then those a sibling file opened module-wide.
         if script.is_none()
-            && let Some((module, name)) = self.using_export(&wanted, offset)
+            && let Some((module, _)) = self.using_export(&wanted, offset)
         {
-            return Resolution::Using { module, name };
+            return Resolution::Using {
+                module,
+                name: wanted,
+            };
         }
         if let Some(module) = script_module {
             for using in &module.usings {
@@ -455,13 +459,19 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         }
         if let Some(workspace) = &self.workspace
             && script.is_none()
-            && let Some((module, name)) = self.workspace_using_export(workspace, &wanted, offset)
+            && let Some((module, _)) = self.workspace_using_export(workspace, &wanted, offset)
         {
-            return Resolution::Using { module, name };
+            return Resolution::Using {
+                module,
+                name: wanted,
+            };
         }
         // Tier 4: Base/Core implicit.
-        if let Some((module, name)) = self.system_export(&wanted) {
-            return Resolution::System { module, name };
+        if let Some((module, _)) = self.system_export(&wanted) {
+            return Resolution::System {
+                module,
+                name: wanted,
+            };
         }
         Resolution::Unresolved
     }
@@ -547,6 +557,7 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
             // module-level `using`/`import` binds — both module globals.
             for name in defined_names(module, namespace)
                 .into_iter()
+                .filter(|name| self.workspace_defines(module, name, offset, namespace))
                 .chain(imported_names(module, namespace))
             {
                 if seen.insert(name.clone()) {
@@ -645,7 +656,7 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
 
         // Defining files: occurrences of each module-global binding whose name the
         // module enclosing it (host module plus file-internal nested `module`s)
-        // actually defines at top level. The `module_defines` gate matches exactly
+        // actually defines at top level. The `workspace_defines` gate matches exactly
         // what the workspace tier of `resolve` fires on, so a plain file-scope
         // global (`x = 1`) or an import the harvester skips is left out, keeping
         // this in lockstep with go-to-definition.
@@ -661,7 +672,7 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
                 let Some(name) = namespaced_binding_name(binding, ns) else {
                     continue;
                 };
-                if !module_defines(module, &name, ns) {
+                if !self.workspace_defines(module, &name, binding.def_range.start(), ns) {
                     continue;
                 }
                 let recs = out
@@ -753,6 +764,26 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         None
     }
 
+    /// Whether a workspace symbol's declarations can all be renamed through the
+    /// reference index. Generated methods have no editable declaration there,
+    /// even when ordinary methods of the same function are recorded.
+    pub fn can_rename_workspace_symbol(&self, symbol: &OccurrenceKey) -> bool {
+        let Some(workspace) = &self.workspace else {
+            return false;
+        };
+        if workspace.pkg.name != symbol.package.as_str() {
+            return false;
+        }
+        let Some(module) = module_at(&workspace.pkg.root, &symbol.module) else {
+            return false;
+        };
+        symbol.namespace != Namespace::Value
+            || !module.functions.iter().any(|group| {
+                group.name == symbol.name.as_str()
+                    && group.methods.iter().any(|method| method.is_generated)
+            })
+    }
+
     /// `(module path, namespace, name)` when `bid` is a module-global the module
     /// enclosing it (host module plus file-internal nested `module`s) defines at
     /// top level — i.e. a package symbol other files can reference, not a plain
@@ -771,7 +802,7 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         let module = module_at(&workspace.pkg.root, &path)?;
         for ns in [Namespace::Value, Namespace::Macro] {
             if let Some(name) = namespaced_binding_name(binding, ns)
-                && module_defines(module, &name, ns)
+                && self.workspace_defines(module, &name, binding.def_range.start(), ns)
             {
                 return Some(OccurrenceKey {
                     package: SmolStr::new(&workspace.pkg.name),
@@ -782,6 +813,29 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
             }
         }
         None
+    }
+
+    fn workspace_defines(
+        &self,
+        module: &ModuleIndex,
+        wanted: &SmolStr,
+        offset: TextSize,
+        namespace: Namespace,
+    ) -> bool {
+        if !module_defines(module, wanted, namespace) {
+            return false;
+        }
+        // Generated overloads alone do not establish a new binding over an
+        // imported type. Explicit function declarations still mask its exports.
+        namespace != Namespace::Value
+            || module_declares_type_or_const(module, wanted)
+            || module.functions.iter().any(|group| {
+                group.name == wanted.as_str()
+                    && group.methods.iter().any(|method| !method.is_generated)
+            })
+            || !self
+                .export_provider(wanted, offset)
+                .is_some_and(|(_, provider)| module_declares_type_or_const(&provider, wanted))
     }
 
     /// Tiers 1 + 2: the binding `wanted` reads to, resolving up the scope chain
@@ -812,16 +866,19 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
     }
 
     /// Tier 3: the first whole-module `using` visible at `offset` that exports
-    /// `wanted`, as `(reporting module, exported name)`.
-    fn using_export(&self, wanted: &SmolStr, offset: TextSize) -> Option<(SmolStr, SmolStr)> {
+    /// `wanted`, as `(full module path, target module)`.
+    fn using_export(
+        &self,
+        wanted: &SmolStr,
+        offset: TextSize,
+    ) -> Option<(SmolStr, Arc<ModuleIndexHandle>)> {
         let at = self.model.scope_at(offset);
         for load in self.model.module_loads() {
             let Some(module) = self.using_module(load, at) else {
                 continue;
             };
             if module_exports(&module, wanted) {
-                let display = load.path.components.last().unwrap().clone();
-                return Some((display, wanted.clone()));
+                return Some((load.path.components.join(".").into(), module));
             }
         }
         None
@@ -829,8 +886,8 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
 
     /// Tier 3 across files: the first whole-module `using` opened in any file of
     /// the module enclosing `offset` (harvested into its
-    /// [`usings`](ModuleIndex::usings)) that exports `wanted`, as `(reporting
-    /// module, exported name)`. Mirrors [`using_export`](Self::using_export) but
+    /// [`usings`](ModuleIndex::usings)) that exports `wanted`, as `(full module
+    /// path, target module)`. Mirrors [`using_export`](Self::using_export) but
     /// sources the clauses from the workspace index rather than this file's
     /// model, so a sibling file's module-wide `using` resolves.
     fn workspace_using_export(
@@ -838,7 +895,7 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         workspace: &WorkspaceCtx,
         wanted: &SmolStr,
         offset: TextSize,
-    ) -> Option<(SmolStr, SmolStr)> {
+    ) -> Option<(SmolStr, Arc<ModuleIndexHandle>)> {
         let path = self.full_module_path(workspace, self.model.scope_at(offset));
         let module = module_at(&workspace.pkg.root, &path)?;
         for using in &module.usings {
@@ -846,8 +903,7 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
                 continue;
             };
             if module_exports(&target, wanted) {
-                let display = SmolStr::new(using.components.last().unwrap());
-                return Some((display, wanted.clone()));
+                return Some((using.components.join(".").into(), target));
             }
         }
         None
@@ -868,6 +924,44 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         Some(Arc::new(ModuleIndexHandle { pkg, rest }))
     }
 
+    /// A whole-module `using` or implicit Base/Core module exporting `name`,
+    /// independently of local and workspace bindings that mask those tiers.
+    /// A method group can extend an imported type's constructors, so its
+    /// presence alone cannot establish that the name refers to a function.
+    pub fn export_module_providing(
+        &self,
+        name: &str,
+        offset: TextSize,
+        namespace: Namespace,
+    ) -> Option<SmolStr> {
+        let wanted = wanted_name(name, namespace);
+        self.export_provider(&wanted, offset)
+            .map(|(module, _)| module)
+    }
+
+    fn export_provider(
+        &self,
+        wanted: &SmolStr,
+        offset: TextSize,
+    ) -> Option<(SmolStr, Arc<ModuleIndexHandle>)> {
+        self.using_export(wanted, offset)
+            .or_else(|| {
+                self.workspace
+                    .as_ref()
+                    .and_then(|workspace| self.workspace_using_export(workspace, wanted, offset))
+            })
+            .or_else(|| {
+                let (module, pkg) = self.system_export(wanted)?;
+                Some((
+                    module,
+                    Arc::new(ModuleIndexHandle {
+                        pkg,
+                        rest: Vec::new(),
+                    }),
+                ))
+            })
+    }
+
     /// The Base/Core module exporting `name` (tier 4), asked *independently of*
     /// the masking order — the one question [`resolve`](Self::resolve) cannot
     /// answer for a name the file binds, since the binding is precisely what
@@ -879,11 +973,11 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
     }
 
     /// Tier 4: `wanted` if Base or Core exports it (Base first).
-    fn system_export(&self, wanted: &SmolStr) -> Option<(SmolStr, SmolStr)> {
+    fn system_export(&self, wanted: &SmolStr) -> Option<(SmolStr, Arc<PackageIndex>)> {
         for module in ["Base", "Core"] {
             let pkg = self.packages.package(module)?;
             if module_exports(&pkg.root, wanted) {
-                return Some((SmolStr::new(module), wanted.clone()));
+                return Some((SmolStr::new(module), pkg));
             }
         }
         None
@@ -936,20 +1030,32 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
     }
 }
 
-/// A resolved whole-module `using` target that keeps its package `Arc` alive so
-/// the borrowed [`ModuleIndex`] outlives one loop iteration. [`Deref`] to the
-/// module it points at.
-struct ModuleIndexHandle {
-    pkg: Arc<PackageIndex>,
+/// Resolve a full module path returned by [`Resolution::Using`] without
+/// depending on which file contains the `using` clause.
+pub(crate) fn resolve_module<P: PackageSource + ?Sized>(
+    packages: &P,
+    path: &str,
+) -> Option<ModuleIndexHandle> {
+    let mut components = path.split('.');
+    let pkg = packages.package(components.next()?)?;
+    let rest: ModulePath = components.map(SmolStr::new).collect();
+    module_at(&pkg.root, &rest)?;
+    Some(ModuleIndexHandle { pkg, rest })
+}
+
+/// A resolved module that keeps its package `Arc` alive while consumers borrow
+/// its [`ModuleIndex`]. Dereferences to the module it points at.
+pub(crate) struct ModuleIndexHandle {
+    pub(crate) pkg: Arc<PackageIndex>,
     rest: Vec<SmolStr>,
 }
 
 impl std::ops::Deref for ModuleIndexHandle {
     type Target = ModuleIndex;
     fn deref(&self) -> &ModuleIndex {
-        // Verified resolvable in `using_module`, and the package Arc is
-        // immutable, so the walk repeats deterministically.
-        resolve_module_path(&self.pkg.root, &self.rest).expect("sub-path verified in using_module")
+        // Construction verifies the path, and the immutable package keeps it
+        // valid for every subsequent lookup.
+        resolve_module_path(&self.pkg.root, &self.rest).expect("module sub-path verified")
     }
 }
 
@@ -990,11 +1096,15 @@ fn module_defines(module: &ModuleIndex, wanted: &SmolStr, namespace: Namespace) 
     match namespace {
         Namespace::Value => {
             module.functions.iter().any(|f| f.name == wanted.as_str())
-                || module.types.iter().any(|t| t.name == wanted.as_str())
-                || module.consts.iter().any(|c| c.name == wanted.as_str())
+                || module_declares_type_or_const(module, wanted)
         }
         Namespace::Macro => module.macros.iter().any(|m| m.name == wanted.as_str()),
     }
+}
+
+fn module_declares_type_or_const(module: &ModuleIndex, wanted: &SmolStr) -> bool {
+    module.types.iter().any(|t| t.name == wanted.as_str())
+        || module.consts.iter().any(|c| c.name == wanted.as_str())
 }
 
 /// Whether a name a module-level `using`/`import` binds is recorded for
@@ -1105,6 +1215,15 @@ mod tests {
     /// A package whose root module exports `exports` (each `@name` is a macro).
     fn package(name: &str, exports: &[&str]) -> Arc<PackageIndex> {
         module_package(name, exports, Vec::new())
+    }
+
+    fn harvested_package(name: &str, source: &str) -> Arc<PackageIndex> {
+        let parsed = crate::parser::parse(source);
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        let mut pkg = (*package(name, &[])).clone();
+        pkg.root = crate::index::harvest_tree(&parsed.cst);
+        pkg.root.name = name.into();
+        Arc::new(pkg)
     }
 
     fn module_package(
@@ -1237,6 +1356,239 @@ mod tests {
     }
 
     #[test]
+    fn export_lookup_sees_names_masked_by_constructor_bindings() {
+        let lib = library(&[
+            package("Base", &["BaseType"]),
+            package("Core", &["CoreType"]),
+            module_package("A", &[], vec![submodule("B", &["UsedType"])]),
+        ]);
+        let src = "using A.B\nBaseType(x) = x\nCoreType(x) = x\nUsedType(x) = x\n\
+                   helper(x) = x\nf(::BaseType, ::CoreType, ::UsedType, ::helper) = 1\n";
+        let model = model_of(src);
+        let resolver = Resolver::new(&model, &lib);
+        for (name, module) in [
+            ("BaseType", Some("Base")),
+            ("CoreType", Some("Core")),
+            ("UsedType", Some("A.B")),
+            ("helper", None),
+        ] {
+            let offset = after(src, name);
+            assert!(matches!(
+                resolver.resolve(name, offset, Namespace::Value),
+                Resolution::Binding(_)
+            ));
+            assert_eq!(
+                resolver.export_module_providing(name, offset, Namespace::Value),
+                module.map(SmolStr::new),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn export_lookup_respects_using_scope() {
+        let lib = library(&[package("A", &["Helper"])]);
+        let src = "module M\nusing A\nf(::Helper) = 1\nend\ng(::Helper) = 2\n";
+        let model = model_of(src);
+        let resolver = Resolver::new(&model, &lib);
+        assert_eq!(
+            resolver.export_module_providing("Helper", after(src, "f(::Helper"), Namespace::Value),
+            Some(SmolStr::new("A"))
+        );
+        assert_eq!(
+            resolver.export_module_providing("Helper", after(src, "g(::Helper"), Namespace::Value),
+            None
+        );
+    }
+
+    #[test]
+    fn workspace_constructor_groups_preserve_imported_type_identity() {
+        for declaration in ["abstract type Animal end", "const Animal = Vector{Int}"] {
+            for (provider, load, module_path, nested) in [
+                ("Creatures", "using Creatures\n", "Creatures", false),
+                (
+                    "Creatures",
+                    "using Creatures.Types\n",
+                    "Creatures.Types",
+                    true,
+                ),
+                ("Base", "", "Base", false),
+                ("Core", "", "Core", false),
+            ] {
+                let source = format!("export Animal\n{declaration}\n");
+                let source = if nested {
+                    format!("module Types\n{source}end\n")
+                } else {
+                    source
+                };
+                let mut lib = library(&[package("Base", &[]), package("Core", &[])]);
+                lib.insert(provider.into(), harvested_package(provider, &source));
+                let workspace = harvested_package(
+                    "MyPkg",
+                    &format!("{load}for op in (:Animal,)\n    @eval ($op)(x::Int) = x\nend\n"),
+                );
+                let src = "struct Dog <: Animal end\n";
+                let model = model_of(src);
+                let offset = after(src, "Animal");
+                let resolver =
+                    Resolver::new(&model, &lib).with_workspace(Some((workspace, Vec::new())));
+                let expected = if load.is_empty() {
+                    Resolution::System {
+                        module: module_path.into(),
+                        name: "Animal".into(),
+                    }
+                } else {
+                    Resolution::Using {
+                        module: module_path.into(),
+                        name: "Animal".into(),
+                    }
+                };
+                assert_eq!(
+                    resolver.resolve("Animal", offset, Namespace::Value),
+                    expected,
+                    "{provider}, {load}, {declaration}"
+                );
+                let candidate = resolver
+                    .visible(offset, Namespace::Value)
+                    .into_iter()
+                    .find(|candidate| candidate.name == "Animal")
+                    .unwrap();
+                let expected = if load.is_empty() {
+                    Source::System {
+                        module: module_path.into(),
+                    }
+                } else {
+                    Source::Using {
+                        module: module_path.rsplit('.').next().unwrap().into(),
+                    }
+                };
+                assert_eq!(candidate.source, expected);
+                assert!(resolver.workspace_symbol_at(offset).is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn workspace_declarations_still_mask_exported_constructor_names() {
+        for (exported, local) in [
+            ("abstract type Animal end", "struct Animal end"),
+            ("abstract type Animal end", "const Animal = Vector{Int}"),
+            ("Animal(x) = x", ""),
+        ] {
+            let lib = library(&[harvested_package(
+                "Creatures",
+                &format!("export Animal\n{exported}\n"),
+            )]);
+            let workspace = harvested_package(
+                "MyPkg",
+                &format!(
+                    "using Creatures\n{local}\n\
+                     for op in (:Animal,)\n    @eval ($op)(x::Int) = x\nend\n"
+                ),
+            );
+            let src = "Animal(1)";
+            let model = model_of(src);
+            let offset = after(src, "Animal");
+            let resolver =
+                Resolver::new(&model, &lib).with_workspace(Some((workspace, Vec::new())));
+            assert_eq!(
+                resolver.resolve("Animal", offset, Namespace::Value),
+                Resolution::Workspace {
+                    module: Vec::new(),
+                    name: "Animal".into(),
+                },
+                "{exported}, {local}"
+            );
+            let candidates: Vec<_> = resolver
+                .visible(offset, Namespace::Value)
+                .into_iter()
+                .filter(|candidate| candidate.name == "Animal")
+                .collect();
+            assert_eq!(candidates.len(), 1);
+            assert_eq!(
+                candidates[0].source,
+                Source::Workspace {
+                    module: "MyPkg".into()
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_functions_shadow_exported_types_and_constants() {
+        for exported in ["abstract type Animal end", "const Animal = 1"] {
+            for declaration in ["Animal(x) = x", "function Animal end"] {
+                for generated in [
+                    "",
+                    "for op in (:Animal,)\n    @eval ($op)(x::Int) = x\nend\n",
+                ] {
+                    let lib = library(&[harvested_package(
+                        "Creatures",
+                        &format!("export Animal\n{exported}\n"),
+                    )]);
+                    let source = format!("using Creatures\n{declaration}\n{generated}Animal(1)\n");
+                    let workspace = harvested_package("MyPkg", &source);
+                    let caller = "Animal(1)";
+                    for src in [&source[..], caller] {
+                        let model = model_of(src);
+                        let resolver = Resolver::new(&model, &lib)
+                            .with_workspace(Some((Arc::clone(&workspace), Vec::new())));
+                        let offset = after(src, "Animal");
+                        if src == caller {
+                            assert_eq!(
+                                resolver.resolve("Animal", offset, Namespace::Value),
+                                Resolution::Workspace {
+                                    module: Vec::new(),
+                                    name: "Animal".into(),
+                                },
+                                "{exported}, {declaration}, {generated}"
+                            );
+                            let candidate = resolver
+                                .visible(offset, Namespace::Value)
+                                .into_iter()
+                                .find(|candidate| candidate.name == "Animal")
+                                .unwrap();
+                            assert!(matches!(candidate.source, Source::Workspace { .. }));
+                        }
+                        let symbol = resolver.workspace_symbol_at(offset).unwrap();
+                        assert_eq!(symbol.name, "Animal");
+                        let occurrences = resolver.workspace_occurrences();
+                        let occurrences = &occurrences[&symbol];
+                        assert!(occurrences.iter().any(|occ| !occ.is_def));
+                        assert_eq!(occurrences.iter().any(|occ| occ.is_def), src != caller);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sibling_nested_using_keeps_the_provider_path() {
+        let lib = library(&[harvested_package(
+            "Creatures",
+            "module Types\nexport Animal\nabstract type Animal end\nend\n",
+        )]);
+        for constructor in [
+            "",
+            "for op in (:Animal,)\n    @eval ($op)(x::Int) = x\nend\n",
+        ] {
+            let workspace =
+                harvested_package("MyPkg", &format!("using Creatures.Types\n{constructor}"));
+            let src = "Animal(1)";
+            let model = model_of(src);
+            let resolver =
+                Resolver::new(&model, &lib).with_workspace(Some((workspace, Vec::new())));
+            assert_eq!(
+                resolver.resolve("Animal", after(src, "Animal"), Namespace::Value),
+                Resolution::Using {
+                    module: "Creatures.Types".into(),
+                    name: "Animal".into(),
+                }
+            );
+        }
+    }
+
+    #[test]
     fn module_binds_its_own_name_but_not_an_ancestors() {
         // Julia scopes a module's own name inside it (`Outer` within module
         // `Outer`), but a nested submodule does not see its parent's name. The
@@ -1361,7 +1713,7 @@ mod tests {
         assert_eq!(
             resolve(src, "inner", &lib),
             Resolution::Using {
-                module: SmolStr::new("B"),
+                module: SmolStr::new("A.B"),
                 name: SmolStr::new("inner"),
             }
         );

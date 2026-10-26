@@ -14,7 +14,10 @@
 //!   [`BindingKind::Function`] — a `function g … end` or a short-form
 //!   `g(x) = …`;
 //! - a top-level name of the enclosing workspace package whose index holds a
-//!   function group and nothing else.
+//!   function group with an ordinary declaration and nothing else.
+//!
+//! A generated-only method group leaves constructor identity open: the
+//! harvester may have recovered methods while missing their type declaration.
 //!
 //! Everything else stays silent. A Base/Core name is known only by the export
 //! snapshot's names, which carry no kinds (`f(x::sin)` is a miss); an
@@ -24,8 +27,10 @@
 //!
 //! The one shape that would otherwise misfire is a *constructor*: an outer
 //! `Foo(x::Int) = …` binds `Foo` as a function even though `Foo` is a type, so
-//! any same-named type, `const`, or module — in this file or anywhere in the
-//! workspace package — withholds the finding. The whole-file bail-outs are the
+//! any same-named type, `const`, module, or import — in this file or anywhere in
+//! the workspace package — withholds the finding. A whole-module `using` or
+//! implicit Base/Core export also leaves constructor identity open, even when
+//! a function group masks that resolution tier. The whole-file bail-outs are the
 //! shared ones ([`RuleContext::trusts_resolution`]): `eval`, an unfollowable
 //! `include`, an unresolvable `using`. A macro call or quoted code may be
 //! reshaped before it runs, so annotations inside one are skipped.
@@ -124,10 +129,20 @@ impl Rule for InvalidTypeDeclaration {
                 .as_ref()
                 .and_then(|resolution| resolution.workspace.as_ref())
                 .and_then(|(pkg, _)| module_at(&pkg.root, &module))
-                .is_some_and(|module| module.functions.iter().any(|g| g.name == name.as_str())),
+                .is_some_and(|module| {
+                    module.functions.iter().any(|group| {
+                        group.name == name.as_str()
+                            && group.methods.iter().any(|method| !method.is_generated)
+                    })
+                }),
             _ => false,
         };
-        if !is_function || self.names_a_type_too(text, ctx) {
+        if !is_function
+            || self.names_a_type_too(text, ctx)
+            || resolver
+                .export_module_providing(text, range.start(), Namespace::Value)
+                .is_some()
+        {
             return;
         }
 
@@ -143,8 +158,8 @@ impl Rule for InvalidTypeDeclaration {
 
 impl InvalidTypeDeclaration {
     /// Whether anything the closed world can see also gives `name` a
-    /// *non-function* meaning: a type, a `const`, or a module, in this file or
-    /// anywhere in the enclosing workspace package. The constructor guard —
+    /// *non-function* meaning: a type, a `const`, a module, or an import, in this
+    /// file or anywhere in the enclosing workspace package. The constructor guard —
     /// `Foo(x::Int) = …` binds `Foo` as a function while `Foo` is a type — and
     /// the general "the model saw two definitions of this name" bail-out.
     ///
@@ -171,12 +186,14 @@ impl InvalidTypeDeclaration {
     }
 }
 
-/// Whether `module` or any submodule defines `name` as something other than a
-/// function: a type, a `const`, or a nested module.
+/// Whether `module` or any submodule gives `name` a possible non-function
+/// meaning. An import may name an external type whose constructors appear in
+/// the function groups without a local type definition.
 fn non_function_definition(module: &ModuleIndex, name: &str) -> bool {
     module.types.iter().any(|t| t.name == name)
         || module.consts.iter().any(|c| c.name == name)
         || module.submodules.iter().any(|m| m.name == name)
+        || module.imported_names.iter().any(|import| import == name)
         || module
             .submodules
             .iter()
@@ -223,6 +240,7 @@ mod tests {
                             where_clauses: Vec::new(),
                             return_type: None,
                             has_body: true,
+                            is_generated: false,
                             doc: None,
                             loc: loc(),
                         }],

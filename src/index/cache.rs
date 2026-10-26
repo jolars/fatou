@@ -30,7 +30,7 @@ use super::model::PackageIndex;
 /// entries an older build wrote unreadable or wrong (a new `postcard` layout, a
 /// [`PackageIndex`] field change). Recorded in every entry header and baked into
 /// the cache path, so mismatched entries are ignored rather than mis-decoded.
-const CACHE_FORMAT: u32 = 6;
+const CACHE_FORMAT: u32 = 8;
 
 /// The build identity stamped into every entry: `fatou@<version>`. Two builds at
 /// the same [`CACHE_FORMAT`] can still harvest different shapes (the harvester
@@ -278,6 +278,22 @@ mod tests {
         index.root.functions = crate::index::harvest_tree(&parsed.cst).functions;
         cache.store("Foo", "abc123", &index);
         assert_eq!(cache.load("Foo", "abc123"), Some(index));
+    }
+
+    #[test]
+    fn generated_method_provenance_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = IndexCache::open_at(dir.path());
+        let mut index = sample_index("Foo");
+        let parsed =
+            crate::parser::parse("f(x, y) = x\nfor op in (:f,)\n@eval ($op)(x) = x\nend\n");
+        index.root.functions = crate::index::harvest_tree(&parsed.cst).functions;
+        cache.store("Foo", "abc123", &index);
+        let restored = cache.load("Foo", "abc123").unwrap();
+        let methods = &restored.root.functions[0].methods;
+        assert!(!methods[0].is_generated);
+        assert!(methods[1].is_generated);
+        assert_eq!(restored, index);
     }
 
     #[test]
