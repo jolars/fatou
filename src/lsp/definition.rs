@@ -45,9 +45,9 @@ use crate::index::{ModuleIndex, PackageIndex};
 use crate::parser::parse;
 use crate::resolve::{
     ModulePath, Namespace, OccurrenceKey, PackageSource, Resolution, Resolver, module_at,
-    resolve_submodule,
+    resolve_module, resolve_submodule,
 };
-use crate::semantic::{Access, BindingId, BindingKind, LoadKind, QualifiedRead, SemanticModel};
+use crate::semantic::{Access, BindingId, BindingKind, QualifiedRead, SemanticModel};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 use super::cross_file;
@@ -514,7 +514,7 @@ fn free_read_locations<P: PackageSource>(
             site_locations(sites, encoding)
         }
         Resolution::Using { module, name } => {
-            library_from_using(model, packages, &module, &name, encoding)
+            library_from_using(packages, &module, &name, encoding)
         }
         // A sibling file's module-level import: navigation to the `import` site
         // is deferred, so no definition location.
@@ -526,67 +526,59 @@ fn free_read_locations<P: PackageSource>(
 }
 
 /// Find the module a whole-module `using` brings in and locate `name`'s
-/// definition sites in it. `module` is the clause's display name (its last
-/// component): a plain `using LinearAlgebra` names the package directly; a
-/// `using A.B` needs the clause walked from its package root. Mirrors hover's
-/// `library_from_using`.
+/// definition sites in it. `module` is the full path returned by the resolver.
+/// `sites_for` selects the definition kinds a consumer needs without repeating
+/// the module lookup.
 fn using_def_sites<P: PackageSource>(
-    model: &SemanticModel,
     packages: &P,
     module: &str,
     name: &str,
+    sites_for: impl Fn(&P, &PackageIndex, &ModuleIndex, &str) -> Vec<(PathBuf, Span)>,
 ) -> Vec<(PathBuf, Span)> {
-    if let Some(pkg) = packages.package(module) {
-        let sites = library_def_sites(packages, &pkg, &pkg.root, name);
-        if !sites.is_empty() {
-            return sites;
-        }
-    }
-    for load in model.module_loads() {
-        if load.kind != LoadKind::Using || load.items.is_some() {
-            continue;
-        }
-        let comps = &load.path.components;
-        if comps.last().map(|c| c.as_str()) != Some(module) {
-            continue;
-        }
-        let Some(first) = comps.first() else { continue };
-        let Some(pkg) = packages.package(first.as_str()) else {
-            continue;
-        };
-        let rest: Vec<&str> = comps[1..].iter().map(|c| c.as_str()).collect();
-        if let Some(m) = resolve_submodule(&pkg.root, &rest) {
-            let sites = library_def_sites(packages, &pkg, m, name);
-            if !sites.is_empty() {
-                return sites;
-            }
-        }
-    }
-    Vec::new()
+    let Some(target) = resolve_module(packages, module) else {
+        return Vec::new();
+    };
+    sites_for(packages, &target.pkg, &target, name)
 }
 
 /// [`using_def_sites`]' single representative site (its first method). Shared
 /// with call hierarchy, which wants one item per symbol.
 pub(crate) fn using_def_site<P: PackageSource>(
-    model: &SemanticModel,
     packages: &P,
     module: &str,
     name: &str,
 ) -> Option<(PathBuf, Span)> {
-    using_def_sites(model, packages, module, name)
+    using_def_sites(packages, module, name, library_def_sites)
         .into_iter()
         .next()
 }
 
+/// The type declaration exported by a `using`, excluding constructor methods.
+pub(crate) fn using_type_def_site<P: PackageSource>(
+    packages: &P,
+    module: &str,
+    name: &str,
+) -> Option<(PathBuf, Span)> {
+    using_def_sites(packages, module, name, |packages, pkg, module, name| {
+        library_type_def_site(packages, pkg, module, name)
+            .into_iter()
+            .collect()
+    })
+    .into_iter()
+    .next()
+}
+
 /// [`using_def_sites`] materialized into [`Location`]s, for go-to-definition.
 fn library_from_using<P: PackageSource>(
-    model: &SemanticModel,
     packages: &P,
     module: &str,
     name: &str,
     encoding: PositionEncoding,
 ) -> Vec<Location> {
-    site_locations(using_def_sites(model, packages, module, name), encoding)
+    site_locations(
+        using_def_sites(packages, module, name, library_def_sites),
+        encoding,
+    )
 }
 
 /// The on-disk definition sites of a library symbol: its [`DefLocation`]s in
@@ -613,8 +605,8 @@ fn library_def_sites<P: PackageSource>(
 }
 
 /// [`library_def_sites`]' single representative site (a function's first
-/// method). Shared with call and type hierarchy, which want one item per
-/// symbol and re-derive the definition's shape from the file.
+/// method). Call hierarchy wants one item per symbol and re-derives the
+/// definition's shape from the file.
 pub(crate) fn library_def_site<P: PackageSource>(
     packages: &P,
     pkg: &PackageIndex,
@@ -624,6 +616,31 @@ pub(crate) fn library_def_site<P: PackageSource>(
     library_def_sites(packages, pkg, module, name)
         .into_iter()
         .next()
+}
+
+/// A library type's declaration or constant alias. Constructor groups can share
+/// its name and point into generated templates, so they cannot supply type
+/// hierarchy sites.
+pub(crate) fn library_type_def_site<P: PackageSource>(
+    packages: &P,
+    pkg: &PackageIndex,
+    module: &ModuleIndex,
+    name: &str,
+) -> Option<(PathBuf, Span)> {
+    let loc = module
+        .types
+        .iter()
+        .find(|ty| ty.name == name)
+        .map(|ty| &ty.loc)
+        .or_else(|| {
+            module
+                .consts
+                .iter()
+                .find(|c| c.name == name)
+                .map(|c| &c.loc)
+        })?;
+    let root = packages.package_root(&pkg.name)?;
+    Some((root.join(&loc.file), loc.range))
 }
 
 /// Turn a library symbol into [`Location`]s in depot source files: find its
@@ -680,7 +697,7 @@ pub(super) fn site_locations(
 
 /// Look `name` up among `module`'s defined symbols and return its definition
 /// locations. Mirrors the search order of hover's `render_library_symbol`
-/// (macros for an `@` name, then functions, types, consts). A function group
+/// (macros for an `@` name, then types, consts, functions). A function group
 /// contributes every method; the other kinds have a single site.
 fn library_def_locations<'m>(module: &'m ModuleIndex, name: &str) -> Vec<&'m DefLocation> {
     if name.starts_with('@') {
@@ -691,6 +708,14 @@ fn library_def_locations<'m>(module: &'m ModuleIndex, name: &str) -> Vec<&'m Def
             .map(|m| &m.loc)
             .into_iter()
             .collect();
+    }
+    // Constructor groups share the type's name, but the declaration owns its
+    // definition site even when its constructors come from generated templates.
+    if let Some(t) = module.types.iter().find(|t| t.name == name) {
+        return vec![&t.loc];
+    }
+    if let Some(c) = module.consts.iter().find(|c| c.name == name) {
+        return vec![&c.loc];
     }
     // Prefer the bare group: a module can also hold a qualified-extension
     // group of the same name (`Base.show` next to its own `show`), whose
@@ -704,12 +729,6 @@ fn library_def_locations<'m>(module: &'m ModuleIndex, name: &str) -> Vec<&'m Def
         .or_else(|| module.functions.iter().find(|f| f.name == name))
     {
         return f.methods.iter().map(|m| &m.loc).collect();
-    }
-    if let Some(t) = module.types.iter().find(|t| t.name == name) {
-        return vec![&t.loc];
-    }
-    if let Some(c) = module.consts.iter().find(|c| c.name == name) {
-        return vec![&c.loc];
     }
     Vec::new()
 }
@@ -1046,6 +1065,61 @@ mod tests {
     }
 
     #[test]
+    fn sibling_nested_using_navigates_to_the_type_declaration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dep = tmp.path().join("Creatures");
+        let workspace = tmp.path().join("MyPkg");
+        fs::create_dir_all(dep.join("src")).unwrap();
+        fs::create_dir_all(workspace.join("src")).unwrap();
+        let entry = dep.join("src/Creatures.jl");
+        fs::write(
+            &entry,
+            "module Creatures\nmodule Types\nexport Animal\nabstract type Animal end\nend\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            workspace.join("src/MyPkg.jl"),
+            "module MyPkg\nusing Creatures.Types\ninclude(\"constructors.jl\")\ninclude(\"use.jl\")\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            workspace.join("src/constructors.jl"),
+            "for op in (:Animal,)\n    @eval ($op)(x::Int) = x\nend\n",
+        )
+        .unwrap();
+        fs::write(workspace.join("src/use.jl"), "Animal(1)\n").unwrap();
+        let lib = TestLib {
+            packages: BTreeMap::from([(
+                "Creatures".into(),
+                Arc::new(harvest_package_named(&dep, "Creatures")),
+            )]),
+            roots: BTreeMap::from([
+                ("Creatures".into(), dep),
+                ("MyPkg".into(), workspace.clone()),
+            ]),
+            workspace: Some((
+                Arc::new(harvest_package_named(&workspace, "MyPkg")),
+                Vec::new(),
+            )),
+        };
+        let uri = from_path(&workspace.join("src/use.jl")).unwrap();
+        for marked in ["Ani|mal(1)", "struct Dog <: Ani|mal end"] {
+            let offset = marked.find('|').unwrap();
+            let source = marked.replacen('|', "", 1);
+            let position =
+                LineIndex::new(&source).byte_to_position(offset, PositionEncoding::Utf16);
+            let locations =
+                compute_definition(&uri, &source, position, PositionEncoding::Utf16, &lib);
+            assert_eq!(locations.len(), 1, "{marked}: {locations:?}");
+            assert_eq!(to_path(&locations[0].uri), Some(entry.clone()));
+            assert_eq!(
+                locations[0].range,
+                Range::new(Position::new(3, 14), Position::new(3, 20))
+            );
+        }
+    }
+
+    #[test]
     fn workspace_tier_is_off_without_membership() {
         // The same package, but no workspace module registered (the file is not
         // a member): `bar` stays unresolved.
@@ -1132,6 +1206,100 @@ mod tests {
         assert_eq!(locs.len(), 2, "{locs:?}");
         assert_eq!(locs[0].range.start, Position::new(1, 4));
         assert_eq!(locs[1].range.start, Position::new(2, 4));
+    }
+
+    #[test]
+    fn library_type_definition_precedes_constructors() {
+        for constructor in [
+            "for op in (:Animal,)\n    @eval ($op)(x::Int) = x\nend\n",
+            "Animal(x::Int) = x\n",
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let entry = tmp.path().join("src").join("Creatures.jl");
+            fs::create_dir_all(entry.parent().unwrap()).unwrap();
+            fs::write(
+                &entry,
+                format!(
+                    "module Creatures\nexport Animal\nabstract type Animal end\n{constructor}end\n"
+                ),
+            )
+            .unwrap();
+            let pkg = harvest_package_named(tmp.path(), "Creatures");
+            assert!(pkg.diagnostics.is_empty(), "{:?}", pkg.diagnostics);
+            let lib = TestLib {
+                packages: BTreeMap::from([("Creatures".to_string(), Arc::new(pkg))]),
+                roots: BTreeMap::from([("Creatures".to_string(), tmp.path().to_path_buf())]),
+                ..Default::default()
+            };
+            let uri = from_path(&tmp.path().join("consumer.jl")).unwrap();
+            for marked in [
+                "using Creatures\nx::Ani|mal",
+                "x::Creatures.Ani|mal",
+                "using Creatures\nAni|mal(1)",
+            ] {
+                let offset = marked.find('|').unwrap();
+                let src = marked.replacen('|', "", 1);
+                let position =
+                    LineIndex::new(&src).byte_to_position(offset, PositionEncoding::Utf16);
+                let locations =
+                    compute_definition(&uri, &src, position, PositionEncoding::Utf16, &lib);
+                assert_eq!(
+                    locations.len(),
+                    1,
+                    "{marked}, {constructor}: {locations:#?}"
+                );
+                assert_eq!(to_path(&locations[0].uri), Some(entry.clone()));
+                assert_eq!(
+                    locations[0].range,
+                    Range::new(Position::new(2, 14), Position::new(2, 20))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn library_alias_definition_precedes_generated_constructors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let entry = tmp.path().join("src").join("Aliases.jl");
+        fs::create_dir_all(entry.parent().unwrap()).unwrap();
+        fs::write(
+            &entry,
+            concat!(
+                "module Aliases\n",
+                "export Alias\n",
+                "\"An integer vector.\"\n",
+                "const Alias = Vector{Int}\n",
+                "for op in (:Alias,)\n",
+                "    @eval ($op)(x::Int) = x\n",
+                "end\nend\n",
+            ),
+        )
+        .unwrap();
+        let pkg = harvest_package_named(tmp.path(), "Aliases");
+        assert!(pkg.diagnostics.is_empty(), "{:?}", pkg.diagnostics);
+        assert_eq!(pkg.root.functions.len(), 1);
+        let lib = TestLib {
+            packages: BTreeMap::from([("Aliases".to_string(), Arc::new(pkg))]),
+            roots: BTreeMap::from([("Aliases".to_string(), tmp.path().to_path_buf())]),
+            ..Default::default()
+        };
+        let uri = from_path(&tmp.path().join("consumer.jl")).unwrap();
+        for marked in [
+            "using Aliases\nx::Ali|as",
+            "x::Aliases.Ali|as",
+            "using Aliases\nAli|as(1)",
+        ] {
+            let offset = marked.find('|').unwrap();
+            let src = marked.replacen('|', "", 1);
+            let position = LineIndex::new(&src).byte_to_position(offset, PositionEncoding::Utf16);
+            let locations = compute_definition(&uri, &src, position, PositionEncoding::Utf16, &lib);
+            assert_eq!(locations.len(), 1, "{marked}: {locations:#?}");
+            assert_eq!(to_path(&locations[0].uri), Some(entry.clone()));
+            assert_eq!(
+                locations[0].range,
+                Range::new(Position::new(3, 6), Position::new(3, 11))
+            );
+        }
     }
 
     #[test]

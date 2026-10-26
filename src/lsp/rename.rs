@@ -19,6 +19,8 @@
 //! renameable and `rename` yields no edit. Macro definitions rename by their
 //! bare name: the occurrence ranges cover the identifier after the `@`, so the
 //! sigil is preserved automatically, cross-file as well as intra-file.
+//! Functions with generated methods are not renameable until the reference
+//! index can update their generated declarations as well as their uses.
 
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
@@ -29,6 +31,7 @@ use rowan::{TextRange, TextSize};
 
 use crate::incremental::Analysis;
 use crate::parser::parse;
+use crate::resolve::Resolver;
 use crate::semantic::{BindingId, SemanticModel};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
@@ -92,17 +95,22 @@ pub(crate) fn prepare_rename_via_db(
             return None;
         }
         let model = snapshot.semantic_model(file);
+        let resolver =
+            Resolver::new(model, snapshot).with_workspace(snapshot.workspace_member(path));
         // A workspace top-level symbol is renameable even when it is a free read
         // here (defined in a sibling file), where the intra-file `prepare_for`
         // would decline it. Offer the identifier under the cursor.
-        if cross_file::workspace_symbol_at(snapshot, path, model, offset).is_some()
-            && let Some(range) = identifier_range_at(model, offset)
-        {
-            return Some(Some(PrepareRenameResponse::Range(to_range(
-                range,
-                &line_index,
-                encoding,
-            ))));
+        if let Some(symbol) = resolver.workspace_symbol_at(offset) {
+            if !resolver.can_rename_workspace_symbol(&symbol) {
+                return Some(None);
+            }
+            if let Some(range) = identifier_range_at(model, offset) {
+                return Some(Some(PrepareRenameResponse::Range(to_range(
+                    range,
+                    &line_index,
+                    encoding,
+                ))));
+            }
         }
         Some(prepare_for(model, &line_index, offset, encoding))
     }));
@@ -133,10 +141,15 @@ pub(crate) fn rename_via_db(
             return None;
         }
         let model = snapshot.semantic_model(file);
+        let resolver =
+            Resolver::new(model, snapshot).with_workspace(snapshot.workspace_member(path));
         // A workspace top-level symbol renames across every member file; anything
         // else stays intra-file. A cross-file edit that touches at least this
         // file wins; an empty one (member set not seeded yet) falls through.
-        if let Some(symbol) = cross_file::workspace_symbol_at(snapshot, path, model, offset) {
+        if let Some(symbol) = resolver.workspace_symbol_at(offset) {
+            if !resolver.can_rename_workspace_symbol(&symbol) {
+                return Some(None);
+            }
             let edit = cross_file_rename(snapshot, &symbol, new_name, encoding);
             if edit
                 .changes
@@ -505,6 +518,71 @@ mod tests {
                 assert_eq!(range.end, Position::new(0, 16));
             }
             other => panic!("expected a plain range, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn workspace_rename_rejects_generated_declarations() {
+        use crate::index::harvest_tree;
+        use crate::lsp::cross_file::test_support::{member_path, workspace_db};
+        use crate::text::PositionEncoding::Utf16;
+        use std::sync::Arc;
+
+        for ordinary in ["", "greet(x, y) = x\n", "function greet end\n"] {
+            let a_text =
+                format!("for op in (:greet,)\n@eval ($op)(x) = x\nend\n{ordinary}greet(1)\n");
+            let b_text = "callit() = greet(2)\nlocalit(greet) = greet(2)\n";
+            let (mut db, _) = workspace_db(&[], &[("a.jl", &a_text), ("b.jl", b_text)]);
+            let parsed = parse(&a_text);
+            assert!(parsed.diagnostics.is_empty());
+            let mut pkg = (*db.library_package("MyPkg").unwrap()).clone();
+            pkg.root.functions = harvest_tree(&parsed.cst).functions;
+            db.set_package_index("MyPkg", Arc::new(pkg));
+            let snapshot = db.snapshot();
+
+            let mut sites = vec![
+                ("a.jl", a_text.as_str(), a_text.rfind("greet(1)").unwrap()),
+                ("b.jl", b_text, b_text.find("greet").unwrap()),
+            ];
+            if !ordinary.is_empty() {
+                sites.push((
+                    "a.jl",
+                    &a_text,
+                    a_text.find(ordinary).unwrap() + ordinary.find("greet").unwrap(),
+                ));
+            }
+            for (file, source, offset) in sites {
+                let path = member_path(file);
+                let uri = crate::lsp::uri::from_path(&path).unwrap();
+                let text = TextBuffer::new(source.to_string());
+                let position = text.line_index().byte_to_position(offset, Utf16);
+                assert!(
+                    prepare_rename_via_db(&snapshot, &path, &text, position, Utf16).is_none(),
+                    "generated declaration must block prepareRename: {a_text}"
+                );
+                assert!(
+                    rename_via_db(&snapshot, &uri, &path, &text, position, "hello", Utf16)
+                        .unwrap()
+                        .is_none(),
+                    "generated declaration must block rename: {a_text}"
+                );
+            }
+
+            let path = member_path("b.jl");
+            let uri = crate::lsp::uri::from_path(&path).unwrap();
+            let text = TextBuffer::new(b_text.to_string());
+            let position = text
+                .line_index()
+                .byte_to_position(b_text.rfind("greet").unwrap(), Utf16);
+            assert!(prepare_rename_via_db(&snapshot, &path, &text, position, Utf16).is_some());
+            let edit = rename_via_db(&snapshot, &uri, &path, &text, position, "hello", Utf16)
+                .unwrap()
+                .expect("the shadowing parameter is still renameable");
+            let changes = edit.changes.unwrap();
+            assert_eq!(changes.len(), 1);
+            let edits = &changes[&uri];
+            assert_eq!(edits.len(), 2);
+            assert!(edits.iter().all(|edit| edit.range.start.line == 1));
         }
     }
 }

@@ -6224,6 +6224,21 @@ fn invalid_type_declaration_ignores_a_constructor_of_a_same_named_type() {
 }
 
 #[test]
+fn invalid_type_declaration_ignores_implicitly_imported_constructors() {
+    for using in ["", "using Base\n"] {
+        let msgs = findings(
+            "invalid-type-declaration",
+            &format!(
+                "{using}struct MyType end\nInt(x::MyType) = 1\nf(y::Int) = y\n\
+                 helper(x) = x\ng(y::helper) = y\n"
+            ),
+        );
+        assert_eq!(msgs.len(), 1, "{using:?}: {msgs:?}");
+        assert!(msgs[0].contains("`helper`"), "{msgs:?}");
+    }
+}
+
+#[test]
 fn invalid_type_declaration_ignores_imported_and_library_names() {
     // An import binds a name whose kind this file cannot see, and a Base name
     // is only known by its export list — both are deliberate misses.

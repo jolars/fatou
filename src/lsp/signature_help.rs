@@ -32,7 +32,9 @@ use crate::ast::{AstNode, AstToken, CallExpr, Expr, HasArgList, KeywordArg};
 use crate::incremental::Analysis;
 use crate::index::{FunctionGroup, Method, ModuleIndex, Param};
 use crate::parser::parse;
-use crate::resolve::{Namespace, PackageSource, Resolution, Resolver, resolve_submodule};
+use crate::resolve::{
+    Namespace, PackageSource, Resolution, Resolver, resolve_module, resolve_submodule,
+};
 use crate::semantic::{BindingKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
@@ -246,8 +248,8 @@ fn resolve_callee<P: PackageSource>(
             library_callee(&pkg.root, &name)
         }
         Resolution::Using { module, name } => {
-            let pkg = packages.package(&module)?;
-            library_callee(&pkg.root, &name)
+            let target = resolve_module(packages, &module)?;
+            library_callee(&target, &name)
         }
         // This resolver has no workspace context.
         Resolution::Workspace { .. } => None,
@@ -301,6 +303,7 @@ fn local_callee(root: &SyntaxNode, def_start: TextSize, name: &str) -> Option<Ca
         where_clauses: Vec::new(),
         return_type: None,
         has_body: true,
+        is_generated: false,
         doc: None,
         loc: crate::index::model::DefLocation {
             file: Default::default(),
@@ -512,6 +515,7 @@ mod tests {
             where_clauses: Vec::new(),
             return_type: None,
             has_body: true,
+            is_generated: false,
             doc: None,
             loc: loc(),
         }

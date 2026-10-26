@@ -27,9 +27,10 @@ use crate::incremental::Analysis;
 use crate::index::{FunctionGroup, ModuleIndex, PackageIndex};
 use crate::parser::parse;
 use crate::resolve::{
-    ModulePath, Namespace, PackageSource, Resolution, Resolver, module_at, resolve_submodule,
+    ModulePath, Namespace, PackageSource, Resolution, Resolver, module_at, resolve_module,
+    resolve_submodule,
 };
-use crate::semantic::{BindingId, BindingKind, LoadKind, SemanticModel};
+use crate::semantic::{BindingId, BindingKind, SemanticModel};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 use super::render::{binding_detail, render_method, render_param, type_detail};
@@ -228,7 +229,10 @@ fn render_free_read<P: PackageSource>(
             let pkg = packages.package(&module)?;
             render_library_symbol(&pkg.root, &name)
         }
-        Resolution::Using { module, name } => library_from_using(model, packages, &module, &name),
+        Resolution::Using { module, name } => {
+            let target = resolve_module(packages, &module)?;
+            render_library_symbol(&target, &name)
+        }
         // A sibling file's module-level import: its source module is not
         // recorded, so nothing to render.
         Resolution::Script { .. }
@@ -236,43 +240,6 @@ fn render_free_read<P: PackageSource>(
         | Resolution::WorkspaceImport { .. }
         | Resolution::Unresolved => None,
     }
-}
-
-/// Find the module a whole-module `using` brings in and render `name` from it.
-/// `module` is the clause's display name (its last component): a plain
-/// `using LinearAlgebra` names the package directly; a `using A.B` needs the
-/// clause walked from its package root.
-fn library_from_using<P: PackageSource>(
-    model: &SemanticModel,
-    packages: &P,
-    module: &str,
-    name: &str,
-) -> Option<String> {
-    if let Some(pkg) = packages.package(module)
-        && let Some(rendered) = render_library_symbol(&pkg.root, name)
-    {
-        return Some(rendered);
-    }
-    for load in model.module_loads() {
-        if load.kind != LoadKind::Using || load.items.is_some() {
-            continue;
-        }
-        let comps = &load.path.components;
-        if comps.last().map(|c| c.as_str()) != Some(module) {
-            continue;
-        }
-        let Some(first) = comps.first() else { continue };
-        let Some(pkg) = packages.package(first.as_str()) else {
-            continue;
-        };
-        let rest: Vec<&str> = comps[1..].iter().map(|c| c.as_str()).collect();
-        if let Some(m) = resolve_submodule(&pkg.root, &rest)
-            && let Some(rendered) = render_library_symbol(m, name)
-        {
-            return Some(rendered);
-        }
-    }
-    None
 }
 
 /// Render a qualified read (`Foo.bar`): the target module's symbol, with
@@ -306,7 +273,6 @@ fn render_qualified_symbol<P: PackageSource>(
         return render_library_symbol(module?, name);
     }
     if let Some(m) = module
-        && !m.functions.iter().any(|f| f.name == name)
         && (m.types.iter().any(|t| t.name == name) || m.consts.iter().any(|c| c.name == name))
     {
         return render_library_symbol(m, name);
@@ -345,7 +311,7 @@ fn library_function_group<'m>(module: &'m ModuleIndex, name: &str) -> Option<&'m
 }
 
 /// Look `name` up among `module`'s defined symbols (macros for an `@` name, then
-/// functions, types, consts) and render its signature(s) and docstring. Mirrors
+/// types, consts, functions) and render its signature(s) and docstring. Mirrors
 /// the search order of completion's `enrich`.
 fn render_library_symbol(module: &ModuleIndex, name: &str) -> Option<String> {
     if name.starts_with('@') {
@@ -359,12 +325,6 @@ fn render_library_symbol(module: &ModuleIndex, name: &str) -> Option<String> {
         }
         return Some(markdown(&head, m.doc.as_ref().map(|d| d.text.as_str())));
     }
-    if let Some(f) = library_function_group(module, name) {
-        return Some(markdown(
-            &method_group(f),
-            f.doc.as_ref().map(|d| d.text.as_str()),
-        ));
-    }
     if let Some(t) = module.types.iter().find(|t| t.name == name) {
         return Some(markdown(
             &type_detail(t),
@@ -377,6 +337,12 @@ fn render_library_symbol(module: &ModuleIndex, name: &str) -> Option<String> {
             None => name.to_string(),
         };
         return Some(markdown(&head, c.doc.as_ref().map(|d| d.text.as_str())));
+    }
+    if let Some(f) = library_function_group(module, name) {
+        return Some(markdown(
+            &method_group(f),
+            f.doc.as_ref().map(|d| d.text.as_str()),
+        ));
     }
     None
 }
@@ -543,6 +509,7 @@ mod tests {
             where_clauses: Vec::new(),
             return_type: None,
             has_body: true,
+            is_generated: false,
             doc: None,
             loc: loc(),
         }
@@ -589,6 +556,38 @@ mod tests {
         let value = hover_ws("sibling(1)", "sibling", package(root)).unwrap();
         assert!(value.contains("sibling"), "{value}");
         assert!(value.contains("a sibling function"), "{value}");
+    }
+
+    #[test]
+    fn sibling_nested_using_renders_the_type_declaration() {
+        let mut creatures = crate::index::harvest_tree(
+            &parse("module Types\nexport Animal\n\"An animal.\"\nabstract type Animal end\nend\n")
+                .cst,
+        );
+        creatures.name = "Creatures".into();
+        let lib = library(vec![package(creatures)]);
+        let mut workspace = crate::index::harvest_tree(
+            &parse(
+                "using Creatures.Types\nfor op in (:Animal,)\n    @eval ($op)(x::Int) = x\nend\n",
+            )
+            .cst,
+        );
+        workspace.name = "MyPkg".into();
+        let workspace = package(workspace);
+        for src in ["Animal(1)", "struct Dog <: Animal end"] {
+            let model = SemanticModel::build(&parse(src).cst);
+            let offset = TextSize::new((src.find("Animal").unwrap() + 3) as u32);
+            let (value, _) = hover_content(
+                &model,
+                &lib,
+                Some((Arc::clone(&workspace), Vec::new())),
+                src,
+                offset,
+            )
+            .expect("the sibling using supplies the type's hover");
+            assert!(value.contains("abstract type Animal"), "{value}");
+            assert!(value.contains("An animal."), "{value}");
+        }
     }
 
     #[test]
@@ -717,6 +716,84 @@ mod tests {
             "{value}"
         );
         assert!(value.contains("A hash table."), "{value}");
+    }
+
+    #[test]
+    fn library_type_hover_precedes_constructors() {
+        for constructor in [
+            "for op in (:Animal,)\n    @eval ($op)(x::Int) = x\nend\n",
+            "Animal(x::Int) = x\n",
+        ] {
+            let parsed = parse(&format!(
+                "export Animal\n\"An animal.\"\nabstract type Animal end\n{constructor}"
+            ));
+            assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+            let mut creatures = crate::index::harvest_tree(&parsed.cst);
+            let constructors = creatures
+                .functions
+                .iter()
+                .find(|f| f.name == "Animal")
+                .unwrap();
+            assert_eq!(constructors.methods.len(), 1);
+            creatures.name = "Creatures".into();
+            let lib = library(vec![package(creatures)]);
+
+            for (src, needle) in [
+                ("using Creatures\nx::Animal", "x::Ani"),
+                ("x::Creatures.Animal", "Creatures.Ani"),
+                ("using Creatures\nAnimal(1)", "Ani"),
+            ] {
+                let value = hover_at(src, needle, &lib).unwrap();
+                assert!(value.contains("abstract type Animal"), "{value}");
+                assert!(value.contains("An animal."), "{value}");
+            }
+
+            let mut workspace =
+                crate::index::harvest_tree(&parse("Creatures.Animal(x::String) = x\n").cst);
+            workspace.name = "MyPkg".into();
+            let value = hover_qualified(
+                "x::Creatures.Animal",
+                "Creatures.Ani",
+                &lib,
+                package(workspace),
+            )
+            .unwrap();
+            assert!(value.contains("abstract type Animal"), "{value}");
+            assert!(value.contains("An animal."), "{value}");
+        }
+    }
+
+    #[test]
+    fn library_alias_hover_precedes_generated_constructors() {
+        let parsed = parse(concat!(
+            "export Alias\n",
+            "\"An integer vector.\"\n",
+            "const Alias = Vector{Int}\n",
+            "for op in (:Alias,)\n",
+            "    @eval ($op)(x::Int) = x\n",
+            "end\n",
+        ));
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        let mut aliases = crate::index::harvest_tree(&parsed.cst);
+        assert_eq!(aliases.functions.len(), 1);
+        aliases.name = "Aliases".into();
+        let lib = library(vec![package(aliases)]);
+        for (src, needle) in [
+            ("using Aliases\nx::Alias", "x::Ali"),
+            ("x::Aliases.Alias", "Aliases.Ali"),
+            ("using Aliases\nAlias(1)", "\nAli"),
+        ] {
+            let value = hover_at(src, needle, &lib).unwrap();
+            assert!(value.contains("Alias = Vector{Int}"), "{value}");
+            assert!(value.contains("An integer vector."), "{value}");
+        }
+        let mut workspace =
+            crate::index::harvest_tree(&parse("Aliases.Alias(x::String) = x\n").cst);
+        workspace.name = "MyPkg".into();
+        let value =
+            hover_qualified("x::Aliases.Alias", "Aliases.Ali", &lib, package(workspace)).unwrap();
+        assert!(value.contains("Alias = Vector{Int}"), "{value}");
+        assert!(value.contains("An integer vector."), "{value}");
     }
 
     #[test]

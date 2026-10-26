@@ -25,7 +25,8 @@
 //! argument), sits inside a macro call or quoted code, targets anything but
 //! a bare function name (constructors, callable values, qualified and
 //! operator callees), or reaches a group with a bodyless `function f end`
-//! placeholder (methods live elsewhere by design).
+//! placeholder (methods live elsewhere by design) or generated methods (other
+//! overloads may evade the harvest).
 //!
 //! Off by default, like `undefined-name`: a bare file may be an `include`d
 //! fragment whose siblings add methods. The language server enables the rule
@@ -170,16 +171,18 @@ impl Rule for CallArity {
             // A same-named type means constructors (implicit ones invisible
             // here); a bodyless `function f end` announces methods defined
             // elsewhere. Unknown parameter macros may change the accepted
-            // argument count. In each case the table is not the whole story.
+            // argument count, and generated methods may have unharvested
+            // overloads. In each case the table is not the whole story.
             if table.methods.is_empty()
                 || table.saw_type
                 || table.saw_placeholder
                 || table.methods.iter().any(|method| {
-                    method
-                        .params
-                        .iter()
-                        .chain(&method.keyword_params)
-                        .any(|param| param.is_opaque)
+                    method.is_generated
+                        || method
+                            .params
+                            .iter()
+                            .chain(&method.keyword_params)
+                            .any(|param| param.is_opaque)
                 })
             {
                 continue;
@@ -400,6 +403,7 @@ mod tests {
             where_clauses: Vec::new(),
             return_type: None,
             has_body: true,
+            is_generated: false,
             doc: None,
             loc: loc(),
         }
@@ -505,6 +509,41 @@ mod tests {
             messages("helper(1, 2)\n", &lib, Some(ws)),
             Vec::<String>::new()
         );
+    }
+
+    #[test]
+    fn partially_generated_method_tables_are_not_exhaustive() {
+        let source = concat!(
+            "export f, g\n",
+            "for op in (:f,)\n@eval ($op)(x) = x\nend\n",
+            "for op in (:f,)\n",
+            "@eval @inline ($op)(x, y; extra=true) = x + y\n",
+            "@eval @inline ($op)(x::Int; extra=true) = x\nend\n",
+            "g(x) = x\n",
+        );
+        let parsed = crate::parser::parse(source);
+        assert!(parsed.diagnostics.is_empty());
+        let mut root = harvest_tree(&parsed.cst);
+        root.name = "MyPkg".to_string();
+        let f = root.functions.iter().find(|g| g.name == "f").unwrap();
+        assert_eq!(f.methods.len(), 1, "only the unary template is recovered");
+        let pkg = Arc::new(PackageIndex {
+            name: "MyPkg".to_string(),
+            root,
+            members: Vec::new(),
+            member_modules: Default::default(),
+            diagnostics: Vec::new(),
+        });
+        let calls = "f(1, 2)\nf(1, 2; extra=true)\nf(1; extra=true)\ng(1, 2)\n";
+        let packages = BTreeMap::from([("MyPkg".to_string(), pkg.clone())]);
+        for (source, workspace) in [
+            (format!("using MyPkg\n{calls}"), None),
+            (calls.to_string(), Some(pkg)),
+        ] {
+            let msgs = messages(&source, &packages, workspace);
+            assert_eq!(msgs.len(), 1, "{source}: {msgs:?}");
+            assert!(msgs[0].contains("`g`"), "{msgs:?}");
+        }
     }
 
     #[test]

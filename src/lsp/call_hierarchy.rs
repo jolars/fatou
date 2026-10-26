@@ -581,9 +581,10 @@ pub(crate) fn outgoing_calls_via_db(
         // One read+parse per distinct library file within this request.
         let mut parsed_files: HashMap<PathBuf, Option<(String, SyntaxNode)>> = HashMap::new();
 
-        // Keyed by (target uri, target selection): one entry per callee, with
-        // every call site of it in this body unioned into `from_ranges`.
-        let mut groups: BTreeMap<(String, u32, u32), CallHierarchyOutgoingCall> = BTreeMap::new();
+        // Generated functions can share a template's location, so the target
+        // name also distinguishes callees when grouping their call sites.
+        let mut groups: BTreeMap<(String, u32, u32, String), CallHierarchyOutgoingCall> =
+            BTreeMap::new();
         for (name, range) in sites {
             let target = match resolver.resolve(&name, range.start(), Namespace::Value) {
                 Resolution::Binding(bid) => {
@@ -618,11 +619,10 @@ pub(crate) fn outgoing_calls_via_db(
                         library_item(&abs, span, &name, encoding, &mut parsed_files)
                     })
                 }),
-                Resolution::Using { module, name } => {
-                    using_def_site(model, snapshot, &module, &name).and_then(|(abs, span)| {
+                Resolution::Using { module, name } => using_def_site(snapshot, &module, &name)
+                    .and_then(|(abs, span)| {
                         library_item(&abs, span, &name, encoding, &mut parsed_files)
-                    })
-                }
+                    }),
                 // A sibling file's module-level import: def site not recorded.
                 Resolution::Script { .. }
                 | Resolution::Ambiguous
@@ -636,6 +636,7 @@ pub(crate) fn outgoing_calls_via_db(
                 target.uri.to_string(),
                 target.selection_range.start.line,
                 target.selection_range.start.character,
+                target.name.clone(),
             );
             groups
                 .entry(key)
@@ -1019,6 +1020,70 @@ mod tests {
         assert_eq!(calls[0].from_ranges[0].start, Position::new(1, 11));
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn outgoing_distinguishes_generated_functions_at_the_same_location() {
+        use std::collections::BTreeMap;
+        use std::sync::Arc;
+
+        for (package, load) in [("Greetings", "using Greetings\n"), ("Base", "")] {
+            let tmp = tempfile::tempdir().unwrap();
+            let entry = tmp.path().join("src").join(format!("{package}.jl"));
+            std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
+            std::fs::write(
+                &entry,
+                format!(
+                    "module {package}\nexport f, g\nfor op in (:f, :g)\n\
+                         @eval ($op)(x) = x\nend\nend\n"
+                ),
+            )
+            .unwrap();
+            let pkg = crate::index::harvest_package_named(tmp.path(), package);
+            assert!(pkg.diagnostics.is_empty(), "{:?}", pkg.diagnostics);
+
+            let (src, position) = cursor(&format!("{load}call|er() = (f(1), g(2), f(3))\n"));
+            let path = tmp.path().join("consumer.jl");
+            let uri = from_path(&path).unwrap();
+            let mut db = IncrementalDatabase::default();
+            db.upsert_file(&path, src.clone());
+            db.set_library(
+                BTreeMap::from([(package.to_string(), Arc::new(pkg))]),
+                BTreeMap::from([(package.to_string(), tmp.path().to_path_buf())]),
+                Vec::new(),
+            );
+            let snapshot = db.snapshot();
+            let item = prepare_call_hierarchy_via_db(
+                &snapshot,
+                &uri,
+                &path,
+                &TextBuffer::new(src),
+                position,
+                Utf16,
+            )
+            .unwrap()
+            .remove(0);
+
+            let calls = outgoing_calls_via_db(&snapshot, &item, Utf16).unwrap();
+            assert_eq!(calls.len(), 2, "{package}: {calls:#?}");
+            let f = calls.iter().find(|call| call.to.name == "f").unwrap();
+            let g = calls.iter().find(|call| call.to.name == "g").unwrap();
+            assert_eq!(to_path(&f.to.uri), Some(entry.clone()));
+            assert_eq!(to_path(&g.to.uri), Some(entry));
+            assert_eq!(f.to.selection_range, g.to.selection_range);
+            let line = if load.is_empty() { 0 } else { 1 };
+            assert_eq!(
+                f.from_ranges,
+                [
+                    Range::new(Position::new(line, 12), Position::new(line, 13)),
+                    Range::new(Position::new(line, 24), Position::new(line, 25)),
+                ]
+            );
+            assert_eq!(
+                g.from_ranges,
+                [Range::new(Position::new(line, 18), Position::new(line, 19))]
+            );
+        }
     }
 
     #[test]
