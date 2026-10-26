@@ -37,6 +37,23 @@ pub enum TypeExpr {
     Raw { text: String },
 }
 
+impl TypeExpr {
+    /// Whether this is a built-in `Vararg` annotation, optionally applied to
+    /// an element type and count. Other modules can define an ordinary type
+    /// named `Vararg`, so a matching final path component is insufficient.
+    pub(crate) fn is_vararg(&self) -> bool {
+        match self {
+            Self::Name { path } => match path.as_slice() {
+                [name] => name == "Vararg",
+                [owner, name] => matches!(owner.as_str(), "Base" | "Core") && name == "Vararg",
+                _ => false,
+            },
+            Self::Applied { base, .. } => base.is_vararg(),
+            _ => false,
+        }
+    }
+}
+
 /// A node's source text with each internal run of whitespace collapsed to a
 /// single space and the ends trimmed. Shared by [`TypeExpr::Raw`], parameter
 /// defaults, and const value previews.

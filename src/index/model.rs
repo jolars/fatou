@@ -224,7 +224,8 @@ pub struct Param {
     pub type_annotation: Option<TypeExpr>,
     /// The default value as a normalized source string (`x = zeros(3)`).
     pub default: Option<String>,
-    /// `true` for a slurping `x...`/`args::Int...` parameter.
+    /// `true` for a slurping `x...`/`args::Int...` parameter or a built-in
+    /// `Vararg` annotation. The type annotation retains any element type and count.
     pub is_vararg: bool,
     /// `true` when a parameter's pattern or type contains an unknown macro
     /// expansion. The other fields do not establish its dispatch type or

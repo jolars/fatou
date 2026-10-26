@@ -64,7 +64,12 @@ pub(crate) fn render_param(param: &Param) -> String {
         out.push_str("::");
         out.push_str(&render_type(ty));
     }
-    if param.is_vararg {
+    if param.is_vararg
+        && !param
+            .type_annotation
+            .as_ref()
+            .is_some_and(TypeExpr::is_vararg)
+    {
         out.push_str("...");
     }
     if let Some(default) = &param.default {
@@ -131,5 +136,43 @@ pub(crate) fn binding_detail(kind: BindingKind) -> &'static str {
         Type => "type",
         Module => "module",
         Import => "import",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::index::harvest_tree;
+    use crate::parser::parse;
+
+    #[test]
+    fn harvested_vararg_signatures_preserve_annotations_and_splats() {
+        for pattern in [
+            "xs::Vararg",
+            "xs::Vararg{Int}",
+            "xs::Vararg{Int, 2}",
+            "xs::Base.Vararg",
+            "xs::Base.Vararg{Int}",
+            "xs::Core.Vararg",
+            "::Core.Vararg{Int, 2}",
+            "xs...",
+            "xs::Int...",
+            "xs::Custom.Vararg",
+            "xs::Custom.Vararg{Int}",
+            "xs::Custom.Vararg...",
+            "xs::Custom.Vararg{Int}...",
+            "xs::Tuple{Vararg{Int}}...",
+        ] {
+            let source = format!("f({pattern}) = 1");
+            let parsed = parse(&source);
+            assert!(parsed.diagnostics.is_empty(), "{source}");
+            let index = harvest_tree(&parsed.cst);
+            let group = &index.functions[0];
+            let expected = format!("f({pattern})");
+            assert_eq!(function_detail(group), expected, "{source}");
+            let (label, spans) = signature_label("f", &group.methods[0]);
+            assert_eq!(label, expected, "{source}");
+            assert_eq!(spans, [(2, 2 + pattern.encode_utf16().count() as u32)]);
+        }
     }
 }

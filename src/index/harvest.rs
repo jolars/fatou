@@ -963,6 +963,12 @@ fn param_from_pattern(node: &SyntaxNode) -> Param {
             let mut param = pattern.as_ref().map(param_from_pattern).unwrap_or_default();
             param.type_annotation = types.first().map(lower_type);
             param.is_opaque |= types.iter().any(contains_macro);
+            // Literal Vararg counts stay unbounded, so uncertain arities can
+            // only hide a diagnostic.
+            param.is_vararg |= param
+                .type_annotation
+                .as_ref()
+                .is_some_and(TypeExpr::is_vararg);
             param
         }
         SyntaxKind::SPLAT_EXPR => {
@@ -1345,6 +1351,52 @@ mod tests {
             &method.where_clauses[0],
             TypeExpr::TypeVar { name, upper: Some(_), .. } if name == "T"
         ));
+    }
+
+    #[test]
+    fn vararg_annotation_is_a_vararg_param() {
+        for annotation in [
+            "Vararg",
+            "Vararg{Any}",
+            "Vararg{Any,M}",
+            "Vararg{Int,2}",
+            "Base.Vararg",
+            "Base.Vararg{Int}",
+            "Core.Vararg",
+            "Core.Vararg{Int}",
+        ] {
+            let m = harvest_str(&format!("f(A, I::{annotation}) = A"), "Pkg");
+            let params = &m.functions[0].methods[0].params;
+            assert!(!params[0].is_vararg, "A is one argument");
+            assert!(params[1].is_vararg, "I::{annotation} takes any number");
+        }
+        let m = harvest_str("f(A, I::Tuple{Vararg{Int}}) = A", "Pkg");
+        assert!(
+            !m.functions[0].methods[0].params[1].is_vararg,
+            "a tuple of varargs is one argument"
+        );
+    }
+
+    #[test]
+    fn custom_vararg_annotations_require_an_explicit_splat() {
+        for annotation in [
+            "Custom.Vararg",
+            "Custom.Vararg{Int}",
+            "Custom.Core.Vararg{Int}",
+            "Core.Custom.Vararg",
+        ] {
+            let m = harvest_str(
+                &format!("f(x::{annotation}) = 1\nf(xs::{annotation}...) = 2"),
+                "Pkg",
+            );
+            let methods = &m.functions[0].methods;
+            assert!(!methods[0].params[0].is_vararg, "x::{annotation}");
+            assert!(methods[1].params[0].is_vararg, "xs::{annotation}...");
+            assert_eq!(
+                methods[0].params[0].type_annotation,
+                methods[1].params[0].type_annotation,
+            );
+        }
     }
 
     #[test]

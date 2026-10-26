@@ -2481,6 +2481,26 @@ fn call_arity_respects_vararg() {
 }
 
 #[test]
+fn call_arity_respects_vararg_annotations() {
+    for annotation in [
+        "Vararg",
+        "Vararg{Int}",
+        "Base.Vararg{Int}",
+        "Core.Vararg{Int}",
+    ] {
+        let src = format!("f(x, xs::{annotation}) = x\nf()\nf(1)\nf(1, 2, 3, 4)\n");
+        assert_eq!(count("call-arity", &src), 1, "{src}");
+    }
+}
+
+#[test]
+fn call_arity_treats_custom_vararg_as_one_argument() {
+    let src =
+        "module Custom\nstruct Vararg end\nend\nf(x::Custom.Vararg) = x\nf()\nf(1)\nf(1, 2)\n";
+    assert_eq!(count("call-arity", src), 2);
+}
+
+#[test]
 fn call_arity_respects_nospecialize_parameter_structure() {
     assert_eq!(
         count(
@@ -4400,6 +4420,16 @@ fn duplicate_method_flags_matching_type_arguments() {
         ),
         1
     );
+}
+
+#[test]
+fn duplicate_method_distinguishes_custom_vararg_from_splat() {
+    for annotation in ["Custom.Vararg", "Custom.Vararg{Int}"] {
+        let src = format!(
+            "module Custom\nstruct Vararg{{T}} end\nend\nf(x::{annotation}) = 1\nf(xs::{annotation}...) = 2\n"
+        );
+        assert_eq!(count("duplicate-method", &src), 0, "{src}");
+    }
 }
 
 #[test]
