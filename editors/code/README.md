@@ -171,3 +171,12 @@ When `fatou.executableStrategy` is `bundled` (the default), the extension
 prefers the binary that shipped inside the VSIX. If no bundled binary is
 available, or `fatou.version`/`fatou.releaseTag` is set explicitly, it downloads
 from GitHub releases configured by `fatou.githubRepo` (default `jolars/fatou`).
+
+## Development
+
+Run `npm ci` and `npm run package` with Node.js 22 or newer.
+
+The `@azure/identity` override keeps VSCE's transitive MSAL Node dependency on a
+patched release for
+[GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5). Remove
+the override once Azure Identity accepts MSAL Node 7.1.0 or newer.
