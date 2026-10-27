@@ -71,7 +71,7 @@ toml = "1.1.2"
 
 [dev-dependencies]
 insta = "1.47.2"
-jsonschema = { version = "0.59.0", default-features = false }
+jsonschema = { version = "0.60.1", default-features = false }
 schemars = "1.2.1"
 tempfile = "3.27.0"
 
@@ -103,7 +103,7 @@ strip = "none"
 
 [build-dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
-clapdown = "0.2.0"
+clapdown = "0.3.0"
 clap_complete = "4.6.5"
 clap_mangen = "0.3.0"
 
