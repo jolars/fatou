@@ -115,6 +115,19 @@ style remains project policy rather than language correctness.
   code indent, matching Julia's `Markdown.parse` without changing ordinary
   continuation lines.
 
+- [x] Parse fenced code below Julia Markdown list items as nested blocks.
+  Remove only the item's prefix from code content, retain lossless tokens and
+  exact decoded ranges, and keep four-space indented code literal. Cover
+  Eunoia.jl's examples with the Markdown oracle and map nested REPL diagnostics
+  through the separate code tokens.
+
+- [ ] Release the list-fence parser fix for Diplodocus. Its exact
+  `fatou-parser = "=0.8.2"` pin remains unchanged until publication. Then update
+  its pin and lockfile, enable the two pending integration tests, and run
+  `examples/eunoia/julia.py --require-list-fences` to verify both examples in
+  detached HTML and Markdown output. Parser and root linter changes belong in
+  separate release commits.
+
 - [x] Cache Markdown anchors and definitions in a demand-only salsa query over
   the file's decoded static docstring payloads. Code edits and equivalent
   literal spellings reuse the index; navigation maps decoded ranges through

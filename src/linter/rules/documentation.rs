@@ -90,24 +90,15 @@ fn collect_code_problems(
     out: &mut Vec<InvalidDocstringCode>,
 ) {
     for fence in root.descendants().filter_map(CodeBlock::cast) {
-        let Some(content_range) = fence.content_range() else {
-            continue;
-        };
         match fence.fence_kind() {
-            FenceKind::Julia => check_mapped_julia(
-                MappedText::direct(decoded.as_str(), content_range),
-                decoded,
-                out,
-            ),
+            FenceKind::Julia => {
+                check_mapped_julia(MappedText::fence(decoded.as_str(), &fence), decoded, out)
+            }
             FenceKind::JuliaRepl | FenceKind::JlDoctest { .. } => {
-                check_repl_fence(decoded.as_str(), content_range, decoded, out)
+                check_repl_fence(&MappedText::fence(decoded.as_str(), &fence), decoded, out)
             }
             FenceKind::Documenter { directive, .. } if directive != DocumenterDirective::Raw => {
-                check_mapped_julia(
-                    MappedText::direct(decoded.as_str(), content_range),
-                    decoded,
-                    out,
-                )
+                check_mapped_julia(MappedText::fence(decoded.as_str(), &fence), decoded, out)
             }
             FenceKind::Plain
             | FenceKind::Documenter { .. }
@@ -118,17 +109,12 @@ fn collect_code_problems(
 }
 
 fn check_repl_fence(
-    text: &str,
-    content_range: TextRange,
+    mapped: &MappedText,
     decoded: &crate::ast::StaticDocText,
     out: &mut Vec<InvalidDocstringCode>,
 ) {
-    let start = usize::from(content_range.start());
-    let end = usize::from(content_range.end());
-    let Some(_) = text.get(start..end) else {
-        return;
-    };
-    let lines = line_ranges(text, start, end);
+    let text = &mapped.text;
+    let lines = line_ranges(text, 0, text.len());
     let has_prompt = lines
         .iter()
         .any(|line| line.content(text).starts_with("julia> "));
@@ -142,8 +128,9 @@ fn check_repl_fence(
         else {
             return;
         };
-        let range = TextRange::new(content_range.start(), TextSize::new(separator.start as u32));
-        check_mapped_julia(MappedText::direct(text, range), decoded, out);
+        let mut snippet = MappedText::default();
+        snippet.push_mapped_slice(mapped, 0, separator.start);
+        check_mapped_julia(snippet, decoded, out);
         return;
     }
 
@@ -158,7 +145,7 @@ fn check_repl_fence(
 
         let code_start = line.content_end - code.len();
         let mut snippet = MappedText::default();
-        snippet.push_slice(text, code_start, line.end);
+        snippet.push_mapped_slice(mapped, code_start, line.end);
         let mut parsed = parser::parse(&snippet.text);
         let mut next = line_index + 1;
 
@@ -174,7 +161,7 @@ fn check_repl_fence(
             {
                 break;
             }
-            snippet.push_slice(text, continuation.start, continuation.end);
+            snippet.push_mapped_slice(mapped, continuation.start, continuation.end);
             parsed = parser::parse(&snippet.text);
             next += 1;
         }
@@ -410,12 +397,31 @@ struct MappedText {
 }
 
 impl MappedText {
-    fn direct(source: &str, range: TextRange) -> Self {
-        let start = usize::from(range.start());
-        let end = usize::from(range.end());
+    fn fence(source: &str, fence: &CodeBlock) -> Self {
         let mut mapped = Self::default();
-        mapped.push_slice(source, start, end);
+        // List indentation is lossless trivia between code tokens. Retaining
+        // its bytes would hide all but the first prompt in a REPL transcript.
+        for token in fence
+            .syntax()
+            .children_with_tokens()
+            .filter_map(|element| element.into_token())
+        {
+            if token.kind() == fatou_parser::documentation::syntax::SyntaxKind::CODE_CONTENT {
+                let range = token.text_range();
+                mapped.push_slice(source, usize::from(range.start()), usize::from(range.end()));
+            }
+        }
         mapped
+    }
+
+    fn push_mapped_slice(&mut self, source: &Self, start: usize, end: usize) {
+        let Some(slice) = source.text.get(start..end) else {
+            return;
+        };
+        self.text.push_str(slice);
+        self.source_bytes
+            .extend_from_slice(&source.source_bytes[start..end]);
+        self.end = source.source_range(start, end).unwrap().end().into();
     }
 
     fn push_slice(&mut self, source: &str, start: usize, end: usize) {

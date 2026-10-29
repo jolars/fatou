@@ -155,6 +155,39 @@ f() = 1
 }
 
 #[test]
+fn invalid_docstring_code_maps_nested_repl_prompts_to_source() {
+    let src = r#""""
+- Example:
+
+  ```julia-repl
+  julia> α = 1
+  1
+
+  julia> )
+  ERROR: unexpected token
+  ```
+"""
+f() = 1
+"#;
+    let config = LintConfig {
+        select: Some(vec!["invalid-docstring-code".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(None, src, &config);
+    let findings: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|finding| finding.rule == "invalid-docstring-code")
+        .collect();
+    assert_eq!(findings.len(), 1, "{:?}", report.diagnostics);
+    let range = findings[0].range;
+    assert_eq!(
+        &src[usize::from(range.start())..usize::from(range.end())],
+        ")"
+    );
+}
+
+#[test]
 fn docstring_argument_mismatch_flags_a_stale_argument_name() {
     let src = r#""""
 # Arguments
