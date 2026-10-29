@@ -138,14 +138,12 @@ style remains project policy rather than language correctness.
   Diplodocus environment to verify both examples in detached HTML and Markdown
   output. Parser and root linter changes belong in separate release commits.
 
-- [ ] **Deferred:** recognize fenced code blocks inside admonitions in
-  `emit_indented_container_blocks`. An `!!! note` with an `@example gallery`
-  fence indented by four spaces currently yields an admonition paragraph
-  containing literal fence text; Julia Markdown produces a nested code block.
-  Preserve the fence classification, body indentation, lossless container
-  prefixes, and exact content ranges. Add a Julia Markdown oracle fixture and
-  source-map regressions. Eunoia's current gallery admonition contains prose
-  only, so this does not block the release for `../diplodocus/`. Executing
+- [x] Recognize fenced code blocks inside admonitions in
+  `emit_indented_container_blocks`, including `@example gallery`. Preserve
+  fence classification, body indentation, lossless four-space or tab prefixes,
+  and exact content ranges. Julia 1.13 Markdown oracle coverage includes mixed
+  prefixes, blank lines, math, and empty fences. Source-map and nested REPL
+  diagnostic regressions cover escaped docstrings and CRLF. Executing
   `@example` blocks remains Diplodocus work.
 
 - [x] Cache Markdown anchors and definitions in a demand-only salsa query over

@@ -67,8 +67,9 @@ blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 permanent cases recorded below. A green report means "no regression", not
 "nothing to do".
 
-Markdown stdlib corpus: **22 fixtures**, pinned to Julia 1.13.0. Wrapped-inline
-fixtures also check CRLF projections and lossless reconstruction.
+Markdown stdlib corpus: **23 fixtures**, pinned to Julia 1.13.0. Wrapped-inline
+and admonition-fence fixtures also check CRLF projections and lossless
+reconstruction.
 
 **Divergence-ledger audit (2026-06-24, COMPLETE):** the old "deliberate, do not
 fix" list was mostly mislabeled for a linter/LSP. All three correctable items
@@ -103,23 +104,23 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-10-29 — wrapped Markdown inlines)
+## Latest session (2026-10-29 — Markdown admonition fences)
 
-- **Parser gap**: collect logical paragraph text before recognizing inline
-  constructs, then emit tokens through the original decoded-byte ranges.
-  Links, nested emphasis, inline code, math, and images can span soft wraps in
-  paragraphs, lists (including quoted lists), admonitions, quotes, and footnotes.
-  Container prefixes remain trivia, and blocks flush pending inline content.
-  Literal inline readers stop at hard breaks, matching Julia's stdlib.
-- **Typed navigation**: payload accessors join continuation tokens; Documenter
-  targets map normalized offsets back to exact decoded ranges. Reference
-  resolution stays downstream. The UTF-8 truncation sweep also exposed and
-  fixed an existing lone-CR panic in `math_block`.
-- **Coverage**: three generated Markdown fixtures cover wrapped constructs,
-  destinations, containers, and hard breaks. LF and CRLF projections agree
-  with Julia 1.13.0. Tests pin block boundaries, losslessness, UTF-8 ranges,
-  and mappings through escaped, dedented Julia docstrings.
-- **Counts**: Markdown **19 → 22** fixtures. JS **749/756 → 749/756** and dir
+- **Parser gap**: recognize fences before the indented-container paragraph
+  fallback and flush preceding prose. Reuse fence emission with either fixed
+  list prefixes or four-space/tab container prefixes. Mixed prefixes, multiple
+  blank lines, code indentation, Documenter roles, and exact decoded ranges
+  survive without moving container trivia into code payloads.
+- **Fence boundaries**: tab-prefixed closing markers retain their own tokens.
+  A closer must start at the body's margin, matching Julia; deeper-indented
+  delimiter text stays code. Unclosed fences diagnose the opener and cannot
+  consume outside blocks or a sibling admonition.
+- **Coverage**: one generated Markdown fixture covers admonition examples,
+  REPLs, doctests, math, padded openings, indented delimiters, and empty bodies.
+  LF/CRLF, UTF-8 truncation, escaped/dedented source maps, classification, and
+  token ranges have regressions. Root linter tests verify exact REPL diagnostic
+  spans through container prefixes and escaped characters.
+- **Counts**: Markdown **22 → 23** fixtures. JS **749/756 → 749/756** and dir
   **273/274 → 273/274**, with no oracle regressions or new blocked cases.
 - **Validation**: focused parser and Markdown tests, workspace tests, both
   JuliaSyntax reports, Clippy with all targets and features, rustfmt, and both
@@ -129,6 +130,8 @@ corpus); trailing block-body junk (`function f g h end`).
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-10-29** — wrapped Markdown inlines and exact decoded ranges across
+  paragraphs, lists, admonitions, quotes, and footnotes. 749 / 273.
 - **2026-10-19** — standalone colon whitespace before delimiters, separators,
   comments, and EOF, preserving invalid quote diagnostics. 749 / 273.
 - **2026-10-18** — nested-block reparsing with context and seam guards, sibling

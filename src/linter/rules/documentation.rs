@@ -399,8 +399,8 @@ struct MappedText {
 impl MappedText {
     fn fence(source: &str, fence: &CodeBlock) -> Self {
         let mut mapped = Self::default();
-        // List indentation is lossless trivia between code tokens. Retaining
-        // its bytes would hide all but the first prompt in a REPL transcript.
+        // Container prefixes are lossless trivia between code tokens. Retaining
+        // their bytes would hide all but the first prompt in a REPL transcript.
         for token in fence
             .syntax()
             .children_with_tokens()
