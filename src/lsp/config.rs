@@ -45,10 +45,14 @@ impl ResolvedConfig {
         directory: Option<&Path>,
     ) -> Arc<Self> {
         let (mut rules, unknown) = ServerRules::from_config(&config.lint);
-        rules.entry_points = directory.map_or_else(
+        let entries = directory.map_or_else(
             || config.project.entry_points(source),
             |directory| config.project.resolved_entry_points(source, directory),
         );
+        match entries {
+            Ok(entries) => rules.entry_points = entries,
+            Err(err) => warnings.push(err.to_string()),
+        }
         warnings.extend(
             unknown
                 .into_iter()
@@ -242,6 +246,51 @@ mod tests {
                 .rules
                 .entry_points
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn extended_entry_point_globs_refresh_after_discovery_invalidation() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Project.toml"), "").unwrap();
+        for entry in ["test/runtests.jl", "scripts/main.jl"] {
+            let path = dir.path().join(entry);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "").unwrap();
+        }
+        std::fs::write(
+            dir.path().join("fatou.toml"),
+            "[project]\nextend-entry-points = ['scripts/**/*.jl']\n",
+        )
+        .unwrap();
+        let (mut store, _) = ConfigStore::new(None);
+        let uri = uri_for(&dir.path().join("scripts/main.jl"));
+        let (resolved, warnings) = store.for_uri(&uri);
+        assert!(warnings.is_empty());
+        assert_eq!(resolved.rules.entry_points.len(), 2);
+        let new_entry = dir.path().join("scripts/new.jl");
+        std::fs::write(&new_entry, "").unwrap();
+        store.invalidate_discovered();
+        let (resolved, warnings) = store.for_uri(&uri);
+        assert!(warnings.is_empty());
+        assert_eq!(resolved.rules.entry_points.len(), 3);
+        assert!(
+            resolved
+                .rules
+                .entry_points
+                .contains(&crate::incremental::normalize_path(&new_entry))
+        );
+        std::fs::write(
+            dir.path().join("fatou.toml"),
+            "[project]\nextend-entry-points = ['scripts/[bad']\n",
+        )
+        .unwrap();
+        store.invalidate_discovered();
+        let (_, warnings) = store.for_uri(&uri);
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("invalid glob pattern"))
         );
     }
 

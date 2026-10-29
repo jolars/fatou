@@ -56,13 +56,31 @@ pub struct ProjectConfig {
     /// Omission infers conventional roots; an empty list disables inference.
     /// Includes supply resolution context without expanding lint targets.
     #[serde(default)]
+    #[cfg_attr(
+        test,
+        schemars(with = "Vec<PathBuf>", default = "default_entry_points")
+    )]
     pub entry_points: Option<Vec<PathBuf>>,
+    /// Additional script paths or globs, relative to the configuration file.
+    #[serde(default)]
+    pub extend_entry_points: Vec<PathBuf>,
+}
+
+fn default_entry_points() -> Vec<PathBuf> {
+    ["test/runtests.jl", "docs/make.jl", "deps/build.jl"]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
 }
 
 impl ProjectConfig {
     /// Resolve explicit programs, or infer existing conventional roots from
     /// Julia projects above the source directory.
-    pub fn resolved_entry_points(&self, source: &ConfigSource, directory: &Path) -> Vec<PathBuf> {
+    pub fn resolved_entry_points(
+        &self,
+        source: &ConfigSource,
+        directory: &Path,
+    ) -> Result<Vec<PathBuf>, crate::file_discovery::FileDiscoveryError> {
         if self.entry_points.is_some() {
             return self.entry_points(source);
         }
@@ -78,31 +96,44 @@ impl ProjectConfig {
         let mut entries: Vec<_> = roots
             .into_iter()
             .flat_map(|root| {
-                ["test/runtests.jl", "docs/make.jl", "deps/build.jl"]
+                default_entry_points()
                     .into_iter()
                     .map(move |entry| root.join(entry))
             })
             .filter(|entry| entry.is_file())
             .map(|entry| crate::incremental::normalize_path(&entry))
             .collect();
+        entries.extend(self.entry_points(source)?);
         entries.sort();
-        entries
+        entries.dedup();
+        Ok(entries)
     }
 
-    /// Anchor literal paths at the configuration file, including user configs.
-    pub fn entry_points(&self, source: &ConfigSource) -> Vec<PathBuf> {
+    /// Anchor paths and expand globs at the configuration file, including user configs.
+    pub fn entry_points(
+        &self,
+        source: &ConfigSource,
+    ) -> Result<Vec<PathBuf>, crate::file_discovery::FileDiscoveryError> {
         let Some(base) = source.path().and_then(Path::parent) else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        let mut entries: Vec<_> = self
+        let mut entries = Vec::new();
+        for path in self
             .entry_points
             .iter()
             .flatten()
-            .map(|path| crate::incremental::normalize_path(&base.join(path)))
-            .collect();
+            .chain(&self.extend_entry_points)
+        {
+            let path = base.join(path);
+            entries.extend(
+                crate::file_discovery::expand_entry_point_glob(&path)?
+                    .into_iter()
+                    .map(|path| crate::incremental::normalize_path(&path)),
+            );
+        }
         entries.sort();
         entries.dedup();
-        entries
+        Ok(entries)
     }
 }
 
@@ -649,20 +680,20 @@ fn load_merged_table(
 }
 
 fn rebase_entry_points(table: &mut toml::Table, path: &Path) {
-    let Some(points) = table
-        .get_mut("project")
-        .and_then(toml::Value::as_table_mut)
-        .and_then(|project| project.get_mut("entry-points"))
-        .and_then(toml::Value::as_array_mut)
-    else {
+    let Some(project) = table.get_mut("project").and_then(toml::Value::as_table_mut) else {
         return;
     };
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    for point in points {
-        if let Some(name) = point.as_str()
-            && !Path::new(name).is_absolute()
-        {
-            *point = toml::Value::String(base.join(name).to_string_lossy().into_owned());
+    for key in ["entry-points", "extend-entry-points"] {
+        let Some(points) = project.get_mut(key).and_then(toml::Value::as_array_mut) else {
+            continue;
+        };
+        for point in points {
+            if let Some(name) = point.as_str()
+                && !Path::new(name).is_absolute()
+            {
+                *point = toml::Value::String(base.join(name).to_string_lossy().into_owned());
+            }
         }
     }
 }
@@ -690,7 +721,10 @@ fn merge_config_tables(base: &mut toml::Table, child: toml::Table) {
                 }
             }
             (Some(toml::Value::Array(existing)), toml::Value::Array(incoming))
-                if matches!(key.as_str(), "extend-exclude" | "extend-select") =>
+                if matches!(
+                    key.as_str(),
+                    "extend-exclude" | "extend-select" | "extend-entry-points"
+                ) =>
             {
                 existing.extend(incoming);
             }
@@ -978,12 +1012,16 @@ mod tests {
             .to_vec();
         expected.sort();
         assert_eq!(
-            ProjectConfig::default().resolved_entry_points(&ConfigSource::None, &nested),
+            ProjectConfig::default()
+                .resolved_entry_points(&ConfigSource::None, &nested)
+                .unwrap(),
             expected
         );
         std::fs::write(nested.join("Project.toml"), "").unwrap();
         assert_eq!(
-            ProjectConfig::default().resolved_entry_points(&ConfigSource::None, &nested),
+            ProjectConfig::default()
+                .resolved_entry_points(&ConfigSource::None, &nested)
+                .unwrap(),
             expected
         );
         std::fs::remove_file(nested.join("Project.toml")).unwrap();
@@ -991,16 +1029,53 @@ mod tests {
         assert!(
             config
                 .resolved_entry_points(&ConfigSource::None, &nested)
+                .unwrap()
                 .is_empty()
         );
         let config: ProjectConfig = toml::from_str("entry-points = ['scripts/main.jl']").unwrap();
         let source = ConfigSource::None;
-        assert!(config.resolved_entry_points(&source, &nested).is_empty());
+        assert!(
+            config
+                .resolved_entry_points(&source, &nested)
+                .unwrap()
+                .is_empty()
+        );
         std::fs::remove_file(dir.path().join("Project.toml")).unwrap();
         assert!(
             ProjectConfig::default()
                 .resolved_entry_points(&source, dir.path())
+                .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn extended_entry_point_globs_keep_declaring_roots_when_inherited() {
+        let dir = tempfile::tempdir().unwrap();
+        for entry in ["shared/scripts/base.jl", "scripts/child.jl"] {
+            let path = dir.path().join(entry);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "").unwrap();
+        }
+        std::fs::write(
+            dir.path().join("shared/base.toml"),
+            "[project]\nentry-points = []\nextend-entry-points = ['scripts/**/*.jl']\n",
+        )
+        .unwrap();
+        let leaf = dir.path().join("fatou.toml");
+        std::fs::write(&leaf,
+            "extend = 'shared/base.toml'\n[project]\nextend-entry-points = ['scripts/**/*.jl', 'scripts/child.jl']\n").unwrap();
+        let (config, source, _) = Config::resolve(Some(&leaf), false, dir.path()).unwrap();
+        let mut expected = ["shared/scripts/base.jl", "scripts/child.jl"]
+            .map(|entry| crate::incremental::normalize_path(&dir.path().join(entry)))
+            .to_vec();
+        expected.sort();
+        assert_eq!(
+            config
+                .project
+                .resolved_entry_points(&source, dir.path())
+                .unwrap(),
+            expected
         );
     }
 
@@ -1017,7 +1092,7 @@ mod tests {
         std::fs::write(&leaf, "extend = \"shared/base.toml\"\n").unwrap();
         let (config, source, _) = Config::resolve(Some(&leaf), false, dir.path()).unwrap();
         assert_eq!(
-            config.project.entry_points(&source),
+            config.project.entry_points(&source).unwrap(),
             [crate::incremental::normalize_path(
                 &dir.path().join("shared/scripts/main.jl")
             )]
@@ -1040,7 +1115,7 @@ mod tests {
 
         let (config, source, _) = Config::resolve(Some(&leaf), false, dir.path()).unwrap();
         assert_eq!(
-            config.project.entry_points(&source),
+            config.project.entry_points(&source).unwrap(),
             [crate::incremental::normalize_path(
                 &dir.path().join("alias/scripts/main.jl")
             )]

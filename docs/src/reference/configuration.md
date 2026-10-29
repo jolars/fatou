@@ -58,24 +58,30 @@ extend-exclude = ["generated.jl"]
 
 ## `[project]`
 
-  | Key            | Type             | Default  | Description                                      |
-  | -------------- | ---------------- | -------- | ------------------------------------------------ |
-  | `entry-points` | array of strings | inferred | Script files to analyze as independent programs. |
+  | Key                   | Type             | Default                  | Description                      |
+  | --------------------- | ---------------- | ------------------------ | -------------------------------- |
+  | `entry-points`        | array of strings | Conventional files below | Replace the script entry points. |
+  | `extend-entry-points` | array of strings | `[]`                     | Add script entry points.         |
 
-When `entry-points` is omitted, Fatou infers existing `test/runtests.jl`,
-`docs/make.jl`, and `deps/build.jl` files relative to Julia projects above the
-lint target or open document. An explicit list replaces these inferred roots;
-`entry-points = []` disables inference. Benchmark files and arbitrary
+The default `entry-points` list contains `test/runtests.jl`, `docs/make.jl`, and
+`deps/build.jl`. Fatou discovers these files relative to Julia projects above
+the lint target or open document, stopping at the repository boundary. Missing
+default files are ignored. Setting `entry-points` replaces the default list;
+`entry-points = []` disables it. `extend-entry-points` adds paths to either the
+defaults or an explicit replacement list. Benchmark files and arbitrary
 include-graph roots are not inferred.
 
-Paths are literal files, without glob expansion, relative to the containing
-configuration file. This also applies to `--config`, `FATOU_CONFIG`, and global
-configuration files. Duplicate normalized paths are ignored. Configure entry
-points in a file; editor-pushed settings do not establish a project root.
+Configured paths can be literal files or globs, relative to the containing
+configuration file. Globs such as `scripts/**/*.jl` expand to Julia files, honor
+`.gitignore`, and contribute no files when unmatched. Invalid globs and missing
+explicit literal paths are errors. This also applies to `--config`,
+`FATOU_CONFIG`, and global configuration files. Duplicate normalized paths are
+ignored. Configure entry points in a file; editor-pushed settings do not
+establish a project root.
 
 ```toml
 [project]
-entry-points = ["scripts/main.jl"]
+extend-entry-points = ["scripts/**/*.jl"]
 ```
 
 The CLI and language server enable `undefined-name` by default for these

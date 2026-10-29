@@ -155,18 +155,20 @@ For the global config, Fatou checks these paths in order:
 
 ## Checking standalone scripts
 
-When `entry-points` is omitted, Fatou infers existing `test/runtests.jl`,
-`docs/make.jl`, and `deps/build.jl` files relative to Julia projects above the
-lint target or open document. An explicit list replaces these inferred roots;
-`entry-points = []` disables inference. Benchmark files and arbitrary
+The default `entry-points` list contains `test/runtests.jl`, `docs/make.jl`, and
+`deps/build.jl`. Fatou discovers these files relative to Julia projects above
+the lint target or open document, stopping at the repository boundary. Missing
+default files are ignored. Setting `entry-points` replaces the default list;
+`entry-points = []` disables it. `extend-entry-points` adds paths to either the
+defaults or an explicit replacement list. Benchmark files and arbitrary
 include-graph roots are not inferred.
 
-Declare the files you run as independent programs to check undefined names
-across their static includes:
+Add files you run as independent programs to check undefined names across their
+static includes:
 
 ```toml
 [project]
-entry-points = ["scripts/main.jl"]
+extend-entry-points = ["scripts/**/*.jl"]
 ```
 
 The CLI and language server enable `undefined-name` by default for each entry
@@ -174,7 +176,9 @@ point and its included files. An explicit `[lint] select` replaces those
 defaults; `ignore = ["undefined-name"]` disables the rule. Files outside these
 programs keep their usual defaults.
 
-No Julia package is required. Paths are relative to the configuration file. If
+No Julia package is required for explicit paths. Both options accept literal
+files and globs relative to the configuration file. Globs honor `.gitignore`;
+unmatched globs add no files. Missing explicit literal paths are errors. If
 `main.jl` includes `settings.jl` and `worker.jl`, functions in `worker.jl` can
 use globals defined in `settings.jl`. Misspellings still produce warnings.
 Separate entry points do not share globals, even when they include the same

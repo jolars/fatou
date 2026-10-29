@@ -601,6 +601,18 @@ fn script_entry_configuration_rejects_unknown_keys_and_missing_entries() {
             "[project]\nentry-points = [\"missing.jl\"]\n",
             "cannot read script entry point",
         ),
+        (
+            "[project]\nextend-entry-points = ['missing.jl']\n",
+            "cannot read script entry point",
+        ),
+        (
+            "[project]\nentry-points = ['scripts/[bad']\n",
+            "invalid glob pattern",
+        ),
+        (
+            "[project]\nextend-entry-points = ['scripts/[bad']\n",
+            "invalid glob pattern",
+        ),
     ] {
         std::fs::write(sandbox.path().join("fatou.toml"), config).unwrap();
         let output = sandbox.run(sandbox.path(), &[], &["lint", "input.jl"]);
@@ -966,4 +978,41 @@ fn conventional_script_roots_enable_undefined_names_and_respect_override() {
     );
     let diagnostics: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
     assert!(!diagnostics.iter().any(|d| d["rule"] == "undefined-name"));
+}
+
+#[test]
+fn entry_point_globs_replace_or_extend_defaults() {
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.path().join("Project.toml"), "").unwrap();
+    for entry in [
+        "test/runtests.jl",
+        "scripts/main.jl",
+        "scripts/nested/other.jl",
+    ] {
+        let path = sandbox.path().join(entry);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "f() = misspelled_name\n").unwrap();
+    }
+    for (config, expected) in [
+        ("[project]\nextend-entry-points = ['scripts/**/*.jl']\n", 3),
+        ("[project]\nentry-points = ['scripts/**/*.jl']\n", 2),
+        (
+            "[project]\nentry-points = []\nextend-entry-points = ['scripts/**/*.jl']\n",
+            2,
+        ),
+        ("[project]\nextend-entry-points = ['missing/**/*.jl']\n", 1),
+        (
+            "[project]\nentry-points = ['scripts/**/*.jl', 'scripts/main.jl']\n",
+            2,
+        ),
+    ] {
+        std::fs::write(sandbox.path().join("fatou.toml"), config).unwrap();
+        let output = sandbox.run(sandbox.path(), &[], &["lint", "--output", "json", "."]);
+        let diagnostics: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+        let count = diagnostics
+            .iter()
+            .filter(|d| d["rule"] == "undefined-name")
+            .count();
+        assert_eq!(count, expected, "{config}: {}", stderr(&output));
+    }
 }

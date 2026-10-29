@@ -188,4 +188,15 @@ fn config_schema_rejects_invalid_configuration() {
 fn config_schema_accepts_script_entries() {
     assert_accepts("[project]\nentry-points = [\"scripts/main.jl\", \"other.jl\"]\n");
     assert_accepts("[project]\nentry-points = []\n");
+    assert_accepts("[project]\nextend-entry-points = ['scripts/**/*.jl']\n");
+    assert_accepts(
+        "[project]\nentry-points = ['scripts/*.jl']\nextend-entry-points = ['tools/**/*.jl']\n",
+    );
+    assert_rejects("[project]\nextend-entry-points = 'scripts/*.jl'\n");
+    assert_rejects("[project]\nextend-entry-points = [1]\n");
+    let schema = generate_schema_json();
+    assert_eq!(
+        schema["definitions"]["ProjectConfig"]["properties"]["entry-points"]["default"],
+        serde_json::json!(["test/runtests.jl", "docs/make.jl", "deps/build.jl"])
+    );
 }

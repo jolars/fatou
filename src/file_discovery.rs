@@ -180,7 +180,7 @@ pub fn collect_julia_files(
         }
 
         if let Some(pattern) = path.to_str().filter(|p| has_glob_meta(p)) {
-            collect_glob(pattern, exclude, &mut files)?;
+            collect_glob(pattern, exclude, &mut files, false)?;
             continue;
         }
 
@@ -195,6 +195,21 @@ pub fn collect_julia_files(
     Ok(files)
 }
 
+/// Expand an entry-point glob with the same matching and ignore behavior as
+/// source discovery. Literal paths stay literal so script loading can report
+/// missing explicitly configured files.
+pub(crate) fn expand_entry_point_glob(path: &Path) -> Result<Vec<PathBuf>, FileDiscoveryError> {
+    if path.is_file() {
+        return Ok(vec![path.to_path_buf()]);
+    }
+    let Some(pattern) = path.to_str().filter(|pattern| has_glob_meta(pattern)) else {
+        return Ok(vec![path.to_path_buf()]);
+    };
+    let mut files = Vec::new();
+    collect_glob(pattern, &ExcludeFilter::default(), &mut files, true)?;
+    Ok(files)
+}
+
 /// Expand a glob `pattern` into `.jl` files. The walk is rooted at the pattern's
 /// longest literal prefix so we never scan more of the tree than necessary, then
 /// every discovered file is tested against the full pattern.
@@ -202,6 +217,7 @@ fn collect_glob(
     pattern: &str,
     exclude: &ExcludeFilter,
     files: &mut Vec<PathBuf>,
+    allow_missing_root: bool,
 ) -> Result<(), FileDiscoveryError> {
     let matcher = GlobBuilder::new(pattern)
         .literal_separator(true)
@@ -213,6 +229,9 @@ fn collect_glob(
         .compile_matcher();
 
     let base = glob_base(pattern);
+    if allow_missing_root && !base.exists() {
+        return Ok(());
+    }
     walk_julia_files(&base, Some(&matcher), exclude, files)
 }
 

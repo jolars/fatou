@@ -180,15 +180,24 @@
       "description": "Independent programs, with conventional roots inferred when omitted.",
       "properties": {
         "entry-points": {
-          "default": null,
+          "default": [
+            "test/runtests.jl",
+            "docs/make.jl",
+            "deps/build.jl"
+          ],
           "description": "Script entry files, relative to the containing configuration file.\nOmission infers conventional roots; an empty list disables inference.\nIncludes supply resolution context without expanding lint targets.",
           "items": {
             "type": "string"
           },
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array"
+        },
+        "extend-entry-points": {
+          "default": [],
+          "description": "Additional script paths or globs, relative to the configuration file.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "type": "object"
