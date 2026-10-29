@@ -8,12 +8,14 @@
 //! process-wide or memory-unsafe effects, each paired with the alternative to
 //! reach for.
 //!
-//! Two shapes are deliberately left alone. A call carrying a trailing `do`
-//! block is skipped, because for `cd`, `redirect_stdout`, and `redirect_stderr`
-//! the do-block form *is* the recommended alternative — flagging it would be
-//! exactly backwards. And a qualified callee (`Base.exit`) spells a different
-//! name, so it never matches; the project spelled out a bare name, and asking
-//! whether a bare name really is Base's is the namespace gate's job.
+//! A call carrying a trailing `do` block is skipped, because for `cd`,
+//! `redirect_stdout`, and `redirect_stderr` the callback form restores the
+//! previous state. Passing that callback explicitly as the first of two
+//! arguments is equivalent. Positional splats leave the overload unknown, so
+//! these three names are also skipped when their arguments are splatted.
+//! A qualified callee (`Base.exit`) spells a different name, so it never
+//! matches; the project spelled out a bare name, and asking whether a bare name
+//! really is Base's is the namespace gate's job.
 //!
 //! That gate has two tiers. A built-in name must be confirmed as Base's via
 //! [`RuleContext::resolves_to_base`], the same conservative stance every idiom
@@ -52,8 +54,12 @@ impl Rule for DiscouragedFunction {
          without ignoring it. Both are tables mapping a function name to the \
          suggestion shown in the diagnostic.\n\n\
          A call carrying a `do` block is never reported, since for `cd` and the \
-         `redirect_*` functions that form is the recommended alternative. A \
-         qualified callee (`Base.exit`) is a different name and does not match. \
+         `redirect_*` functions that form is the recommended alternative. \
+         Two-argument calls to `cd`, `redirect_stdout`, and `redirect_stderr` \
+         are also allowed: they pass the callback explicitly and restore the \
+         previous state. Calls to these three functions with positional splats \
+         are skipped because the overload cannot be determined.\n\n\
+         A qualified callee (`Base.exit`) is a different name and does not match. \
          A built-in name is only reported once it is confirmed to be Base's, so \
          a local of the same name — or a file whose imports cannot be resolved — \
          reports nothing; a name the project configured is reported unless a \
@@ -92,6 +98,14 @@ impl Rule for DiscouragedFunction {
         let Some(suggestion) = config.lookup(callee.text()) else {
             return;
         };
+        if matches!(callee.text(), "cd" | "redirect_stdout" | "redirect_stderr") {
+            let shape = matchers::CallShape::of(&call);
+            // Both spellings of the callback overload restore the prior state;
+            // a splat may supply that callback even when it is not visible.
+            if shape.positional.len() == 2 || shape.positional_open {
+                return;
+            }
+        }
 
         let confirmed = if DiscouragedFunctionConfig::is_builtin(callee.text()) {
             ctx.resolves_to_base(&call)

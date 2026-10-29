@@ -3383,6 +3383,79 @@ fn discouraged_function_ignores_the_do_block_form() {
 }
 
 #[test]
+fn discouraged_function_ignores_an_explicit_redirect_callback() {
+    let src = r#"
+function printed(io::IO)::Nothing
+    redirect_stdout(Base.Fix1(println, "hi"), io)
+    return nothing
+end
+"#;
+    assert!(discouraged(DiscouragedFunctionConfig::default(), src).is_empty());
+}
+
+#[test]
+fn discouraged_function_ignores_explicit_callbacks_for_scoped_effects() {
+    for name in ["cd", "redirect_stdout", "redirect_stderr"] {
+        for callback in ["callback", "() -> println(\"hi\")", "make_callback()"] {
+            let src = format!(
+                "function f(callback, destination)\n    {name}({callback}, destination)\nend\n"
+            );
+            assert!(
+                discouraged(DiscouragedFunctionConfig::default(), &src).is_empty(),
+                "unexpected finding for {src:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn discouraged_function_ignores_splatted_arguments_for_scoped_effects() {
+    for name in ["cd", "redirect_stdout", "redirect_stderr"] {
+        for args in ["args...", "callback, args...", "args..., destination"] {
+            let src = format!("function f(callback, destination, args)\n    {name}({args})\nend\n");
+            assert!(
+                discouraged(DiscouragedFunctionConfig::default(), &src).is_empty(),
+                "unexpected finding for {src:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn discouraged_function_flags_unscoped_effects() {
+    for name in ["cd", "redirect_stdout", "redirect_stderr"] {
+        for args in ["", "destination"] {
+            let src = format!("function f(destination)\n    {name}({args})\nend\n");
+            assert_eq!(
+                discouraged(DiscouragedFunctionConfig::default(), &src).len(),
+                1,
+                "expected a finding for {src:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn discouraged_function_flags_other_functions_with_two_arguments() {
+    assert_eq!(
+        discouraged(
+            DiscouragedFunctionConfig::default(),
+            "function f(ptr, i)\n    unsafe_load(ptr, i)\nend\n",
+        )
+        .len(),
+        1
+    );
+    assert_eq!(
+        discouraged(
+            deny_list(&[("helper", "use another function")], &[]),
+            "function f(x, y)\n    helper(x, y)\nend\n",
+        )
+        .len(),
+        1
+    );
+}
+
+#[test]
 fn discouraged_function_ignores_a_qualified_callee() {
     assert!(
         discouraged(
