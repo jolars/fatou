@@ -184,13 +184,20 @@ fn render_list(node: &SyntaxNode) -> String {
         .children()
         .filter(|child| child.kind() == SyntaxKind::LIST_ITEM)
         .map(|item| {
-            let mut contents = vec![format!("(paragraph {})", render_inlines(&item))];
+            let inlines = render_inlines(&item);
+            let mut contents = if inlines.is_empty() {
+                Vec::new()
+            } else {
+                vec![format!("(paragraph {inlines})")]
+            };
             contents.extend(
                 item.children()
                     .filter(|child| {
                         matches!(
                             child.kind(),
-                            SyntaxKind::LIST | SyntaxKind::INDENTED_CODE_BLOCK
+                            SyntaxKind::LIST
+                                | SyntaxKind::INDENTED_CODE_BLOCK
+                                | SyntaxKind::FENCED_CODE_BLOCK
                         )
                     })
                     .map(|child| render_block(&child)),

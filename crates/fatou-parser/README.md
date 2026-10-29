@@ -50,6 +50,11 @@ assert_eq!(reconstruct(&output.cst), source);
 `fatou_parser::documentation::ast` provides typed navigation for Julia Markdown
 blocks and inline content. It also classifies core Documenter links, fences, and
 `jldoctest` info strings locally while preserving unknown extension syntax.
+Fences below list items retain the list prefix as whitespace trivia. Their
+`CodeBlock::content()` joins the `CODE_CONTENT` tokens without that prefix; each
+token has an exact decoded-text range. `content_range()` covers the whole body,
+including indentation between tokens, so consumers that transform the code
+should map individual tokens rather than add offsets to that range.
 
 ## Status
 

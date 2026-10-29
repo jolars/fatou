@@ -218,6 +218,166 @@ fn an_unclosed_explicit_fence_falls_back_losslessly() {
 }
 
 #[test]
+fn a_fence_can_start_immediately_after_a_list_marker() {
+    let input = "- ```julia\n  α = 1\n  ```\n- next\n";
+    let parsed = parse(input);
+    assert_eq!(reconstruct(&parsed.cst), input);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let list = parsed.cst.children().find_map(List::cast).unwrap();
+    let first = list.items().next().unwrap();
+    assert!(first.inlines().next().is_none());
+    let code = first
+        .blocks()
+        .find_map(|block| match block {
+            Block::CodeBlock(code) => Some(code),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(code.content(), "α = 1");
+}
+
+#[test]
+fn list_fences_preserve_indented_blank_lines() {
+    let input = "- Example:\n  ```julia\n  α = 1\n  \n  \n  β = 2\n  ```\n";
+    let parsed = parse(input);
+    assert_eq!(reconstruct(&parsed.cst), input);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let code = parsed.cst.descendants().find_map(CodeBlock::cast).unwrap();
+    assert_eq!(code.content(), "α = 1\n\n\nβ = 2");
+}
+
+#[test]
+fn list_fences_preserve_code_indentation_and_decoded_ranges() {
+    for (marker, prefix) in [("-", "  "), ("1.", "   "), ("  -", "    ")] {
+        for fence in ["```", "~~~~"] {
+            for newline in ["\n", "\r\n"] {
+                let input = format!(
+                    "{marker} Example{newline}{newline}{prefix}{fence}julia{newline}\
+                     {prefix}α = 1{newline}{prefix}  β = 2{newline}{prefix}{fence}{newline}\
+                     {marker} Next{newline}"
+                );
+                let parsed = parse(&input);
+                assert_eq!(reconstruct(&parsed.cst), input);
+                assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+                let list = parsed.cst.children().find_map(List::cast).unwrap();
+                let items: Vec<_> = list.items().collect();
+                assert_eq!(items.len(), 2);
+                let code = items[0]
+                    .blocks()
+                    .find_map(|block| match block {
+                        Block::CodeBlock(code) => Some(code),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("no nested fence in {input:?}"));
+                assert_eq!(code.fence_kind(), FenceKind::Julia);
+                assert_eq!(code.content(), format!("α = 1{newline}  β = 2"));
+                let body = code.content_range().unwrap();
+                assert_eq!(
+                    &input[usize::from(body.start())..usize::from(body.end())],
+                    format!("α = 1{newline}{prefix}  β = 2{newline}")
+                );
+                let tokens: Vec<_> = code
+                    .syntax()
+                    .children_with_tokens()
+                    .filter_map(|element| element.into_token())
+                    .filter(|token| token.kind() == SyntaxKind::CODE_CONTENT)
+                    .collect();
+                assert_eq!(tokens.len(), 2);
+                for token in tokens {
+                    let range = token.text_range();
+                    assert_eq!(
+                        &input[usize::from(range.start())..usize::from(range.end())],
+                        token.text()
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn list_fences_do_not_consume_siblings_or_indented_code() {
+    let input = concat!(
+        "- Literal fences\n\n",
+        "      ```julia\n      x = 1\n      ```\n",
+        "- Missing close\n\n",
+        "  ```julia\n  α = 1\n",
+        "- Sibling\n\n",
+        "  ```julia\n  β = 2\n  ```\n",
+    );
+    let parsed = parse(input);
+    assert_eq!(reconstruct(&parsed.cst), input);
+    assert_eq!(parsed.diagnostics.len(), 1, "{:?}", parsed.diagnostics);
+    let diagnostic = parsed.diagnostics[0];
+    assert_eq!(diagnostic.kind, DiagnosticKind::UnclosedFence);
+    assert_eq!(
+        usize::from(diagnostic.range.start()),
+        input.find("  ```julia\n  α").unwrap() + 2
+    );
+    let list = parsed.cst.children().find_map(List::cast).unwrap();
+    let items: Vec<_> = list.items().collect();
+    assert_eq!(items.len(), 3);
+    assert!(
+        items[0]
+            .blocks()
+            .any(|block| matches!(block, Block::IndentedCodeBlock(_)))
+    );
+    assert!(
+        !items[1]
+            .blocks()
+            .any(|block| matches!(block, Block::CodeBlock(_)))
+    );
+    assert!(
+        items[2]
+            .blocks()
+            .any(|block| matches!(block, Block::CodeBlock(_)))
+    );
+}
+
+#[test]
+fn list_fence_code_ranges_compose_with_escaped_docstring_bytes() {
+    let source = r#"
+"""
+- Example:
+  ```julia
+  α = 1
+  \u0066(α)
+  ```
+"""
+f() = 1
+"#;
+    let parsed = parse_julia(source);
+    let attachment = parsed
+        .cst
+        .descendants()
+        .find_map(DocAttachment::cast)
+        .unwrap();
+    let DocText::Static(decoded) = attachment.text() else {
+        panic!("expected a static docstring");
+    };
+    let markdown = parse(decoded.as_str());
+    let code = markdown
+        .cst
+        .descendants()
+        .find_map(CodeBlock::cast)
+        .unwrap();
+    assert_eq!(code.content(), "α = 1\nf(α)");
+    let second_line = code
+        .syntax()
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() == SyntaxKind::CODE_CONTENT)
+        .nth(1)
+        .unwrap();
+    let name = rowan::TextRange::at(second_line.text_range().start(), rowan::TextSize::new(1));
+    let original = decoded.source_map().source_range(name).unwrap();
+    assert_eq!(
+        &source[usize::from(original.start())..usize::from(original.end())],
+        r"\u0066"
+    );
+}
+
+#[test]
 fn typed_ast_casts_are_total_over_document_blocks() {
     let parsed = parse("# H\n\ntext\n\n---\n");
     let document = Document::cast(parsed.cst).unwrap();

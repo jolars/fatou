@@ -281,14 +281,37 @@ impl CodeBlock {
 
     /// Return the code body using Julia Markdown's trailing-newline chomp.
     pub fn content(&self) -> String {
-        token(self.syntax(), SyntaxKind::CODE_CONTENT)
-            .map(|token| token.text().trim_end_matches(['\r', '\n']).to_string())
-            .unwrap_or_default()
+        let mut content = String::new();
+        for token in self
+            .syntax()
+            .children_with_tokens()
+            .filter_map(|element| element.into_token())
+        {
+            if token.kind() == SyntaxKind::CODE_CONTENT {
+                content.push_str(token.text());
+            }
+        }
+        content.trim_end_matches(['\r', '\n']).to_string()
     }
 
-    /// Return the exact decoded-text range occupied by the code body.
+    /// Return the decoded-text range covering the code body.
+    ///
+    /// In a list, the range includes the list's indentation on continuation
+    /// lines. Individual `CODE_CONTENT` tokens exclude that indentation and
+    /// preserve exact ranges for consumers of [`Self::content`].
     pub fn content_range(&self) -> Option<TextRange> {
-        token(self.syntax(), SyntaxKind::CODE_CONTENT).map(|token| token.text_range())
+        let mut tokens = self
+            .syntax()
+            .children_with_tokens()
+            .filter_map(|element| element.into_token())
+            .filter(|token| token.kind() == SyntaxKind::CODE_CONTENT);
+        let first = tokens.next()?.text_range();
+        Some(TextRange::new(
+            first.start(),
+            tokens
+                .last()
+                .map_or(first.end(), |token| token.text_range().end()),
+        ))
     }
 
     /// Classify ordinary Julia and Documenter fence info strings locally.
@@ -317,9 +340,17 @@ impl IndentedCodeBlock {
 impl MathBlock {
     /// Return the math formula without block delimiters or its final newline.
     pub fn content(&self) -> String {
-        token(self.syntax(), SyntaxKind::MATH_CONTENT)
-            .map(|token| token.text().trim_end_matches(['\r', '\n']).to_string())
-            .unwrap_or_default()
+        let mut content = String::new();
+        for token in self
+            .syntax()
+            .children_with_tokens()
+            .filter_map(|element| element.into_token())
+        {
+            if token.kind() == SyntaxKind::MATH_CONTENT {
+                content.push_str(token.text());
+            }
+        }
+        content.trim_end_matches(['\r', '\n']).to_string()
     }
 }
 
