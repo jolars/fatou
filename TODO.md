@@ -121,12 +121,42 @@ style remains project policy rather than language correctness.
   Eunoia.jl's examples with the Markdown oracle and map nested REPL diagnostics
   through the separate code tokens.
 
-- [ ] Release the list-fence parser fix for Diplodocus. Its exact
-  `fatou-parser = "=0.8.2"` pin remains unchanged until publication. Then update
-  its pin and lockfile, enable the two pending integration tests, and run
-  `examples/eunoia/julia.py --require-list-fences` to verify both examples in
-  detached HTML and Markdown output. Parser and root linter changes belong in
-  separate release commits.
+- [ ] **Before the next parser release:** parse inline Markdown across wrapped
+  source lines in `crates/fatou-parser/src/documentation/parser.rs`.
+  `emit_paragraph` currently calls `parse_inlines` once per line, so wrapped
+  links, bold text, and inline code silently remain literal text. For example,
+  `../Eunoia.jl/docs/src/index.md` wraps this reference across two lines:
+
+  ```markdown
+  [API
+  Reference](@ref)
+  ```
+
+  Julia 1.13 produces one link with the label `API Reference`; Fatou produces
+  no link and no diagnostic. This blocks the authored Documenter profile
+  tracked in `../diplodocus/TODO.md`. Parse inline content across paragraph
+  continuations, including list items and admonitions, without crossing block
+  boundaries. Add Julia Markdown oracle fixtures for wrapped links, emphasis,
+  and inline code, plus UTF-8, CRLF, losslessness, and exact decoded-to-source
+  range regressions. Keep reference resolution in `../diplodocus/`.
+
+- [ ] Release the parser fixes needed by Diplodocus in `../diplodocus/`. Its
+  exact `fatou-parser = "=0.8.2"` pin remains unchanged until publication. Then
+  update `../diplodocus/Cargo.toml` and `../diplodocus/Cargo.lock`, enable the
+  two pending integration tests, and run
+  `../diplodocus/examples/eunoia/julia.py --require-list-fences` from the
+  Diplodocus environment to verify both examples in detached HTML and Markdown
+  output. Parser and root linter changes belong in separate release commits.
+
+- [ ] **Deferred:** recognize fenced code blocks inside admonitions in
+  `emit_indented_container_blocks`. An `!!! note` with an `@example gallery`
+  fence indented by four spaces currently yields an admonition paragraph
+  containing literal fence text; Julia Markdown produces a nested code block.
+  Preserve the fence classification, body indentation, lossless container
+  prefixes, and exact content ranges. Add a Julia Markdown oracle fixture and
+  source-map regressions. Eunoia's current gallery admonition contains prose
+  only, so this does not block the release for `../diplodocus/`. Executing
+  `@example` blocks remains Diplodocus work.
 
 - [x] Cache Markdown anchors and definitions in a demand-only salsa query over
   the file's decoded static docstring payloads. Code edits and equivalent
