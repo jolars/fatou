@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.9.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.8.2...fatou-parser-v0.9.0) (2026-10-29)
+
+### Features
+
+- **parser:** parse fences inside admonitions ([`0312cb9`](https://github.com/jolars/fatou/commit/0312cb98120533a20630c1186ddda3c3f3a3db10))
+- **parser:** parse wrapped Markdown inline content ([`27f1b89`](https://github.com/jolars/fatou/commit/27f1b8950666bcd2ce99833072293e7a1b2adb26))
+
+### Bug Fixes
+
+- **parser:** parse fenced code in Markdown lists ([`43e0b5e`](https://github.com/jolars/fatou/commit/43e0b5e137fe2a69d3f19f18ac9463437d48895d))
+
 ## [0.8.2](https://github.com/jolars/fatou/compare/fatou-parser-v0.8.1...fatou-parser-v0.8.2) (2026-10-20)
 
 ### Bug Fixes

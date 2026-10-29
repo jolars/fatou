@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.25.0](https://github.com/jolars/fatou/compare/v0.24.0...v0.25.0) (2026-10-29)
+
+### Features
+
+- extend script entry points with globs ([`74d2f99`](https://github.com/jolars/fatou/commit/74d2f9905de8c37a65e2428b89ac5a5576c83c3c)), closes [#134](https://github.com/jolars/fatou/issues/134)
+- infer conventional script entry points ([`533816a`](https://github.com/jolars/fatou/commit/533816aabac0e25848e910a9283dde9baba49631)), closes [#134](https://github.com/jolars/fatou/issues/134)
+- **linter:** align workspace rule defaults ([`fa08817`](https://github.com/jolars/fatou/commit/fa0881737136b20f118388400bad080f62ca4972))
+
+### Bug Fixes
+
+- **linter:** map code in nested documentation fences ([`cdb48dd`](https://github.com/jolars/fatou/commit/cdb48dd421826841eb72fd231797eae4829f1f1c))
+- **linter:** recognize static `@eval` definitions ([`09850a8`](https://github.com/jolars/fatou/commit/09850a8ad48485d2a5ef5576258cc5d2d0a57112)), fixes [#133](https://github.com/jolars/fatou/issues/133)
+- **index:** recover Base call signatures ([`58c9567`](https://github.com/jolars/fatou/commit/58c9567d7be4ac40a1ca84ff243d16612fcc0553)), fixes [#132](https://github.com/jolars/fatou/issues/132)
+- **linter:** allow explicit callbacks for scoped effects ([`66aff6d`](https://github.com/jolars/fatou/commit/66aff6d9ae3b4af1ea3665f8a1954539902ee5c5)), fixes [#131](https://github.com/jolars/fatou/issues/131)
+- **index:** harvest literal `@eval` loop methods (#128) ([`a7aee39`](https://github.com/jolars/fatou/commit/a7aee393568358f74ec917a0c515a7b93f51875d))
+- **index:** treat a Vararg-annotated parameter as variadic (#126) ([`78d8f0d`](https://github.com/jolars/fatou/commit/78d8f0d491d683d9593897a88b72bcb0f89d7a96))
+
+### Dependencies
+
+- updated crates/fatou-formatter to v0.7.5
+- updated crates/fatou-parser to v0.9.0
+
 ## [0.24.0](https://github.com/jolars/fatou/compare/v0.23.0...v0.24.0) (2026-10-20)
 
 ### Features

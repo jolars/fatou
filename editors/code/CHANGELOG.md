@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.25.0](https://github.com/jolars/fatou/compare/fatou-code-v0.24.0...fatou-code-v0.25.0) (2026-10-29)
+
+### Bug Fixes
+
+- **code:** update vulnerable packaging dependencies ([`e56861c`](https://github.com/jolars/fatou/commit/e56861cd05c9c17b529e7f1b5eade1864d8f7845))
+
+### Dependencies
+
+- updated fatou to v0.25.0
+
 ## [0.24.0](https://github.com/jolars/fatou/compare/fatou-code-v0.23.0...fatou-code-v0.24.0) (2026-10-20)
 
 ### Dependencies
