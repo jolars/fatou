@@ -139,6 +139,42 @@ fn script_globals_backdate_across_body_edits_and_forget_deleted_sources() {
     );
 }
 
+#[test]
+fn script_eval_effects_backdate_and_refresh_after_edits() {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("main.jl");
+    let sources = BTreeMap::from([(entry.clone(), Ok(Arc::from("@eval g() = 1\n")))]);
+    let mut db = IncrementalDatabase::default();
+    db.set_script_sources(std::slice::from_ref(&entry), &sources, &BTreeMap::new());
+    let file = db.lookup_file(&entry).unwrap();
+    let before = Arc::clone(fatou::incremental::script_program(&db, file));
+    assert!(!before.incomplete);
+    assert!(before.eval_sources.is_empty());
+    db.upsert_file(&entry, "\n@eval g() = 12345\n");
+    assert!(Arc::ptr_eq(
+        &before,
+        fatou::incremental::script_program(&db, file)
+    ));
+
+    db.upsert_file(&entry, "@eval $name() = 1\n");
+    let dynamic = Arc::clone(fatou::incremental::script_program(&db, file));
+    assert!(dynamic.incomplete);
+    assert_eq!(dynamic.eval_sources, [entry.clone()].into());
+    db.upsert_file(&entry, "\n@eval $name() = 12345\n");
+    assert!(Arc::ptr_eq(
+        &dynamic,
+        fatou::incremental::script_program(&db, file)
+    ));
+
+    db.upsert_file(&entry, "@eval g() = 1\n");
+    let restored = fatou::incremental::script_program(&db, file);
+    assert!(!restored.incomplete);
+    assert!(restored.eval_sources.is_empty());
+}
+
 fn edit(range: std::ops::Range<usize>, insert: &str) -> Edit {
     Edit {
         range,

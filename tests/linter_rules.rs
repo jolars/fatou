@@ -1489,6 +1489,61 @@ fn undefined_name_skips_files_that_eval() {
 }
 
 #[test]
+fn undefined_name_checks_files_with_static_eval_function_definitions() {
+    for definition in [
+        "@eval f(x) = x",
+        "@eval function f(x)\n    x\nend",
+        "@eval f(x::T)::T where {T} = x",
+        "Base.@eval f(x) = x",
+        "@Base.eval function f(x)\n    x\nend",
+        "@eval(f(x) = x)",
+        "@eval f(x) = body_is_exempt(x)",
+    ] {
+        let source = format!("{definition}\ng() = f(1) + typo\n");
+        let messages = findings("undefined-name", &source);
+        assert_eq!(messages.len(), 1, "{source}: {messages:?}");
+        assert!(messages[0].contains("`typo`"), "{messages:?}");
+    }
+}
+
+#[test]
+fn undefined_name_keeps_unknown_eval_definitions_conservative() {
+    let config = LintConfig {
+        select: Some(vec!["undefined-name".into()]),
+        ..Default::default()
+    };
+    for definition in [
+        "@eval $name(x) = x",
+        "@eval f(x::$T) = x",
+        "@eval f(x) = $body",
+        "@eval f(x) = $(eval(code))",
+        "@eval Other f(x) = x",
+        "Custom.@eval f(x) = x",
+        "macro eval(ex)\n    ex\nend\n@eval f(x) = x",
+        "module Base\nmacro eval(ex)\n    ex\nend\nend\nBase.@eval f(x) = x",
+        "baremodule Base\nmacro eval(ex)\n    ex\nend\nBase.@eval f(x) = x\nend",
+        "@eval f(x) = eval(code)",
+        "@eval f(x) = @unknown x",
+        "@wrapper @eval f(x) = x",
+        "function setup()\n    @eval f(x) = x\nend",
+        "for i in 1:2\n    @eval f(x) = x\nend",
+    ] {
+        let source = format!("{definition}\ng() = maybe_generated\n");
+        let report = check_source(None, &source, &config);
+        assert_eq!(
+            report
+                .diagnostics
+                .iter()
+                .map(|d| d.rule)
+                .collect::<Vec<_>>(),
+            ["analysis-incomplete"],
+            "{source}: {:?}",
+            report.diagnostics
+        );
+    }
+}
+
+#[test]
 fn undefined_name_skips_files_that_include() {
     // Without project context an `include` splices in unknown definitions.
     assert_eq!(

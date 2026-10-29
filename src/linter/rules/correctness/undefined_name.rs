@@ -16,7 +16,7 @@
 //! - a whole-module `using` does not resolve against the provided library
 //!   (an unharvested package, or a relative `using .M`) — it may export
 //!   anything;
-//! - the file calls `eval`/`@eval` (definitions invisible to the model);
+//! - the file calls `eval`/`@eval` with definitions invisible to the model;
 //! - the file `include`s anything while neither workspace nor explicit script
 //!   context is known, or
 //!   `include`s a non-literal path even with one (the harvest cannot follow
@@ -64,8 +64,8 @@ impl Rule for UndefinedName {
          assignments. An explicit `[lint] select` replaces the defaults, and \
          `ignore = [\"undefined-name\"]` disables the rule. Each entry point and host \
          module is checked independently; findings name the failing contexts. \
-         Dynamic includes, `eval`, unresolved whole-module `using`s, and broken \
-         include closures suppress findings for that entry. Value reads inside \
+         Dynamic includes, dynamic `eval`, unresolved whole-module `using`s, and \
+         broken include closures suppress findings for that entry. Value reads inside \
          macro calls and quoted code remain exempt. Without entry points, \
          standalone files can opt in with \
          `[lint] extend-select = [\"undefined-name\"]`; files containing includes \

@@ -56,20 +56,57 @@ fn skipped_analysis_notices_require_an_enabled_unsuppressed_rule() {
 }
 
 #[test]
-fn other_resolution_limits_do_not_produce_include_context_notices() {
+fn dynamic_eval_explains_skipped_undefined_names() {
     for source in [
         "eval(code)\nf() = typo\n",
         "@eval x = 1\nf() = typo\n",
         "Core.eval(code)\nf() = typo\n",
-        "using Unavailable\nf() = typo\n",
+        "@eval $name() = 1\nf() = typo\n",
     ] {
-        assert!(
-            check_source(None, source, &undefined_names())
-                .diagnostics
-                .is_empty(),
-            "{source}"
-        );
+        let report = check_source(None, source, &undefined_names());
+        assert_eq!(report.status, LintStatus::Clean);
+        let [notice] = &report.diagnostics[..] else {
+            panic!("{source}: {:?}", report.diagnostics);
+        };
+        assert_eq!(notice.rule, "analysis-incomplete");
+        assert_eq!(notice.severity, Severity::Info);
+        assert!(notice.message.body.contains("undefined-name"));
+        assert!(notice.message.body.contains("eval"));
+        assert_eq!(&source[notice.range], source.lines().next().unwrap());
+        assert!(notice.fixes.is_empty());
     }
+}
+
+#[test]
+fn static_eval_does_not_produce_analysis_notices() {
+    let report = check_source(None, "@eval f() = 1\nf()\n", &undefined_names());
+    assert_eq!(report.status, LintStatus::Clean);
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+}
+
+#[test]
+fn dynamic_eval_notices_require_an_enabled_unsuppressed_rule() {
+    let source = "eval(code)\nf() = typo\n";
+    let mut ignored = undefined_names();
+    ignored.ignore.push("undefined-name".into());
+    for config in [LintConfig::default(), ignored] {
+        assert!(check_source(None, source, &config).diagnostics.is_empty());
+    }
+    let source = format!("# fatou-ignore-file undefined-name: dynamic definitions\n{source}");
+    assert!(
+        check_source(None, &source, &undefined_names())
+            .diagnostics
+            .is_empty()
+    );
+}
+
+#[test]
+fn unresolved_usings_do_not_produce_eval_notices() {
+    assert!(
+        check_source(None, "using Unavailable\nf() = typo\n", &undefined_names())
+            .diagnostics
+            .is_empty()
+    );
 }
 
 #[test]
@@ -99,38 +136,43 @@ fn cli_analysis_notices_preserve_output_formats_and_success_with_fix() {
         "[lint]\nselect = [\"undefined-name\"]\n[lint.severity]\nundefined-name = \"error\"\n",
     )
     .unwrap();
-    let source = "include(\"helper.jl\")\nf() = typo\n";
-    std::fs::write(dir.path().join("main.jl"), source).unwrap();
     std::fs::write(dir.path().join("helper.jl"), "provided = 1\n").unwrap();
-    for mode in ["pretty", "concise", "json"] {
-        for fix in [false, true] {
-            let mut command = Command::new(env!("CARGO_BIN_EXE_fatou"));
-            command
-                .current_dir(dir.path())
-                .env_remove("FATOU_CONFIG")
-                .env("JULIA_PROJECT", dir.path())
-                .env("JULIA_DEPOT_PATH", dir.path().join("empty-depot"))
-                .args(["lint", "--output", mode]);
-            if fix {
-                command.arg("--fix");
+    for (source, reason) in [
+        ("include(\"helper.jl\")\nf() = typo\n", "entry-points"),
+        ("@eval $name() = 1\nf() = typo\n", "eval"),
+    ] {
+        std::fs::write(dir.path().join("main.jl"), source).unwrap();
+        for mode in ["pretty", "concise", "json"] {
+            for fix in [false, true] {
+                let mut command = Command::new(env!("CARGO_BIN_EXE_fatou"));
+                command
+                    .current_dir(dir.path())
+                    .env_remove("FATOU_CONFIG")
+                    .env("JULIA_PROJECT", dir.path())
+                    .env("JULIA_DEPOT_PATH", dir.path().join("empty-depot"))
+                    .args(["lint", "--output", mode]);
+                if fix {
+                    command.arg("--fix");
+                }
+                let output = command.arg("main.jl").output().unwrap();
+                assert!(output.status.success(), "{mode}, fix={fix}: {output:?}");
+                let stdout = String::from_utf8(output.stdout).unwrap();
+                let stderr = String::from_utf8(output.stderr).unwrap();
+                let rendered = if mode == "json" { &stdout } else { &stderr };
+                assert!(rendered.contains("analysis-incomplete"), "{rendered}");
+                assert!(rendered.contains(reason), "{rendered}");
+                if mode == "json" {
+                    let diagnostics: Vec<serde_json::Value> =
+                        serde_json::from_str(&stdout).unwrap();
+                    assert_eq!(diagnostics.len(), 1);
+                    assert_eq!(diagnostics[0]["severity"], "info");
+                }
+                assert!(!stderr.contains(": clean"));
+                assert_eq!(
+                    std::fs::read_to_string(dir.path().join("main.jl")).unwrap(),
+                    source
+                );
             }
-            let output = command.arg("main.jl").output().unwrap();
-            assert!(output.status.success(), "{mode}, fix={fix}: {output:?}");
-            let stdout = String::from_utf8(output.stdout).unwrap();
-            let stderr = String::from_utf8(output.stderr).unwrap();
-            let rendered = if mode == "json" { &stdout } else { &stderr };
-            assert!(rendered.contains("analysis-incomplete"), "{rendered}");
-            assert!(rendered.contains("entry-points"), "{rendered}");
-            if mode == "json" {
-                let diagnostics: Vec<serde_json::Value> = serde_json::from_str(&stdout).unwrap();
-                assert_eq!(diagnostics.len(), 1);
-                assert_eq!(diagnostics[0]["severity"], "info");
-            }
-            assert!(!stderr.contains(": clean"));
-            assert_eq!(
-                std::fs::read_to_string(dir.path().join("main.jl")).unwrap(),
-                source
-            );
         }
     }
 }

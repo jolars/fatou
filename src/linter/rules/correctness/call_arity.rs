@@ -17,7 +17,7 @@
 //! (names without signatures) library calls simply find no methods and stay
 //! silent.
 //!
-//! The whole file is skipped when it calls `eval`/`@eval`, `include`s
+//! The whole file is skipped when it calls an unmodeled `eval`/`@eval`, `include`s
 //! anything without a workspace context (or with a dynamic path), or
 //! `using`s a module the library cannot resolve — in each case methods may
 //! exist that the model cannot see. A single call is skipped when it splats
@@ -70,8 +70,8 @@ impl Rule for CallArity {
          unknown method always silences the check rather than triggering it. \
          Calls that splat arguments, carry `do` blocks, sit in macro calls or \
          quoted code, or target constructors and callable values are exempt, \
-         and a file that `eval`s or `include`s outside a known workspace is \
-         skipped entirely. The rule runs by default for workspace package \
+         and files that use dynamic `eval` or `include` outside a known workspace \
+         are skipped entirely. The rule runs by default for workspace package \
          files. Other files require explicit selection because they may be \
          fragments whose siblings add methods."
     }

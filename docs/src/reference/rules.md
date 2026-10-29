@@ -125,7 +125,7 @@ warning: unused-argument
 
 ## `undefined-name`
 
-Flag an identifier that no resolution tier provides: not a local or a file binding, not a same-module global from included files, not a whole-module `using`'s export, and not a Base/Core name. For standalone programs, declare `[project] entry-points = ["main.jl"]` to enable this rule by default, follow static includes, and resolve ordinary global assignments. An explicit `[lint] select` replaces the defaults, and `ignore = ["undefined-name"]` disables the rule. Each entry point and host module is checked independently; findings name the failing contexts. Dynamic includes, `eval`, unresolved whole-module `using`s, and broken include closures suppress findings for that entry. Value reads inside macro calls and quoted code remain exempt. Without entry points, standalone files can opt in with `[lint] extend-select = ["undefined-name"]`; files containing includes are skipped. The rule also runs by default for workspace package files.
+Flag an identifier that no resolution tier provides: not a local or a file binding, not a same-module global from included files, not a whole-module `using`'s export, and not a Base/Core name. For standalone programs, declare `[project] entry-points = ["main.jl"]` to enable this rule by default, follow static includes, and resolve ordinary global assignments. An explicit `[lint] select` replaces the defaults, and `ignore = ["undefined-name"]` disables the rule. Each entry point and host module is checked independently; findings name the failing contexts. Dynamic includes, dynamic `eval`, unresolved whole-module `using`s, and broken include closures suppress findings for that entry. Value reads inside macro calls and quoted code remain exempt. Without entry points, standalone files can opt in with `[lint] extend-select = ["undefined-name"]`; files containing includes are skipped. The rule also runs by default for workspace package files.
 
 `raduis` is a typo; no tier resolves it:
 
@@ -435,7 +435,7 @@ error: julia-version-compat
 
 ## `call-arity`
 
-Flag a call that no visible method of the function accepts: a positional count outside every method's range, or a keyword argument no positionally-matching method declares. Such a call raises `MethodError` at runtime. The method table unions every tier name resolution sees — the file's own definitions, the workspace package, and the harvested library, qualified extensions included — so an unknown method always silences the check rather than triggering it. Calls that splat arguments, carry `do` blocks, sit in macro calls or quoted code, or target constructors and callable values are exempt, and a file that `eval`s or `include`s outside a known workspace is skipped entirely. The rule runs by default for workspace package files. Other files require explicit selection because they may be fragments whose siblings add methods.
+Flag a call that no visible method of the function accepts: a positional count outside every method's range, or a keyword argument no positionally-matching method declares. Such a call raises `MethodError` at runtime. The method table unions every tier name resolution sees — the file's own definitions, the workspace package, and the harvested library, qualified extensions included — so an unknown method always silences the check rather than triggering it. Calls that splat arguments, carry `do` blocks, sit in macro calls or quoted code, or target constructors and callable values are exempt, and files that use dynamic `eval` or `include` outside a known workspace are skipped entirely. The rule runs by default for workspace package files. Other files require explicit selection because they may be fragments whose siblings add methods.
 
 `half` has no two-argument method:
 
@@ -455,7 +455,7 @@ warning: call-arity
 
 ## `function-has-no-methods`
 
-Flag a call to a function whose every visible definition is a bodyless `function f end` declaration. Such a function has an empty method table, so the call raises `MethodError` whatever it passes. Only a name the closed world defines is checked — one belonging to this file or to the enclosing workspace package — since the owner of a `using`'d or Base/Core name may add methods elsewhere. A declaration the package `export`s or declares `public` is exempt as an interface hook for a package extension or a downstream package to implement, as is a name that also names a type. The file is skipped entirely when it `eval`s, `include`s outside a known workspace, or `using`s a module the library cannot resolve, and call sites in macro calls or quoted code are exempt. The rule runs by default for workspace package files. Other files require explicit selection because their siblings may define the methods.
+Flag a call to a function whose every visible definition is a bodyless `function f end` declaration. Such a function has an empty method table, so the call raises `MethodError` whatever it passes. Only a name the closed world defines is checked — one belonging to this file or to the enclosing workspace package — since the owner of a `using`'d or Base/Core name may add methods elsewhere. A declaration the package `export`s or declares `public` is exempt as an interface hook for a package extension or a downstream package to implement, as is a name that also names a type. The file is skipped entirely when it uses dynamic `eval`, `include`s outside a known workspace, or `using`s a module the library cannot resolve, and call sites in macro calls or quoted code are exempt. The rule runs by default for workspace package files. Other files require explicit selection because their siblings may define the methods.
 
 `normalize` is declared but never given a method:
 
@@ -1620,7 +1620,7 @@ warning: unexplained-suppression
 
 ## `outdated-suppression`
 
-Flag a `# fatou-ignore` directive that suppressed nothing: either the rule it names ran and reported nothing it covers, or the directive has no code after it to apply to. A rule that this run did not enable, and any rule in a file whose names cannot be resolved (one that `eval`s, or `using`s a module the run did not harvest), is dormant rather than stale and is never reported. The safe fix deletes the directive.
+Flag a `# fatou-ignore` directive that suppressed nothing: either the rule it names ran and reported nothing it covers, or the directive has no code after it to apply to. A rule that this run did not enable, and any rule in a file whose names cannot be resolved (one that uses dynamic `eval` or `using`s a module the run did not harvest), is dormant rather than stale and is never reported. The safe fix deletes the directive.
 
 A directive at the end of a file, with nothing left to suppress:
 

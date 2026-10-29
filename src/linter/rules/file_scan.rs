@@ -14,6 +14,7 @@
 use rowan::TextRange;
 
 use crate::project::scripts::DefinitionEffects;
+use crate::semantic::SemanticModel;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
 /// One pass over the CST collecting everything a resolution-dependent rule
@@ -26,8 +27,10 @@ pub(crate) struct FileScan {
     macro_calls: Vec<TextRange>,
     /// `QUOTE_EXPR`/`QUOTE_SYM` extents: quoted code is data, not code.
     quotes: Vec<TextRange>,
-    /// The file calls `eval`/`@eval`, which can define anything at runtime.
+    /// The file calls an `eval`/`@eval` whose definitions are not modeled.
     pub(crate) calls_eval: bool,
+    /// The first dynamic eval that prevents checking undefined names.
+    pub(crate) first_eval: Option<TextRange>,
     /// The file `include`s a literal path. The harvest follows those, so they
     /// are only a problem without a workspace to have harvested them.
     pub(crate) literal_include: bool,
@@ -38,19 +41,24 @@ pub(crate) struct FileScan {
 }
 
 impl FileScan {
-    pub(crate) fn collect(root: &SyntaxNode) -> Self {
+    pub(crate) fn collect(root: &SyntaxNode, model: &SemanticModel) -> Self {
         let mut scan = FileScan {
             macro_calls: Vec::new(),
             quotes: Vec::new(),
             calls_eval: false,
+            first_eval: None,
             literal_include: false,
             dynamic_include: false,
             first_include: None,
         };
         let mut effects = DefinitionEffects::default();
         for node in root.descendants() {
-            if effects.observe(&node) && scan.first_include.is_none() {
+            let called_eval = effects.calls_eval;
+            if effects.observe(&node, model) && scan.first_include.is_none() {
                 scan.first_include = Some(node.text_range());
+            }
+            if effects.calls_eval && !called_eval {
+                scan.first_eval = Some(node.text_range());
             }
             match node.kind() {
                 SyntaxKind::MACRO_CALL => scan.macro_calls.push(node.text_range()),

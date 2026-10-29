@@ -424,7 +424,9 @@ impl<'a> RuleContext<'a> {
 
     /// The shared per-file soundness scan (see [`FileScan`]).
     pub(crate) fn file_scan(&self) -> &FileScan {
-        self.cache.scan.get_or_init(|| FileScan::collect(self.root))
+        self.cache
+            .scan
+            .get_or_init(|| FileScan::collect(self.root, self.model))
     }
 
     /// Whether missing module uses can prove an import unused. A package
@@ -986,7 +988,7 @@ impl ResolvedRules {
         }
 
         if self.enabled.contains("undefined-name")
-            && let Some(notice) = include_context_notice(ctx)
+            && let Some(notice) = analysis_context_notice(ctx)
         {
             all.push(notice);
         }
@@ -1008,28 +1010,73 @@ impl ResolvedRules {
     }
 }
 
-/// A missing host context is actionable configuration, not a Julia violation.
+/// An analysis limit explains missing findings rather than a Julia violation.
 /// Wait for a resolution context so a cold LSP fallback does not flash notices.
-fn include_context_notice(ctx: &RuleContext<'_>) -> Option<Diagnostic> {
-    if ctx.scripts.is_some()
-        || ctx.resolution.as_ref()?.workspace.is_some()
-        || ctx
-            .suppressions
-            .is_suppressed("undefined-name", ctx.root.text_range())
+fn analysis_context_notice(ctx: &RuleContext<'_>) -> Option<Diagnostic> {
+    let resolution = ctx.resolution.as_ref()?;
+    if ctx
+        .suppressions
+        .is_suppressed("undefined-name", ctx.root.text_range())
     {
         return None;
     }
-    let range = ctx.file_scan().first_include?;
-    Some(Diagnostic {
-        severity: Severity::Info,
-        ..Diagnostic::new(
-            ANALYSIS_INCOMPLETE,
+    let scan = ctx.file_scan();
+    let (range, message) = if let Some(scripts) = ctx.scripts {
+        if scripts.pending {
+            return None;
+        }
+        let contexts: Vec<_> = scripts
+            .contexts(ctx.path?)
+            .into_iter()
+            .filter(|context| !context.program.eval_sources.is_empty())
+            .collect();
+        if contexts.is_empty() {
+            return None;
+        }
+        let sources: BTreeSet<_> = contexts
+            .iter()
+            .flat_map(|context| &context.program.eval_sources)
+            .map(|path| format!("`{}`", path.display()))
+            .collect();
+        (
+            scan.first_eval
+                .unwrap_or_else(|| TextRange::empty(ctx.root.text_range().start())),
+            format!(
+                "`undefined-name` checking was skipped in {} because dynamic \
+                 `eval` in {} can define additional names.",
+                contexts
+                    .iter()
+                    .map(|context| context.label())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                sources.into_iter().collect::<Vec<_>>().join(", "),
+            ),
+        )
+    } else if let Some(range) = scan.first_eval {
+        (
             range,
+            "`undefined-name` checking was skipped because dynamic `eval` can \
+             define additional names. Only top-level, current-module `@eval` \
+             function definitions with literal names and no interpolation or \
+             nested macros are modeled."
+                .to_string(),
+        )
+    } else {
+        if resolution.workspace.is_some() {
+            return None;
+        }
+        (
+            scan.first_include?,
             "`undefined-name` checking was skipped because includes have no known \
              package or script context. For a standalone script, declare \
              `[project] entry-points` in `fatou.toml` and use static \
-             `include(\"path\")` calls.",
+             `include(\"path\")` calls."
+                .to_string(),
         )
+    };
+    Some(Diagnostic {
+        severity: Severity::Info,
+        ..Diagnostic::new(ANALYSIS_INCOMPLETE, range, message)
     })
 }
 
@@ -1250,6 +1297,12 @@ mod base_resolution_tests {
             None
         ));
         assert!(!call_is_base(
+            "@eval $name() = 1\nlength(x)\n",
+            "length(x)",
+            Some(&library(&[])),
+            None
+        ));
+        assert!(call_is_base(
             "@eval f() = 1\nlength(x)\n",
             "length(x)",
             Some(&library(&[])),

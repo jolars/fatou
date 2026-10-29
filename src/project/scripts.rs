@@ -18,6 +18,7 @@ use super::{IncludeEdge, include_edges, include_target};
 /// Definitions whose values cannot be inferred from a static include closure.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DefinitionEffects {
+    /// An `eval` whose definitions the semantic model cannot account for.
     pub calls_eval: bool,
     pub literal_include: bool,
     pub dynamic_include: bool,
@@ -25,12 +26,13 @@ pub struct DefinitionEffects {
 
 impl DefinitionEffects {
     /// Record definition effects and report whether this node is an include.
-    pub(crate) fn observe(&mut self, node: &SyntaxNode) -> bool {
+    pub(crate) fn observe(&mut self, node: &SyntaxNode, model: &SemanticModel) -> bool {
         if let Some(call) = MacroCall::cast(node.clone()) {
             if call
                 .name()
                 .and_then(|name| name.macro_token())
                 .is_some_and(|t| t.text() == "eval")
+                && !model.is_static_eval_definition(&call)
             {
                 self.calls_eval = true;
             }
@@ -52,10 +54,14 @@ impl DefinitionEffects {
                 && let Some(token) = callee.syntax().last_token()
                 && matches!(token.text(), "include" | "eval")
             {
-                // Qualified and computed include/eval calls have no supported
-                // static target; treating them as absent would invent findings.
-                self.dynamic_include = true;
-                return token.text() == "include";
+                // Qualified and computed calls have no supported static target;
+                // treating them as absent would invent findings.
+                if token.text() == "eval" {
+                    self.calls_eval = true;
+                } else {
+                    self.dynamic_include = true;
+                    return true;
+                }
             }
         }
         false
@@ -77,6 +83,7 @@ pub struct ScriptFile {
     pub modules: BTreeMap<ModulePath, ScriptModule>,
     pub includes: Vec<IncludeEdge>,
     pub incomplete: bool,
+    calls_eval: bool,
     events: Vec<ScriptEvent>,
 }
 
@@ -175,8 +182,9 @@ impl ScriptFile {
         out.events = events.into_iter().map(|(_, event)| event).collect();
         let mut effects = DefinitionEffects::default();
         for node in root.descendants() {
-            effects.observe(&node);
+            effects.observe(&node, model);
         }
+        out.calls_eval = effects.calls_eval;
         out.incomplete |= effects.calls_eval || effects.dynamic_include;
         out
     }
@@ -207,6 +215,9 @@ pub struct ScriptProgram {
     pub modules: BTreeMap<ModulePath, ScriptModule>,
     pub members: BTreeMap<PathBuf, BTreeSet<ModulePath>>,
     pub incomplete: bool,
+    /// Files whose dynamic `eval`s prevent proving that a name is undefined.
+    /// Spans are recovered from the current file's CST, keeping this range-free.
+    pub eval_sources: BTreeSet<PathBuf>,
     /// Confirmed failed reads, keyed by the file containing each include.
     /// Paths are decoded literals, so consumers recover spans from current text.
     pub failed_includes: BTreeMap<PathBuf, BTreeSet<String>>,
@@ -269,6 +280,9 @@ impl ScriptProgram {
         }
         active.insert(path.to_path_buf());
         self.incomplete |= projection.incomplete;
+        if projection.calls_eval {
+            self.eval_sources.insert(path.to_path_buf());
+        }
         for (suffix, module) in &projection.modules {
             let path: ModulePath = host.iter().chain(suffix).cloned().collect();
             let dest = self.modules.entry(path).or_default();

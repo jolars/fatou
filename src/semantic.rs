@@ -30,6 +30,7 @@
 pub mod binding;
 pub mod builder;
 pub mod cfg;
+mod eval;
 pub mod import;
 pub mod scope;
 pub mod signature;

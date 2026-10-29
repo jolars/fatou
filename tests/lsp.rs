@@ -7114,6 +7114,53 @@ fn script_entry_points_enable_default_diagnostics_after_loading() {
 }
 
 #[test]
+fn script_eval_edits_refresh_sibling_findings_and_analysis_notices() {
+    let dir = TempDir::new("fatou-lsp-script-eval");
+    write_file(
+        &dir.path.join("fatou.toml"),
+        "[project]\nentry-points = [\"main.jl\"]\n[lint]\nselect = [\"undefined-name\"]\n",
+    );
+    write_file(
+        &dir.path.join("main.jl"),
+        "@eval $name() = 1\ninclude(\"worker.jl\")\n",
+    );
+    let worker_text = "f() = (g(), undefined_probe_name())\n";
+    write_file(&dir.path.join("worker.jl"), worker_text);
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_options(&client, serde_json::Value::Null);
+    let worker = file_uri(&dir.path.join("worker.jl"));
+    let entry = file_uri(&dir.path.join("main.jl"));
+    let expect = |code: &str, text: &str| {
+        loop {
+            let published = recv_publish_for(&client, &worker);
+            if published.diagnostics.len() == 1
+                && published.diagnostics[0].code == Some(NumberOrString::String(code.into()))
+                && published.diagnostics[0].message.contains(text)
+            {
+                assert_eq!(published.version, Some(1));
+                break;
+            }
+        }
+    };
+    open_document(&client, &worker, worker_text);
+    expect("analysis-incomplete", "eval");
+    open_document(&client, &entry, "@eval g() = 1\ninclude(\"worker.jl\")\n");
+    expect("undefined-name", "`undefined_probe_name`");
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didChange".into(),
+            params: serde_json::json!({"textDocument": {"uri": entry, "version": 2},
+            "contentChanges": [{"text": "@eval $name() = 1\ninclude(\"worker.jl\")\n"}]}),
+        }))
+        .unwrap();
+    expect("analysis-incomplete", "eval");
+    drop(client);
+    thread.join().unwrap();
+}
+
+#[test]
 fn unused_imports_refresh_after_cross_file_unsaved_edits_and_close() {
     let _env = ENV_LOCK.lock().unwrap();
     for scripts in [true, false] {

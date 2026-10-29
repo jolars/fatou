@@ -55,8 +55,8 @@ impl Rule for OutdatedSuppression {
         "Flag a `# fatou-ignore` directive that suppressed nothing: either the \
          rule it names ran and reported nothing it covers, or the directive has \
          no code after it to apply to. A rule that this run did not enable, and \
-         any rule in a file whose names cannot be resolved (one that `eval`s, \
-         or `using`s a module the run did not harvest), is dormant rather than \
+         any rule in a file whose names cannot be resolved (one that uses dynamic \
+         `eval` or `using`s a module the run did not harvest), is dormant rather than \
          stale and is never reported. The safe fix deletes the directive."
     }
 
@@ -126,8 +126,8 @@ fn verdict_is_trustworthy(rule: &str, ctx: &RuleContext<'_>) -> bool {
     // The floor, and deliberately one question rather than a list of rules:
     // *any* rule may open by asking what a name means
     // (`RuleContext::resolves_to_base` is the standard first move for an idiom
-    // rule), and every one of them goes quiet for a file that `eval`s, carries
-    // an unfollowable `include`, or `using`s a module nothing harvested — which
+    // rule), and every one goes quiet for a file with dynamic `eval`,
+    // an unfollowable `include`, or a `using` of a module nothing harvested — which
     // is most real files when the CLI lints against the built-in Base/Core
     // snapshot alone. Their silence there says nothing about the directive, so
     // such a file keeps every suppression it has.

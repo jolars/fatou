@@ -26,7 +26,7 @@
 //!   record.
 //!
 //! The whole-file bail-outs are [`call-arity`](super::CallArity)'s, via
-//! [`RuleContext::trusts_resolution`]: `eval`/`@eval` (the `@eval`-in-a-loop
+//! [`RuleContext::trusts_resolution`]: unmodeled `eval`/`@eval` (the `@eval`-in-a-loop
 //! method factory among them), an `include` no harvest can follow, and an
 //! unresolvable `using`. A call site inside a macro call or quoted code is
 //! skipped too.
@@ -67,8 +67,8 @@ impl Rule for FunctionHasNoMethods {
          the package `export`s or declares `public` is exempt as an interface \
          hook for a package extension or a downstream package to implement, \
          as is a name that also names a type. The file is skipped entirely \
-         when it `eval`s, `include`s outside a known workspace, or `using`s a \
-         module the library cannot resolve, and call sites in macro calls or \
+         when it uses dynamic `eval`, `include`s outside a known workspace, or \
+         `using`s a module the library cannot resolve, and call sites in macro calls or \
          quoted code are exempt. The rule runs by default for workspace \
          package files. Other files require explicit selection because their \
          siblings may define the methods."

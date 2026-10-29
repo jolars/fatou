@@ -93,11 +93,11 @@ change notice severity; disabling, ignoring, or suppressing the rule file-wide
 silences the notice.
 
 A missing or unreadable entry point fails CLI linting. The language server logs
-the failure and continues checking other entries. Dynamic includes, `eval`,
-unresolved whole-module `using`s, include cycles, and unreadable or unparseable
-dependencies make an entry's undefined-name analysis incomplete and suppress its
-findings. Relative whole-module `using`s remain unresolved. Other independent
-entries still run.
+the failure and continues checking other entries. Dynamic includes, dynamic
+`eval`, unresolved whole-module `using`s, include cycles, and unreadable or
+unparseable dependencies make an entry's undefined-name analysis incomplete and
+suppress its findings. Relative whole-module `using`s remain unresolved. Other
+independent entries still run.
 
 Missing or unreadable static include targets produce errors at their include
 calls, including empty paths and directory targets. The CLI reports errors in

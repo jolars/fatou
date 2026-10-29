@@ -121,6 +121,20 @@ fn cli_still_flags_a_genuine_typo() {
 }
 
 #[test]
+fn static_eval_definitions_resolve_without_hiding_sibling_typos() {
+    for definition in ["@eval g() = 1", "@eval function g()\n    1\nend"] {
+        let (_dep, pkg, mut library) = project("f() = (g(), undefined_probe_name())\n");
+        write(&pkg.path().join("src/a.jl"), definition);
+        library
+            .packages
+            .insert("M".into(), Arc::new(harvest_package_named(pkg.path(), "M")));
+        let findings = undefined_in_b(&pkg, &library);
+        assert_eq!(findings.len(), 1, "{definition}: {findings:?}");
+        assert!(findings[0].contains("`undefined_probe_name`"));
+    }
+}
+
+#[test]
 fn generated_imported_constructors_remain_types_in_sibling_files() {
     let dep = TempDir::new();
     write(

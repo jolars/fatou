@@ -43,7 +43,7 @@ fn lint_with_project(dir: &Path, project: &Path, args: &[&str]) -> Vec<Value> {
         .unwrap_or_else(|err| panic!("{err}: {}", String::from_utf8_lossy(&output.stderr)));
     assert_eq!(
         output.status.success(),
-        findings.is_empty(),
+        findings.iter().all(|d| d["rule"] == "analysis-incomplete"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -252,6 +252,97 @@ fn script_include_hosts_do_not_share_globals() {
 }
 
 #[test]
+fn static_eval_definitions_do_not_hide_findings_in_included_files() {
+    for definition in [
+        "@eval g() = 1",
+        "@eval function g()\n    1\nend",
+        "Base.@eval g() = 1",
+        "@Base.eval g() = 1",
+        "@eval(g() = 1)",
+    ] {
+        let dir = project(&["src/Demo.jl"]);
+        write(
+            dir.path(),
+            "src/Demo.jl",
+            &format!("module Demo\ninclude(\"a.jl\")\n{definition}\nend\n"),
+        );
+        write(
+            dir.path(),
+            "src/a.jl",
+            "f() = (g(), undefined_probe_name())\n",
+        );
+        for args in [vec!["src"], vec!["--fix", "src/a.jl"]] {
+            let findings = lint(dir.path(), &args);
+            assert_eq!(findings.len(), 1, "{definition}: {findings:#?}");
+            assert_eq!(findings[0]["rule"], "undefined-name");
+            assert!(findings[0].to_string().contains("`undefined_probe_name`"));
+        }
+    }
+}
+
+#[test]
+fn dynamic_eval_explains_skipped_analysis_in_sibling_files() {
+    let dir = project(&["main.jl", "good.jl"]);
+    write(
+        dir.path(),
+        "main.jl",
+        "include(\"dynamic.jl\")\ninclude(\"worker.jl\")\n",
+    );
+    write(dir.path(), "dynamic.jl", "@eval $name() = 1\n");
+    write(dir.path(), "worker.jl", "f() = maybe_generated\n");
+    write(dir.path(), "good.jl", "g() = independent_typo\n");
+    let findings = lint(dir.path(), &["worker.jl", "good.jl"]);
+    assert_eq!(findings.len(), 2, "{findings:#?}");
+    let notice = findings
+        .iter()
+        .find(|d| d["rule"] == "analysis-incomplete")
+        .unwrap();
+    assert_eq!(notice["severity"], "info");
+    let message = notice.to_string();
+    assert!(message.contains("undefined-name"), "{message}");
+    assert!(message.contains("dynamic.jl"), "{message}");
+    assert!(message.contains("main.jl"), "{message}");
+    assert!(
+        findings
+            .iter()
+            .any(|d| d["rule"] == "undefined-name" && d.to_string().contains("`independent_typo`"))
+    );
+}
+
+#[test]
+fn shared_files_keep_findings_from_entries_without_dynamic_eval() {
+    let dir = project(&["dynamic.jl", "static.jl"]);
+    write(
+        dir.path(),
+        "dynamic.jl",
+        "@eval $name() = 1\ninclude(\"worker.jl\")\n",
+    );
+    write(
+        dir.path(),
+        "static.jl",
+        "@eval g() = 1\ninclude(\"worker.jl\")\n",
+    );
+    write(dir.path(), "worker.jl", "f() = (g(), typo)\n");
+    let diagnostics = lint(dir.path(), &["worker.jl"]);
+    assert_eq!(diagnostics.len(), 2, "{diagnostics:#?}");
+    let finding = diagnostics
+        .iter()
+        .find(|d| d["rule"] == "undefined-name")
+        .unwrap()
+        .to_string();
+    assert!(finding.contains("`typo`"), "{finding}");
+    assert!(finding.contains("static.jl"), "{finding}");
+    assert!(!finding.contains("dynamic.jl"), "{finding}");
+    let notice = diagnostics
+        .iter()
+        .find(|d| d["rule"] == "analysis-incomplete")
+        .unwrap()
+        .to_string();
+    assert!(notice.contains("dynamic.jl"), "{notice}");
+    assert!(!notice.contains("static.jl"), "{notice}");
+}
+
+#[test]
 fn script_uncertainty_in_a_sibling_suppresses_undefined_names() {
     for uncertain in [
         "eval(code)\n",
@@ -268,7 +359,13 @@ fn script_uncertainty_in_a_sibling_suppresses_undefined_names() {
         );
         write(dir.path(), "uncertain.jl", uncertain);
         write(dir.path(), "worker.jl", "f() = maybe_defined\n");
-        assert!(lint(dir.path(), &["worker.jl"]).is_empty(), "{uncertain}");
+        let diagnostics = lint(dir.path(), &["worker.jl"]);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d["rule"] == "analysis-incomplete"),
+            "{uncertain}: {diagnostics:#?}"
+        );
     }
 }
 
