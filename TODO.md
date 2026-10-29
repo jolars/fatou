@@ -121,24 +121,14 @@ style remains project policy rather than language correctness.
   Eunoia.jl's examples with the Markdown oracle and map nested REPL diagnostics
   through the separate code tokens.
 
-- [ ] **Before the next parser release:** parse inline Markdown across wrapped
-  source lines in `crates/fatou-parser/src/documentation/parser.rs`.
-  `emit_paragraph` currently calls `parse_inlines` once per line, so wrapped
-  links, bold text, and inline code silently remain literal text. For example,
-  `../Eunoia.jl/docs/src/index.md` wraps this reference across two lines:
-
-  ```markdown
-  [API
-  Reference](@ref)
-  ```
-
-  Julia 1.13 produces one link with the label `API Reference`; Fatou produces
-  no link and no diagnostic. This blocks the authored Documenter profile
-  tracked in `../diplodocus/TODO.md`. Parse inline content across paragraph
-  continuations, including list items and admonitions, without crossing block
-  boundaries. Add Julia Markdown oracle fixtures for wrapped links, emphasis,
-  and inline code, plus UTF-8, CRLF, losslessness, and exact decoded-to-source
-  range regressions. Keep reference resolution in `../diplodocus/`.
+- [x] Parse inline Markdown across wrapped paragraph lines, including list
+  items, admonitions, block quotes, and footnotes. Links, emphasis, and inline
+  code share the paragraph's logical text without crossing block boundaries.
+  Typed payload accessors normalize continuations, while the CST preserves
+  original newlines, container prefixes, and decoded ranges. Julia 1.13 oracle
+  fixtures cover the wrapped constructs and hard-break boundaries; UTF-8,
+  CRLF, losslessness, and exact docstring source maps have regression tests.
+  Reference resolution remains in `../diplodocus/`.
 
 - [ ] Release the parser fixes needed by Diplodocus in `../diplodocus/`. Its
   exact `fatou-parser = "=0.8.2"` pin remains unchanged until publication. Then

@@ -67,6 +67,9 @@ blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 permanent cases recorded below. A green report means "no regression", not
 "nothing to do".
 
+Markdown stdlib corpus: **22 fixtures**, pinned to Julia 1.13.0. Wrapped-inline
+fixtures also check CRLF projections and lossless reconstruction.
+
 **Divergence-ledger audit (2026-06-24, COMPLETE):** the old "deliberate, do not
 fix" list was mostly mislabeled for a linter/LSP. All three correctable items
 were fixed — `&&`/`||` associativity (a *bug*, C1), comparison chains (C3),
@@ -100,30 +103,34 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-10-19 — standalone colon whitespace)
+## Latest session (2026-10-29 — wrapped Markdown inlines)
 
-- **Parser gap**: `parse_quote_sym` declines value-position colons before a
-  closing delimiter, comma, semicolon, or EOF before recording quote whitespace
-  diagnostics. Horizontal whitespace and comments, including multiline block
-  comments, do not turn a standalone colon into a quote. Newline and quoted
-  symbol diagnostics remain intact. No CST shape or projector changes.
-- **Coverage**: parser/oracle fixture `colon_value_whitespace` covers the reported
-  index and `view` call, parentheses, vectors, braces, curlies, separators, and
-  comments. Explicit tests pin clean EOF cases and invalid quotes such as
-  `: name`. CLI regressions verify lint execution and safe formatting. The
-  existing corpus sweep checks incremental edits in top-level and nested module
-  contexts.
-- **Counts**: JS **749/756 → 749/756**, dir **272/273 → 273/274**. Zero oracle
-  regressions and no new blocked cases. Generated expectations remain pinned
-  to Julia 1.13.0 / JuliaSyntax 1.0.2.
-- **Validation**: workspace tests, both oracle reports, Clippy with all targets
-  and features, and rustfmt pass. The new fixture passes losslessness, safe
-  formatting, and formatting idempotency checks.
+- **Parser gap**: collect logical paragraph text before recognizing inline
+  constructs, then emit tokens through the original decoded-byte ranges.
+  Links, nested emphasis, inline code, math, and images can span soft wraps in
+  paragraphs, lists (including quoted lists), admonitions, quotes, and footnotes.
+  Container prefixes remain trivia, and blocks flush pending inline content.
+  Literal inline readers stop at hard breaks, matching Julia's stdlib.
+- **Typed navigation**: payload accessors join continuation tokens; Documenter
+  targets map normalized offsets back to exact decoded ranges. Reference
+  resolution stays downstream. The UTF-8 truncation sweep also exposed and
+  fixed an existing lone-CR panic in `math_block`.
+- **Coverage**: three generated Markdown fixtures cover wrapped constructs,
+  destinations, containers, and hard breaks. LF and CRLF projections agree
+  with Julia 1.13.0. Tests pin block boundaries, losslessness, UTF-8 ranges,
+  and mappings through escaped, dedented Julia docstrings.
+- **Counts**: Markdown **19 → 22** fixtures. JS **749/756 → 749/756** and dir
+  **273/274 → 273/274**, with no oracle regressions or new blocked cases.
+- **Validation**: focused parser and Markdown tests, workspace tests, both
+  JuliaSyntax reports, Clippy with all targets and features, rustfmt, and both
+  member crates' Wasm release builds pass.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-10-19** — standalone colon whitespace before delimiters, separators,
+  comments, and EOF, preserving invalid quote diagnostics. 749 / 273.
 - **2026-10-18** — nested-block reparsing with context and seam guards, sibling
   reuse, and diagnostic-stream coverage; measurements in `bench/reparse.json`.
   Body edges and enclosing recovery still fall back. 749 / 272.
