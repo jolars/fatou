@@ -177,15 +177,18 @@
     },
     "ProjectConfig": {
       "additionalProperties": false,
-      "description": "Explicit programs analyzed independently of package entry points.",
+      "description": "Independent programs, with conventional roots inferred when omitted.",
       "properties": {
         "entry-points": {
-          "default": [],
-          "description": "Script entry files, relative to the containing configuration file.\nIncludes supply resolution context without expanding lint targets.",
+          "default": null,
+          "description": "Script entry files, relative to the containing configuration file.\nOmission infers conventional roots; an empty list disables inference.\nIncludes supply resolution context without expanding lint targets.",
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "type": "object"

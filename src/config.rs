@@ -47,18 +47,48 @@ pub struct Config {
     pub extend_exclude: Vec<String>,
 }
 
-/// Explicit programs analyzed independently of package entry points.
+/// Independent programs, with conventional roots inferred when omitted.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct ProjectConfig {
     /// Script entry files, relative to the containing configuration file.
+    /// Omission infers conventional roots; an empty list disables inference.
     /// Includes supply resolution context without expanding lint targets.
     #[serde(default)]
-    pub entry_points: Vec<PathBuf>,
+    pub entry_points: Option<Vec<PathBuf>>,
 }
 
 impl ProjectConfig {
+    /// Resolve explicit programs, or infer existing conventional roots from
+    /// Julia projects above the source directory.
+    pub fn resolved_entry_points(&self, source: &ConfigSource, directory: &Path) -> Vec<PathBuf> {
+        if self.entry_points.is_some() {
+            return self.entry_points(source);
+        }
+        let mut roots = Vec::new();
+        for root in directory.ancestors() {
+            if root.join("Project.toml").is_file() || root.join("JuliaProject.toml").is_file() {
+                roots.push(root);
+            }
+            if root.join(".git").exists() {
+                break;
+            }
+        }
+        let mut entries: Vec<_> = roots
+            .into_iter()
+            .flat_map(|root| {
+                ["test/runtests.jl", "docs/make.jl", "deps/build.jl"]
+                    .into_iter()
+                    .map(move |entry| root.join(entry))
+            })
+            .filter(|entry| entry.is_file())
+            .map(|entry| crate::incremental::normalize_path(&entry))
+            .collect();
+        entries.sort();
+        entries
+    }
+
     /// Anchor literal paths at the configuration file, including user configs.
     pub fn entry_points(&self, source: &ConfigSource) -> Vec<PathBuf> {
         let Some(base) = source.path().and_then(Path::parent) else {
@@ -67,6 +97,7 @@ impl ProjectConfig {
         let mut entries: Vec<_> = self
             .entry_points
             .iter()
+            .flatten()
             .map(|path| crate::incremental::normalize_path(&base.join(path)))
             .collect();
         entries.sort();
@@ -924,6 +955,53 @@ mod tests {
             .to_string();
         assert!(error.contains("missing.toml"), "{error}");
         assert!(error.contains("unknown"), "{error}");
+    }
+
+    #[test]
+    fn conventional_entry_points_and_explicit_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Project.toml"), "").unwrap();
+        for entry in [
+            "test/runtests.jl",
+            "docs/make.jl",
+            "deps/build.jl",
+            "benchmark/benchmarks.jl",
+            "scripts/main.jl",
+        ] {
+            let path = dir.path().join(entry);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "").unwrap();
+        }
+        let nested = dir.path().join("test");
+        let mut expected = ["test/runtests.jl", "docs/make.jl", "deps/build.jl"]
+            .map(|entry| crate::incremental::normalize_path(&dir.path().join(entry)))
+            .to_vec();
+        expected.sort();
+        assert_eq!(
+            ProjectConfig::default().resolved_entry_points(&ConfigSource::None, &nested),
+            expected
+        );
+        std::fs::write(nested.join("Project.toml"), "").unwrap();
+        assert_eq!(
+            ProjectConfig::default().resolved_entry_points(&ConfigSource::None, &nested),
+            expected
+        );
+        std::fs::remove_file(nested.join("Project.toml")).unwrap();
+        let config: ProjectConfig = toml::from_str("entry-points = []").unwrap();
+        assert!(
+            config
+                .resolved_entry_points(&ConfigSource::None, &nested)
+                .is_empty()
+        );
+        let config: ProjectConfig = toml::from_str("entry-points = ['scripts/main.jl']").unwrap();
+        let source = ConfigSource::None;
+        assert!(config.resolved_entry_points(&source, &nested).is_empty());
+        std::fs::remove_file(dir.path().join("Project.toml")).unwrap();
+        assert!(
+            ProjectConfig::default()
+                .resolved_entry_points(&source, dir.path())
+                .is_empty()
+        );
     }
 
     #[test]

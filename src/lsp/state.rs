@@ -1253,6 +1253,9 @@ impl GlobalState {
                 path.file_name()
                     .is_some_and(|name| name == CONFIG_FILE_NAME)
                     || self.config.watches_config_path(&path)
+                    || is_environment_file(&path)
+                    || (path.extension().is_some_and(|ext| ext == "jl")
+                        && event.typ != lsp_types::FileChangeType::CHANGED)
             })
         });
         if config_changed {

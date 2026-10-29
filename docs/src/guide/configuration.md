@@ -155,6 +155,12 @@ For the global config, Fatou checks these paths in order:
 
 ## Checking standalone scripts
 
+When `entry-points` is omitted, Fatou infers existing `test/runtests.jl`,
+`docs/make.jl`, and `deps/build.jl` files relative to Julia projects above the
+lint target or open document. An explicit list replaces these inferred roots;
+`entry-points = []` disables inference. Benchmark files and arbitrary
+include-graph roots are not inferred.
+
 Declare the files you run as independent programs to check undefined names
 across their static includes:
 

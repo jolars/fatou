@@ -931,3 +931,39 @@ fn cli_unknown_rule_table_is_a_config_parse_error() {
         "the typo should be named: {stderr}"
     );
 }
+
+#[test]
+fn conventional_script_roots_enable_undefined_names_and_respect_override() {
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.path().join("Project.toml"), "").unwrap();
+    for entry in [
+        "test/runtests.jl",
+        "docs/make.jl",
+        "deps/build.jl",
+        "benchmark/benchmarks.jl",
+    ] {
+        let path = sandbox.path().join(entry);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "f() = misspelled_name\n").unwrap();
+        let output = sandbox.run(sandbox.path(), &[], &["lint", "--output", "json", entry]);
+        let diagnostics: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            diagnostics.iter().any(|d| d["rule"] == "undefined-name"),
+            !entry.starts_with("benchmark/"),
+            "{}",
+            stderr(&output)
+        );
+    }
+    std::fs::write(
+        sandbox.path().join("fatou.toml"),
+        "[project]\nentry-points = []\n",
+    )
+    .unwrap();
+    let output = sandbox.run(
+        sandbox.path(),
+        &[],
+        &["lint", "--output", "json", "test/runtests.jl"],
+    );
+    let diagnostics: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(!diagnostics.iter().any(|d| d["rule"] == "undefined-name"));
+}

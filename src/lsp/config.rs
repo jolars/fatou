@@ -38,9 +38,17 @@ pub(crate) struct ResolvedConfig {
 }
 
 impl ResolvedConfig {
-    fn resolve(config: &Config, source: &ConfigSource, warnings: &mut Vec<String>) -> Arc<Self> {
+    fn resolve(
+        config: &Config,
+        source: &ConfigSource,
+        warnings: &mut Vec<String>,
+        directory: Option<&Path>,
+    ) -> Arc<Self> {
         let (mut rules, unknown) = ServerRules::from_config(&config.lint);
-        rules.entry_points = config.project.entry_points(source);
+        rules.entry_points = directory.map_or_else(
+            || config.project.entry_points(source),
+            |directory| config.project.resolved_entry_points(source, directory),
+        );
         warnings.extend(
             unknown
                 .into_iter()
@@ -59,6 +67,7 @@ pub(crate) struct ConfigStore {
     /// Client settings merged over defaults; the fallback when discovery finds
     /// no `fatou.toml`.
     client: Arc<ResolvedConfig>,
+    client_config: Config,
     /// Discovery results keyed by the document's parent directory. A negative
     /// result (no `fatou.toml` above the directory) caches the client config,
     /// so the ancestor walk and file reads run once per directory, not per
@@ -80,8 +89,10 @@ impl ConfigStore {
                 &Config::default(),
                 &ConfigSource::None,
                 &mut Vec::new(),
+                None,
             ),
             by_dir: HashMap::new(),
+            client_config: Default::default(),
             inherited_files: HashSet::new(),
             pending_watches: Vec::new(),
         };
@@ -113,7 +124,9 @@ impl ConfigStore {
         match serde_json::from_value::<RawConfig>(payload) {
             Ok(raw) => {
                 let (config, mut warnings) = raw.into_config();
-                self.client = ResolvedConfig::resolve(&config, &ConfigSource::None, &mut warnings);
+                self.client_config = config.clone();
+                self.client =
+                    ResolvedConfig::resolve(&config, &ConfigSource::None, &mut warnings, None);
                 warnings
             }
             Err(err) => vec![format!("invalid client settings (kept previous): {err}")],
@@ -154,6 +167,12 @@ impl ConfigStore {
             return (Arc::clone(cached), Vec::new());
         }
         let mut warnings = Vec::new();
+        let fallback = ResolvedConfig::resolve(
+            &self.client_config,
+            &ConfigSource::None,
+            &mut Vec::new(),
+            Some(&dir),
+        );
         let resolved = match Config::resolve(None, false, &dir) {
             Ok((config, source, deprecations)) if source.path().is_some() => {
                 let path = source.path().expect("source has a path");
@@ -172,16 +191,16 @@ impl ConfigStore {
                         .into_iter()
                         .map(|warning| format!("{}: {warning}", path.display())),
                 );
-                ResolvedConfig::resolve(&config, &source, &mut warnings)
+                ResolvedConfig::resolve(&config, &source, &mut warnings, Some(&dir))
             }
             // No config file at all: the client settings apply.
-            Ok(_) => Arc::clone(&self.client),
+            Ok(_) => Arc::clone(&fallback),
             // Unreadable or unparsable file: warn once and keep the server
             // working on the client settings until the file is fixed (its
             // change event drops this cached fallback).
             Err(err) => {
                 warnings.push(err.to_string());
-                Arc::clone(&self.client)
+                Arc::clone(&fallback)
             }
         };
         self.by_dir.insert(dir, Arc::clone(&resolved));
@@ -196,6 +215,34 @@ mod tests {
 
     fn uri_for(path: &std::path::Path) -> Uri {
         uri::from_path(path).unwrap()
+    }
+
+    #[test]
+    fn conventional_roots_without_config_and_empty_override() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Project.toml"), "").unwrap();
+        std::fs::create_dir(dir.path().join("test")).unwrap();
+        let entry = dir.path().join("test/runtests.jl");
+        std::fs::write(&entry, "").unwrap();
+        let (mut store, _) = ConfigStore::new(None);
+        assert_eq!(
+            store.for_uri(&uri_for(&entry)).0.rules.entry_points,
+            std::slice::from_ref(&entry)
+        );
+        std::fs::write(
+            dir.path().join("fatou.toml"),
+            "[project]\nentry-points = []\n",
+        )
+        .unwrap();
+        store.invalidate_discovered();
+        assert!(
+            store
+                .for_uri(&uri_for(&entry))
+                .0
+                .rules
+                .entry_points
+                .is_empty()
+        );
     }
 
     #[test]

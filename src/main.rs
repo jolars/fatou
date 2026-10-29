@@ -61,6 +61,20 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             let filter = resolve_exclude_filter(&config, &source, &exclude, force_exclude)?;
             let anchor = std::env::current_dir().map_err(|e| e.to_string())?;
             let julia_target = resolve_julia_target(julia_version.as_deref(), &config, &anchor);
+            let mut entries: Vec<_> = paths
+                .iter()
+                .flat_map(|path| {
+                    let path = anchor.join(path);
+                    let directory = if path.is_dir() {
+                        path.as_path()
+                    } else {
+                        path.parent().unwrap_or(&anchor)
+                    };
+                    config.project.resolved_entry_points(&source, directory)
+                })
+                .collect();
+            entries.sort();
+            entries.dedup();
             run_lint(
                 paths,
                 output,
@@ -68,7 +82,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                 unsafe_fixes,
                 cli.color,
                 &config,
-                &config.project.entry_points(&source),
+                &entries,
                 &filter,
                 julia_target,
             )

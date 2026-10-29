@@ -58,9 +58,15 @@ extend-exclude = ["generated.jl"]
 
 ## `[project]`
 
-  | Key            | Type             | Default | Description                                      |
-  | -------------- | ---------------- | ------- | ------------------------------------------------ |
-  | `entry-points` | array of strings | `[]`    | Script files to analyze as independent programs. |
+  | Key            | Type             | Default  | Description                                      |
+  | -------------- | ---------------- | -------- | ------------------------------------------------ |
+  | `entry-points` | array of strings | inferred | Script files to analyze as independent programs. |
+
+When `entry-points` is omitted, Fatou infers existing `test/runtests.jl`,
+`docs/make.jl`, and `deps/build.jl` files relative to Julia projects above the
+lint target or open document. An explicit list replaces these inferred roots;
+`entry-points = []` disables inference. Benchmark files and arbitrary
+include-graph roots are not inferred.
 
 Paths are literal files, without glob expansion, relative to the containing
 configuration file. This also applies to `--config`, `FATOU_CONFIG`, and global
