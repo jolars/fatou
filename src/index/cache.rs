@@ -27,10 +27,11 @@ use crate::environment::{JuliaInstall, Package, PackageKind};
 use super::model::PackageIndex;
 
 /// The on-disk layout and serialized-shape version. Bump whenever a change makes
-/// entries an older build wrote unreadable or wrong (a new `postcard` layout, a
-/// [`PackageIndex`] field change). Recorded in every entry header and baked into
-/// the cache path, so mismatched entries are ignored rather than mis-decoded.
-const CACHE_FORMAT: u32 = 8;
+/// entries an older build wrote unreadable or wrong (a new `postcard` layout,
+/// a [`PackageIndex`] field change, or corrected harvesting semantics). Recorded
+/// in every entry header and baked into the cache path, so mismatched entries
+/// are ignored rather than mis-decoded.
+const CACHE_FORMAT: u32 = 9;
 
 /// The build identity stamped into every entry: `fatou@<version>`. Two builds at
 /// the same [`CACHE_FORMAT`] can still harvest different shapes (the harvester

@@ -1,5 +1,6 @@
 //! Recover method templates from literal-symbol loops such as Base's
 //! `for op in (:+, :min, :max); @eval ($op)(a, b, c, xs...) = ...; end`.
+//! Both tuple and vector literals can supply the names.
 //! The loop body must consist entirely of `@eval` method definitions, with
 //! only the callee interpolated in each signature. All locations refer to
 //! the original source, and executable interpolations remain unharvested.
@@ -31,9 +32,10 @@ pub(super) fn literal_eval_loop(node: &SyntaxNode) -> Option<GeneratedMethods> {
         return None;
     };
     let variable = variable.ident()?;
-    let Expr::TupleExpr(values) = binding.iterable()? else {
+    let values = binding.iterable()?;
+    if !matches!(values, Expr::TupleExpr(_) | Expr::VectExpr(_)) {
         return None;
-    };
+    }
     let names = values
         .syntax()
         .children()

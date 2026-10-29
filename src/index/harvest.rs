@@ -50,6 +50,21 @@ pub fn harvest_package_named(source_root: &Path, name: &str) -> PackageIndex {
 /// `base/boot.jl`) get the same depot-relative `DefLocation`s as ordinary
 /// packages entered through [`harvest_package_named`].
 pub fn harvest_entry(source_root: &Path, entry: &Path, name: &str) -> PackageIndex {
+    harvest_entry_with_base_includes(source_root, entry, name, false)
+}
+
+/// Base's bootstrap `include` resolves from the Base source directory, while
+/// nested modules retain their ordinary file-relative `include` functions.
+pub(super) fn harvest_base_entry(base_dir: &Path, entry: &Path) -> PackageIndex {
+    harvest_entry_with_base_includes(base_dir, entry, "Base", true)
+}
+
+fn harvest_entry_with_base_includes(
+    source_root: &Path,
+    entry: &Path,
+    name: &str,
+    base_includes: bool,
+) -> PackageIndex {
     let mut harvester = Harvester {
         root: source_root.to_path_buf(),
         visited: HashSet::new(),
@@ -59,6 +74,7 @@ pub fn harvest_entry(source_root: &Path, entry: &Path, name: &str) -> PackageInd
         diagnostics: Vec::new(),
         root_filled: false,
         follow_includes: true,
+        base_includes,
     };
     let mut root = ModuleIndex {
         name: name.to_string(),
@@ -127,6 +143,7 @@ pub fn harvest_tree(cst: &SyntaxNode) -> ModuleIndex {
         diagnostics: Vec::new(),
         root_filled: false,
         follow_includes: false,
+        base_includes: false,
     };
     let mut root = ModuleIndex {
         name: String::new(),
@@ -175,6 +192,8 @@ struct Harvester {
     /// Whether `include("literal")` targets are read and walked. Off for
     /// [`harvest_tree`], whose single-tree walk must never touch disk.
     follow_includes: bool,
+    /// Base's bootstrap paths are rooted at `root` in the root module only.
+    base_includes: bool,
 }
 
 impl Harvester {
@@ -336,7 +355,12 @@ impl Harvester {
             return;
         };
         if let Some(path) = include_target(&call) {
-            match resolve_target(&path, file.parent()) {
+            let base = if self.base_includes && self.module_path.is_empty() {
+                Some(self.root.as_path())
+            } else {
+                file.parent()
+            };
+            match resolve_target(&path, base) {
                 Some(target) if target.is_file() => self.walk_file(&target, dest, at_root),
                 _ => self.diagnostics.push(HarvestDiagnostic::UnresolvedInclude {
                     raw: path,
@@ -1309,6 +1333,7 @@ mod tests {
             diagnostics: Vec::new(),
             root_filled: false,
             follow_includes: true,
+            base_includes: false,
         };
         let mut root = ModuleIndex {
             name: name.to_string(),
@@ -1456,13 +1481,18 @@ mod tests {
         for source in [
             "for op in names\n@eval ($op)(xs...) = xs\nend",
             "for op in (:f, computed())\n@eval ($op)(xs...) = xs\nend",
+            "for op in [:f, computed()]\n@eval $op(xs...) = xs\nend",
+            "for op in [names...]\n@eval $op(xs...) = xs\nend",
+            "for op in [name for name in (:f,)]\n@eval $op(xs...) = xs\nend",
             "for op in (:f,), other in (:g,)\n@eval ($op)(xs...) = xs\nend",
             "for op in (:f,)\nop = :g\n@eval ($op)(xs...) = xs\nend",
             "for op in (:f,)\nCustom.@eval ($op)(xs...) = xs\nend",
             "for op in (:f,)\n@eval Other ($op)(xs...) = xs\nend",
             "for op in (:f,)\n@eval ($other)(xs...) = xs\nend",
             "for op in (:f,)\n@eval ($op)(x::$T) = x\nend",
+            "for op in [:f]\n@eval $op(x::$T) = x\nend",
             "for op in (:f,)\n@eval ($op)(x) = $(op = :g)\nend",
+            "for op in [:f]\n@eval $op(x) = $(op = :g)\nend",
             "for op in (:f,)\n@eval begin\nif condition\n($op)(xs...) = xs\nend\nend\nend",
             "for op in (:f,)\n@eval begin\n($op)(x) = x\n$(unknown_code)\nend\nend",
             "for op in (:f,)\n($op)(xs...) = xs\nend",

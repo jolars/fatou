@@ -18,7 +18,7 @@ use crate::environment::JuliaInstall;
 
 use super::HarvestedLibrary;
 use super::cache::{CacheKey, IndexCache};
-use super::harvest::{harvest_entry, harvest_package_named};
+use super::harvest::{harvest_base_entry, harvest_entry, harvest_package_named};
 use super::model::{DefLocation, ExportedName, ModuleIndex, PackageIndex, Span, Visibility};
 
 /// Base's harvest entry files. Julia 1.12 split the `module Base` opener and
@@ -193,7 +193,7 @@ fn harvest_base(base_dir: &Path) -> PackageIndex {
         if !file.is_file() {
             continue;
         }
-        let index = harvest_entry(base_dir, &file, "Base");
+        let index = harvest_base_entry(base_dir, &file);
         match &mut merged {
             None => merged = Some(index),
             Some(acc) => merge_index(acc, index),
@@ -201,7 +201,7 @@ fn harvest_base(base_dir: &Path) -> PackageIndex {
     }
     // No entry present: harvest the canonical name for a proper missing-file
     // diagnostic rather than a silent empty index.
-    merged.unwrap_or_else(|| harvest_entry(base_dir, &base_dir.join(BASE_ENTRIES[0]), "Base"))
+    merged.unwrap_or_else(|| harvest_base_entry(base_dir, &base_dir.join(BASE_ENTRIES[0])))
 }
 
 /// Fold `other`'s root items and diagnostics into `acc`. Function methods merge
