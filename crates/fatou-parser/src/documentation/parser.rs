@@ -62,6 +62,12 @@ struct FenceOpen {
     length: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum FencePrefix {
+    Spaces(usize),
+    IndentedContainer,
+}
+
 #[derive(Clone, Copy)]
 struct InlineLine {
     line: Line,
@@ -134,8 +140,14 @@ impl<'a> Parser<'a> {
             return self.emit_block_interpolation(line, expression_end);
         }
         if let Some(open) = fence_open(self.lines[line], self.text) {
-            if let Some(close) = self.find_fence_close(line + 1, open, 0) {
-                return self.emit_fence(line, close, open, 0, self.lines[line].start);
+            if let Some(close) = self.find_fence_close(line + 1, open, FencePrefix::Spaces(0)) {
+                return self.emit_fence(
+                    line,
+                    close,
+                    open,
+                    FencePrefix::Spaces(0),
+                    self.lines[line].start,
+                );
             }
             self.diagnostics.push(ParseDiagnostic {
                 kind: DiagnosticKind::UnclosedFence,
@@ -188,50 +200,50 @@ impl<'a> Parser<'a> {
         self.emit_paragraph(line)
     }
 
-    fn find_fence_close(&self, from: usize, open: FenceOpen, prefix: usize) -> Option<usize> {
+    fn find_fence_close(&self, from: usize, open: FenceOpen, prefix: FencePrefix) -> Option<usize> {
         for line_index in from..self.lines.len() {
             let line = self.lines[line_index];
-            if prefix > 0
-                && line.is_blank(self.text)
-                && self.line_after_prefix(line, prefix).is_none()
-            {
+            if line.is_blank(self.text) && self.line_after_prefix(line, prefix).is_none() {
                 // Two unindented blank lines end Julia's list container.
-                if self.lines.get(line_index + 1).is_some_and(|next| {
-                    next.is_blank(self.text) && self.line_after_prefix(*next, prefix).is_none()
-                }) {
+                if matches!(prefix, FencePrefix::Spaces(_))
+                    && self.lines.get(line_index + 1).is_some_and(|next| {
+                        next.is_blank(self.text) && self.line_after_prefix(*next, prefix).is_none()
+                    })
+                {
                     return None;
                 }
                 continue;
             }
             let line = self.line_after_prefix(line, prefix)?;
             let content = line.content(self.text);
-            let indent = indentation(content);
-            if indent > 3 {
-                continue;
-            }
-            let bytes = content.as_bytes();
-            let mut end = indent;
-            while end < bytes.len() && bytes[end] == open.marker {
-                end += 1;
-            }
-            if end - indent == open.length && content[end..].trim_matches([' ', '\t']).is_empty() {
+            let end = content
+                .bytes()
+                .take_while(|&byte| byte == open.marker)
+                .count();
+            if end == open.length && content[end..].trim_matches([' ', '\t']).is_empty() {
                 return Some(line_index);
             }
         }
         None
     }
 
-    fn line_after_prefix(&self, line: Line, prefix: usize) -> Option<Line> {
-        let content = line.content(self.text);
-        (content
-            .as_bytes()
-            .get(..prefix)?
-            .iter()
-            .all(|&byte| byte == b' '))
-        .then_some(Line {
-            start: line.start + prefix,
-            ..line
-        })
+    fn line_after_prefix(&self, line: Line, prefix: FencePrefix) -> Option<Line> {
+        let start = match prefix {
+            FencePrefix::Spaces(prefix) => {
+                if !line
+                    .content(self.text)
+                    .as_bytes()
+                    .get(..prefix)?
+                    .iter()
+                    .all(|&byte| byte == b' ')
+                {
+                    return None;
+                }
+                line.start + prefix
+            }
+            FencePrefix::IndentedContainer => indented_content_start(line, self.text)?,
+        };
+        Some(Line { start, ..line })
     }
 
     fn emit_fence(
@@ -239,7 +251,7 @@ impl<'a> Parser<'a> {
         open_line: usize,
         close_line: usize,
         open: FenceOpen,
-        prefix: usize,
+        prefix: FencePrefix,
         opening_start: usize,
     ) -> usize {
         let opening = self.lines[open_line];
@@ -265,20 +277,28 @@ impl<'a> Parser<'a> {
         } else {
             SyntaxKind::CODE_CONTENT
         };
-        if prefix == 0 {
+        if matches!(prefix, FencePrefix::Spaces(0)) {
             self.token(content_kind, opening.end, closing.start);
         } else {
             for line_index in open_line + 1..close_line {
                 let line = self.lines[line_index];
-                let removed = prefix.min(indentation(line.content(self.text)));
-                self.token(SyntaxKind::WHITESPACE, line.start, line.start + removed);
-                self.token(content_kind, line.start + removed, line.end);
+                let content_start = match prefix {
+                    FencePrefix::Spaces(prefix) => {
+                        line.start + prefix.min(indentation(line.content(self.text)))
+                    }
+                    FencePrefix::IndentedContainer => {
+                        indented_content_start(line, self.text).unwrap_or(line.content_end)
+                    }
+                };
+                self.token(SyntaxKind::WHITESPACE, line.start, content_start);
+                self.token(content_kind, content_start, line.end);
             }
         }
 
-        let close_content = closing.content(self.text);
-        let close_indent = indentation(close_content);
-        let marker_start = closing.start + close_indent;
+        let marker_start = self
+            .line_after_prefix(closing, prefix)
+            .expect("closing fence retains its container prefix")
+            .start;
         let mut marker_end = marker_start;
         while marker_end < closing.content_end && self.text.as_bytes()[marker_end] == open.marker {
             marker_end += 1;
@@ -518,6 +538,30 @@ impl<'a> Parser<'a> {
             let Some(content_start) = indented_content_start(line, self.text) else {
                 break;
             };
+            if let Some(open) = fence_open(
+                Line {
+                    start: content_start,
+                    ..line
+                },
+                self.text,
+            ) {
+                if let Some(close) =
+                    self.find_fence_close(line_index + 1, open, FencePrefix::IndentedContainer)
+                {
+                    line_index = self.emit_fence(
+                        line_index,
+                        close,
+                        open,
+                        FencePrefix::IndentedContainer,
+                        line.start,
+                    );
+                    continue;
+                }
+                self.diagnostics.push(ParseDiagnostic {
+                    kind: DiagnosticKind::UnclosedFence,
+                    range: range(open.marker_start, open.marker_end),
+                });
+            }
             if let Some((marker_start, marker_end, _)) =
                 list_marker_range(self.text, content_start, line.content_end)
             {
@@ -536,6 +580,15 @@ impl<'a> Parser<'a> {
                     break;
                 };
                 if list_marker_range(self.text, content_start, paragraph_line.content_end).is_some()
+                    || (!inlines.is_empty()
+                        && fence_open(
+                            Line {
+                                start: content_start,
+                                ..paragraph_line
+                            },
+                            self.text,
+                        )
+                        .is_some())
                 {
                     break;
                 }
@@ -634,7 +687,9 @@ impl<'a> Parser<'a> {
                 self.text,
             )
             .and_then(|open| {
-                if let Some(close) = self.find_fence_close(line_index + 1, open, item_indent) {
+                if let Some(close) =
+                    self.find_fence_close(line_index + 1, open, FencePrefix::Spaces(item_indent))
+                {
                     Some((open, close))
                 } else {
                     self.diagnostics.push(ParseDiagnostic {
@@ -645,7 +700,13 @@ impl<'a> Parser<'a> {
                 }
             });
             if let Some((open, close)) = first_fence {
-                line_index = self.emit_fence(line_index, close, open, item_indent, content_start);
+                line_index = self.emit_fence(
+                    line_index,
+                    close,
+                    open,
+                    FencePrefix::Spaces(item_indent),
+                    content_start,
+                );
             } else {
                 inlines.push(InlineLine::new(
                     Line {
@@ -708,16 +769,20 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 if let Some(open) = self
-                    .line_after_prefix(continuation, item_indent)
+                    .line_after_prefix(continuation, FencePrefix::Spaces(item_indent))
                     .and_then(|line| fence_open(line, self.text))
                 {
-                    if let Some(close) = self.find_fence_close(line_index + 1, open, item_indent) {
+                    if let Some(close) = self.find_fence_close(
+                        line_index + 1,
+                        open,
+                        FencePrefix::Spaces(item_indent),
+                    ) {
                         self.flush_inline_lines(&mut inlines, SyntaxKind::NEWLINE);
                         line_index = self.emit_fence(
                             line_index,
                             close,
                             open,
-                            item_indent,
+                            FencePrefix::Spaces(item_indent),
                             continuation.start,
                         );
                         after_blank = false;

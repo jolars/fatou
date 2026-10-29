@@ -10,6 +10,10 @@
 //! continuations with spaces. Wrapped payloads can have multiple content tokens;
 //! each token retains its exact decoded-text range.
 //!
+//! Fenced code in lists and admonitions retains container prefixes as trivia.
+//! Code payloads remove only those prefixes, preserving body indentation, and
+//! each content token maps directly to the original decoded bytes.
+//!
 //! Inline `--` and `---` follow Julia 1.13's en-dash and em-dash semantics.
 //! Their CST tokens retain the original spelling; typed navigation exposes
 //! [`ast::Inline::EnDash`] and [`ast::Inline::EmDash`], and heading content

@@ -57,11 +57,13 @@ original newlines and container prefixes. A wrapped payload can contain several
 content tokens, each with an exact decoded-text range; a range covering the
 whole construct also includes the intervening prefixes.
 
-Fences below list items retain the list prefix as whitespace trivia. Their
-`CodeBlock::content()` joins the `CODE_CONTENT` tokens without that prefix; each
-token has an exact decoded-text range. `content_range()` covers the whole body,
-including indentation between tokens, so consumers that transform the code
-should map individual tokens rather than add offsets to that range.
+Fences below list items and inside admonitions retain container prefixes as
+whitespace trivia. Their `CodeBlock::content()` joins the `CODE_CONTENT` tokens
+without those prefixes, preserving code indentation; each token has an exact
+decoded-text range. Admonitions accept four-space and tab prefixes, including
+mixed prefixes within one body. `content_range()` covers the whole body,
+including prefixes between tokens, so consumers that transform the code should
+map individual tokens rather than add offsets to that range.
 
 ## Status
 

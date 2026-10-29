@@ -6,7 +6,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fatou_parser::documentation::ast::{Autolink, CodeBlock, Image, InlineCode, InlineMath, Link};
+use fatou_parser::documentation::ast::{
+    Autolink, CodeBlock, Image, InlineCode, InlineMath, Link, MathBlock,
+};
 use fatou_parser::documentation::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
 use fatou_parser::documentation::{parse, reconstruct};
 use rowan::ast::AstNode as _;
@@ -17,7 +19,7 @@ const CORPUS_REL: &str = "tests/fixtures/documentation/oracle";
 fn markdown_oracle_corpus_is_present_and_pinned() {
     let root = corpus_root();
     assert!(root.join(".markdown-source").is_file());
-    assert!(read_cases().len() >= 22);
+    assert!(read_cases().len() >= 23);
 }
 
 #[test]
@@ -25,7 +27,7 @@ fn matches_julia_markdown_semantic_shape() {
     let mut failures = Vec::new();
     for case in read_cases() {
         let mut inputs = vec![("LF", case.input.clone())];
-        if case.slug.starts_with("wrapped_") {
+        if case.slug.starts_with("wrapped_") || case.slug == "admonition_fenced_code" {
             inputs.push(("CRLF", case.input.replace('\n', "\r\n")));
         }
         for (ending, input) in inputs {
@@ -113,14 +115,18 @@ fn render_block(node: &SyntaxNode) -> String {
         }
         SyntaxKind::FENCED_CODE_BLOCK => {
             let block = CodeBlock::cast(node.clone()).expect("fenced code block");
-            format!("(code {} {})", hex(&block.info()), hex(&block.content()))
+            format!(
+                "(code {} {})",
+                hex(&block.info()),
+                hex(&block.content().replace("\r\n", "\n"))
+            )
         }
         SyntaxKind::INDENTED_CODE_BLOCK => {
             format!("(code  {})", hex(&indented_code(node)))
         }
         SyntaxKind::MATH_BLOCK => {
-            let formula = first_token(node, SyntaxKind::MATH_CONTENT);
-            format!("(math {})", hex(formula.trim_end_matches(['\r', '\n'])))
+            let block = MathBlock::cast(node.clone()).expect("math block");
+            format!("(math {})", hex(&block.content().replace("\r\n", "\n")))
         }
         SyntaxKind::BLOCK_QUOTE => format!(
             "(blockquote {})",

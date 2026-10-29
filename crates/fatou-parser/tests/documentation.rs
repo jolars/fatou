@@ -1,6 +1,6 @@
 use fatou_parser::documentation::ast::{
-    Block, CodeBlock, Document, DocumenterDirective, DocumenterLinkKind, FenceKind, Heading,
-    Inline, InlineCode, Link, List,
+    Admonition, Block, CodeBlock, Document, DocumenterDirective, DocumenterLinkKind, FenceKind,
+    Heading, Inline, InlineCode, Link, List,
 };
 use fatou_parser::documentation::syntax::SyntaxKind;
 use fatou_parser::documentation::{DiagnosticKind, parse, reconstruct};
@@ -33,6 +33,7 @@ fn documentation_parse_is_lossless_at_utf8_boundaries() {
         "α [`β`](@ref Γ.δ) -- $x$\n!!! note \"λ\"\n    `μ` and $(f(ν))\n",
         "- [α\r\n  β](@ref\r\n  Γ.δ) **λ\r\n  μ** `ν\r\n  ξ`\r\n",
         "> [α\n> β](@ref)\n> `λ\n> μ`\n",
+        "!!! note\n    ```@example α\n    β = 1\n\n\n\tγ(β)\n    ```\n",
     ] {
         let boundaries: Vec<_> = input
             .char_indices()
@@ -625,6 +626,230 @@ f() = 1
         &source[usize::from(original.start())..usize::from(original.end())],
         r"\u0066"
     );
+}
+
+#[test]
+fn admonition_fences_preserve_classification_indentation_and_ranges() {
+    for prefix in ["    ", "\t"] {
+        for newline in ["\n", "\r\n"] {
+            for (fence, info, kind) in [
+                (
+                    "```",
+                    "@example gallery",
+                    FenceKind::Documenter {
+                        directive: DocumenterDirective::Example,
+                        arguments: Some("gallery".to_string()),
+                    },
+                ),
+                ("~~~~", "julia", FenceKind::Julia),
+                ("```", "julia-repl", FenceKind::JuliaRepl),
+                (
+                    "~~~",
+                    "jldoctest gallery",
+                    FenceKind::JlDoctest {
+                        label: Some("gallery".to_string()),
+                        options: None,
+                    },
+                ),
+                ("```", "python", FenceKind::Other("python".to_string())),
+                ("~~~", "", FenceKind::Plain),
+            ] {
+                let input = format!(
+                    "!!! note \"Gallery\"{newline}\
+                     {prefix}Before.{newline}\
+                     {prefix}{fence}{info}{newline}\
+                     {prefix}α = 1{newline}\
+                     {prefix}    β = 2{newline}\
+                     {prefix}{fence}{newline}\
+                     {prefix}After.{newline}\
+                     Outside.{newline}"
+                );
+                let parsed = parse(&input);
+                assert_eq!(reconstruct(&parsed.cst), input);
+                assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+                let document = Document::cast(parsed.cst).unwrap();
+                let blocks: Vec<_> = document.blocks().collect();
+                assert_eq!(blocks.len(), 2);
+                let Block::Admonition(admonition) = &blocks[0] else {
+                    panic!("expected an admonition");
+                };
+                let blocks: Vec<_> = admonition.blocks().collect();
+                assert_eq!(blocks.len(), 3, "{input:?}");
+                assert!(matches!(blocks[0], Block::Paragraph(_)));
+                assert!(matches!(blocks[2], Block::Paragraph(_)));
+                let Block::CodeBlock(code) = &blocks[1] else {
+                    panic!("expected a nested fence in {input:?}");
+                };
+                assert_eq!(code.info(), info);
+                assert_eq!(code.fence_kind(), kind);
+                let delimiters: Vec<_> = code
+                    .syntax()
+                    .children_with_tokens()
+                    .filter_map(|element| element.into_token())
+                    .filter(|token| token.kind() == SyntaxKind::FENCE)
+                    .map(|token| token.text().to_string())
+                    .collect();
+                assert_eq!(delimiters, [fence, fence]);
+                assert_eq!(code.content(), format!("α = 1{newline}    β = 2"));
+                let body = code.content_range().unwrap();
+                assert_eq!(usize::from(body.start()), input.find("α = 1").unwrap());
+                assert_eq!(
+                    &input[usize::from(body.start())..usize::from(body.end())],
+                    format!("α = 1{newline}{prefix}    β = 2{newline}")
+                );
+                let tokens: Vec<_> = code
+                    .syntax()
+                    .children_with_tokens()
+                    .filter_map(|element| element.into_token())
+                    .filter(|token| token.kind() == SyntaxKind::CODE_CONTENT)
+                    .collect();
+                assert_eq!(tokens.len(), 2);
+                assert_eq!(tokens[0].text(), format!("α = 1{newline}"));
+                assert_eq!(tokens[1].text(), format!("    β = 2{newline}"));
+                for token in document
+                    .syntax()
+                    .descendants_with_tokens()
+                    .filter_map(|element| element.into_token())
+                {
+                    let range = token.text_range();
+                    assert_eq!(
+                        &input[usize::from(range.start())..usize::from(range.end())],
+                        token.text()
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn admonition_fences_keep_blank_lines_and_mixed_container_prefixes() {
+    let input = concat!(
+        "!!! note\n",
+        "    ```@example gallery\n",
+        "\tα = 1\n",
+        "\n\n",
+        "      β = 2\n",
+        "\t```\n",
+    );
+    for input in [input.to_string(), input.replace('\n', "\r\n")] {
+        let parsed = parse(&input);
+        assert_eq!(reconstruct(&parsed.cst), input);
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        let code = parsed.cst.descendants().find_map(CodeBlock::cast).unwrap();
+        let newline = if input.contains('\r') { "\r\n" } else { "\n" };
+        assert_eq!(
+            code.content(),
+            format!("α = 1{newline}{newline}{newline}  β = 2")
+        );
+    }
+}
+
+#[test]
+fn admonition_fences_do_not_consume_outside_blocks() {
+    let input = concat!(
+        "!!! note \"Missing close\"\n",
+        "    ```julia\n    α = 1\n",
+        "```julia\nβ = 2\n```\n",
+        "!!! tip\n    ```@example gallery\n    γ = 3\n    ```\n",
+    );
+    let parsed = parse(input);
+    assert_eq!(reconstruct(&parsed.cst), input);
+    assert_eq!(parsed.diagnostics.len(), 1, "{:?}", parsed.diagnostics);
+    let diagnostic = parsed.diagnostics[0];
+    assert_eq!(diagnostic.kind, DiagnosticKind::UnclosedFence);
+    assert_eq!(
+        usize::from(diagnostic.range.start()),
+        input.find("```julia").unwrap()
+    );
+    assert_eq!(diagnostic.range.len(), rowan::TextSize::new(3));
+    let document = Document::cast(parsed.cst).unwrap();
+    let blocks: Vec<_> = document.blocks().collect();
+    assert_eq!(blocks.len(), 3);
+    let Block::Admonition(first) = &blocks[0] else {
+        panic!("expected an admonition");
+    };
+    assert!(
+        !first
+            .blocks()
+            .any(|block| matches!(block, Block::CodeBlock(_)))
+    );
+    let Block::CodeBlock(outside) = &blocks[1] else {
+        panic!("expected an outside fence");
+    };
+    assert_eq!(outside.content(), "β = 2");
+    let Block::Admonition(last) = &blocks[2] else {
+        panic!("expected a sibling admonition");
+    };
+    let code = last
+        .blocks()
+        .find_map(|block| match block {
+            Block::CodeBlock(code) => Some(code),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(code.content(), "γ = 3");
+}
+
+#[test]
+fn admonition_fence_ranges_compose_with_escaped_dedented_docstrings() {
+    let source = r#""""
+    !!! note "Gallery"
+        ```@example gallery
+        α = 1
+            \u0066(\u03b1)
+        ```
+    """
+f() = 1
+"#;
+    for source in [source.to_string(), source.replace('\n', "\r\n")] {
+        let julia = parse_julia(&source);
+        assert!(julia.diagnostics.is_empty());
+        let attachment = julia
+            .cst
+            .descendants()
+            .find_map(DocAttachment::cast)
+            .unwrap();
+        let DocText::Static(decoded) = attachment.text() else {
+            panic!("expected a static docstring");
+        };
+        let markdown = parse(decoded.as_str());
+        assert_eq!(reconstruct(&markdown.cst), decoded.as_str());
+        let admonition = markdown.cst.children().find_map(Admonition::cast).unwrap();
+        let code = admonition
+            .blocks()
+            .find_map(|block| match block {
+                Block::CodeBlock(code) => Some(code),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(code.content(), "α = 1\n    f(α)");
+        let body = code.content_range().unwrap();
+        let original = decoded.source_map().source_range(body).unwrap();
+        let newline = if source.contains('\r') { "\r\n" } else { "\n" };
+        assert_eq!(
+            &source[usize::from(original.start())..usize::from(original.end())],
+            format!("α = 1{newline}            \\u0066(\\u03b1){newline}")
+        );
+        let second_line = code
+            .syntax()
+            .children_with_tokens()
+            .filter_map(|element| element.into_token())
+            .filter(|token| token.kind() == SyntaxKind::CODE_CONTENT)
+            .nth(1)
+            .unwrap();
+        for (offset, length, spelling) in [(4, 1, r"\u0066"), (6, 2, r"\u03b1")] {
+            let range = rowan::TextRange::at(
+                second_line.text_range().start() + rowan::TextSize::new(offset),
+                rowan::TextSize::new(length),
+            );
+            let original = decoded.source_map().source_range(range).unwrap();
+            assert_eq!(
+                &source[usize::from(original.start())..usize::from(original.end())],
+                spelling
+            );
+        }
+    }
 }
 
 #[test]

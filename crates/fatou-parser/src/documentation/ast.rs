@@ -296,8 +296,8 @@ impl CodeBlock {
 
     /// Return the decoded-text range covering the code body.
     ///
-    /// In a list, the range includes the list's indentation on continuation
-    /// lines. Individual `CODE_CONTENT` tokens exclude that indentation and
+    /// In a container, the range includes its prefixes on continuation
+    /// lines. Individual `CODE_CONTENT` tokens exclude those prefixes and
     /// preserve exact ranges for consumers of [`Self::content`].
     pub fn content_range(&self) -> Option<TextRange> {
         let mut tokens = self
