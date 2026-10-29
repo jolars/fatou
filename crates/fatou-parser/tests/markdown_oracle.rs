@@ -6,9 +6,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fatou_parser::documentation::ast::CodeBlock;
-use fatou_parser::documentation::parse;
+use fatou_parser::documentation::ast::{Autolink, CodeBlock, Image, InlineCode, InlineMath, Link};
 use fatou_parser::documentation::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
+use fatou_parser::documentation::{parse, reconstruct};
 use rowan::ast::AstNode as _;
 
 const CORPUS_REL: &str = "tests/fixtures/documentation/oracle";
@@ -17,22 +17,29 @@ const CORPUS_REL: &str = "tests/fixtures/documentation/oracle";
 fn markdown_oracle_corpus_is_present_and_pinned() {
     let root = corpus_root();
     assert!(root.join(".markdown-source").is_file());
-    assert!(read_cases().len() >= 15);
+    assert!(read_cases().len() >= 22);
 }
 
 #[test]
 fn matches_julia_markdown_semantic_shape() {
     let mut failures = Vec::new();
     for case in read_cases() {
-        let parsed = parse(&case.input);
-        let actual = render_document(&parsed.cst);
-        if actual != case.expected.trim() {
-            failures.push(format!(
-                "{}\n  expected: {}\n    actual: {}",
-                case.slug,
-                case.expected.trim(),
-                actual
-            ));
+        let mut inputs = vec![("LF", case.input.clone())];
+        if case.slug.starts_with("wrapped_") {
+            inputs.push(("CRLF", case.input.replace('\n', "\r\n")));
+        }
+        for (ending, input) in inputs {
+            let parsed = parse(&input);
+            assert_eq!(reconstruct(&parsed.cst), input, "{} ({ending})", case.slug);
+            let actual = render_document(&parsed.cst);
+            if actual != case.expected.trim() {
+                failures.push(format!(
+                    "{} ({ending})\n  expected: {}\n    actual: {}",
+                    case.slug,
+                    case.expected.trim(),
+                    actual
+                ));
+            }
         }
     }
     assert!(
@@ -317,14 +324,14 @@ fn render_inline_element(element: SyntaxElement) -> Option<String> {
             SyntaxKind::STRONG => Some(format!("(strong {})", render_inlines(&node))),
             SyntaxKind::INLINE_CODE => Some(format!(
                 "(code  {})",
-                hex(first_token(&node, SyntaxKind::CODE_CONTENT).trim())
+                hex(&InlineCode::cast(node).unwrap().content())
             )),
             SyntaxKind::INLINE_MATH => Some(format!(
                 "(math {})",
-                hex(first_token(&node, SyntaxKind::MATH_CONTENT).trim())
+                hex(&InlineMath::cast(node).unwrap().content())
             )),
             SyntaxKind::LINK => {
-                let destination = first_token(&node, SyntaxKind::LINK_DESTINATION);
+                let destination = Link::cast(node.clone()).unwrap().destination();
                 Some(format!(
                     "(link ({}) {})",
                     render_inlines(&node),
@@ -332,12 +339,13 @@ fn render_inline_element(element: SyntaxElement) -> Option<String> {
                 ))
             }
             SyntaxKind::IMAGE => {
-                let alt = first_token(&node, SyntaxKind::TEXT);
-                let destination = first_token(&node, SyntaxKind::LINK_DESTINATION);
+                let image = Image::cast(node).unwrap();
+                let alt = image.alt();
+                let destination = image.destination();
                 Some(format!("(image {} {})", hex(&alt), hex(&destination)))
             }
             SyntaxKind::AUTOLINK => {
-                let destination = first_token(&node, SyntaxKind::LINK_DESTINATION);
+                let destination = Autolink::cast(node).unwrap().destination();
                 Some(format!(
                     "(link ((text {})) {})",
                     hex(&destination),

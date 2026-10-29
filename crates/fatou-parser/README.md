@@ -50,6 +50,13 @@ assert_eq!(reconstruct(&output.cst), source);
 `fatou_parser::documentation::ast` provides typed navigation for Julia Markdown
 blocks and inline content. It also classifies core Documenter links, fences, and
 `jldoctest` info strings locally while preserving unknown extension syntax.
+Inline constructs span paragraph continuations, including those in lists and
+admonitions. Wrapped labels expose `Inline::SoftBreak` tokens, while inline code
+and link destinations join continuations with spaces. The CST retains the
+original newlines and container prefixes. A wrapped payload can contain several
+content tokens, each with an exact decoded-text range; a range covering the
+whole construct also includes the intervening prefixes.
+
 Fences below list items retain the list prefix as whitespace trivia. Their
 `CodeBlock::content()` joins the `CODE_CONTENT` tokens without that prefix; each
 token has an exact decoded-text range. `content_range()` covers the whole body,

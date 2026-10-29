@@ -62,6 +62,36 @@ struct FenceOpen {
     length: usize,
 }
 
+#[derive(Clone, Copy)]
+struct InlineLine {
+    line: Line,
+    content_start: usize,
+    quote_marker: Option<usize>,
+}
+
+impl InlineLine {
+    fn new(line: Line, content_start: usize) -> Self {
+        Self {
+            line,
+            content_start,
+            quote_marker: None,
+        }
+    }
+}
+
+struct InlinePiece {
+    logical: std::ops::Range<usize>,
+    source: std::ops::Range<usize>,
+    kind: InlinePieceKind,
+}
+
+enum InlinePieceKind {
+    Content,
+    SoftBreak,
+    HardBreak,
+    Prefix(SyntaxKind),
+}
+
 struct Parser<'a> {
     text: &'a str,
     lines: Vec<Line>,
@@ -374,16 +404,50 @@ impl<'a> Parser<'a> {
                     self.token(SyntaxKind::WHITESPACE, quote_content, list_start);
                     self.token(SyntaxKind::LIST_MARKER, list_start, list_end);
                     self.token(SyntaxKind::WHITESPACE, list_end, item_content);
-                    self.parse_inlines(item_content, item_line.content_end);
-                    self.token(SyntaxKind::NEWLINE, item_line.content_end, item_line.end);
-                    self.finish();
+                    let mut inlines = vec![InlineLine::new(
+                        Line {
+                            start: item_content,
+                            ..item_line
+                        },
+                        item_content,
+                    )];
                     line_index += 1;
+                    while line_index < self.lines.len() {
+                        let continuation = self.lines[line_index];
+                        let Some((quote_marker, quote_content_start)) =
+                            block_quote_content(continuation, self.text)
+                        else {
+                            break;
+                        };
+                        let indent =
+                            indentation(&self.text[quote_content_start..continuation.content_end]);
+                        if quote_content_start + indent == continuation.content_end
+                            || indent < item_content - quote_content
+                            || list_marker_range(
+                                self.text,
+                                quote_content_start,
+                                continuation.content_end,
+                            )
+                            .is_some()
+                        {
+                            break;
+                        }
+                        inlines.push(InlineLine {
+                            line: continuation,
+                            content_start: quote_content_start + indent,
+                            quote_marker: Some(quote_marker),
+                        });
+                        line_index += 1;
+                    }
+                    self.flush_inline_lines(&mut inlines, SyntaxKind::NEWLINE);
+                    self.finish();
                 }
                 self.finish();
                 continue;
             }
 
             self.start(SyntaxKind::PARAGRAPH);
+            let mut inlines = Vec::new();
             while line_index < self.lines.len() {
                 let paragraph_line = self.lines[line_index];
                 let Some((quote_marker, quote_content)) =
@@ -397,15 +461,14 @@ impl<'a> Parser<'a> {
                 {
                     break;
                 }
-                self.emit_quote_prefix(paragraph_line, quote_marker, quote_content);
-                self.parse_inlines(quote_content, paragraph_line.content_end);
-                self.token(
-                    SyntaxKind::SOFT_BREAK,
-                    paragraph_line.content_end,
-                    paragraph_line.end,
-                );
+                inlines.push(InlineLine {
+                    line: paragraph_line,
+                    content_start: quote_content,
+                    quote_marker: Some(quote_marker),
+                });
                 line_index += 1;
             }
+            self.flush_inline_lines(&mut inlines, SyntaxKind::SOFT_BREAK);
             self.finish();
         }
         self.finish();
@@ -466,6 +529,7 @@ impl<'a> Parser<'a> {
             }
 
             self.start(SyntaxKind::PARAGRAPH);
+            let mut inlines = Vec::new();
             while line_index < self.lines.len() {
                 let paragraph_line = self.lines[line_index];
                 let Some(content_start) = indented_content_start(paragraph_line, self.text) else {
@@ -475,18 +539,13 @@ impl<'a> Parser<'a> {
                 {
                     break;
                 }
-                self.token(SyntaxKind::WHITESPACE, paragraph_line.start, content_start);
-                self.parse_inlines(content_start, paragraph_line.content_end);
-                self.token(
-                    SyntaxKind::SOFT_BREAK,
-                    paragraph_line.content_end,
-                    paragraph_line.end,
-                );
+                inlines.push(InlineLine::new(paragraph_line, content_start));
                 line_index += 1;
                 if line_index >= self.lines.len() || self.lines[line_index].is_blank(self.text) {
                     break;
                 }
             }
+            self.flush_inline_lines(&mut inlines, SyntaxKind::SOFT_BREAK);
             self.finish();
         }
         line_index
@@ -501,8 +560,13 @@ impl<'a> Parser<'a> {
         self.token(SyntaxKind::FOOTNOTE_LABEL, label_start, label_end);
         self.token(SyntaxKind::WHITESPACE, label_end, content_start);
         self.start(SyntaxKind::PARAGRAPH);
-        self.parse_inlines(content_start, header.content_end);
-        self.token(SyntaxKind::SOFT_BREAK, header.content_end, header.end);
+        let mut inlines = vec![InlineLine::new(
+            Line {
+                start: content_start,
+                ..header
+            },
+            content_start,
+        )];
 
         let mut next = line_index + 1;
         while next < self.lines.len() {
@@ -513,11 +577,13 @@ impl<'a> Parser<'a> {
             let Some(content_start) = indented_content_start(line, self.text) else {
                 break;
             };
-            self.token(SyntaxKind::WHITESPACE, line.start, content_start);
-            self.parse_inlines(content_start, line.content_end);
-            self.token(SyntaxKind::SOFT_BREAK, line.content_end, line.end);
+            if list_marker_range(self.text, content_start, line.content_end).is_some() {
+                break;
+            }
+            inlines.push(InlineLine::new(line, content_start));
             next += 1;
         }
+        self.flush_inline_lines(&mut inlines, SyntaxKind::SOFT_BREAK);
         self.finish();
         next = self.emit_indented_container_blocks(next);
         self.finish();
@@ -559,6 +625,7 @@ impl<'a> Parser<'a> {
             self.token(SyntaxKind::LIST_MARKER, marker_start, marker_end);
             self.token(SyntaxKind::WHITESPACE, marker_end, content_start);
             let item_indent = marker_end - line.start + usize::from(content_start > marker_end);
+            let mut inlines = Vec::new();
             let first_fence = fence_open(
                 Line {
                     start: line.start + item_indent,
@@ -580,8 +647,13 @@ impl<'a> Parser<'a> {
             if let Some((open, close)) = first_fence {
                 line_index = self.emit_fence(line_index, close, open, item_indent, content_start);
             } else {
-                self.parse_inlines(content_start, line.content_end);
-                self.token(SyntaxKind::NEWLINE, line.content_end, line.end);
+                inlines.push(InlineLine::new(
+                    Line {
+                        start: content_start,
+                        ..line
+                    },
+                    content_start,
+                ));
                 line_index += 1;
             }
             let mut after_blank = false;
@@ -601,6 +673,7 @@ impl<'a> Parser<'a> {
                     if !continues_list && !continues_item {
                         break;
                     }
+                    self.flush_inline_lines(&mut inlines, SyntaxKind::NEWLINE);
                     self.token(SyntaxKind::BLANK_LINE, continuation.start, continuation.end);
                     line_index += 1;
                     after_blank = true;
@@ -614,6 +687,7 @@ impl<'a> Parser<'a> {
                         .first()
                         .is_some_and(u8::is_ascii_digit);
                     if nested_indent > base_indent {
+                        self.flush_inline_lines(&mut inlines, SyntaxKind::NEWLINE);
                         line_index =
                             self.emit_list_level(line_index, nested_indent, nested_ordered);
                         after_blank = false;
@@ -628,6 +702,7 @@ impl<'a> Parser<'a> {
                 if after_blank
                     && indented_content_start_after(continuation, self.text, item_indent).is_some()
                 {
+                    self.flush_inline_lines(&mut inlines, SyntaxKind::NEWLINE);
                     line_index = self.emit_indented_code_after(line_index, item_indent);
                     after_blank = false;
                     continue;
@@ -637,6 +712,7 @@ impl<'a> Parser<'a> {
                     .and_then(|line| fence_open(line, self.text))
                 {
                     if let Some(close) = self.find_fence_close(line_index + 1, open, item_indent) {
+                        self.flush_inline_lines(&mut inlines, SyntaxKind::NEWLINE);
                         line_index = self.emit_fence(
                             line_index,
                             close,
@@ -652,20 +728,11 @@ impl<'a> Parser<'a> {
                         range: range(open.marker_start, open.marker_end),
                     });
                 }
-                self.token(
-                    SyntaxKind::WHITESPACE,
-                    continuation.start,
-                    continuation.start + indent,
-                );
-                self.parse_inlines(continuation.start + indent, continuation.content_end);
-                self.token(
-                    SyntaxKind::NEWLINE,
-                    continuation.content_end,
-                    continuation.end,
-                );
+                inlines.push(InlineLine::new(continuation, continuation.start + indent));
                 line_index += 1;
                 after_blank = false;
             }
+            self.flush_inline_lines(&mut inlines, SyntaxKind::NEWLINE);
             self.finish();
         }
         self.finish();
@@ -736,30 +803,16 @@ impl<'a> Parser<'a> {
     fn emit_paragraph(&mut self, line_index: usize) -> usize {
         self.start(SyntaxKind::PARAGRAPH);
         let mut current = line_index;
+        let mut inlines = Vec::new();
         while current < self.lines.len() && !self.lines[current].is_blank(self.text) {
             if current > line_index && self.is_breaking_block(current) {
                 break;
             }
             let line = self.lines[current];
-            let hard_break = line.content_end > line.start
-                && self.text.as_bytes()[line.content_end - 1] == b'\\'
-                && line.end > line.content_end;
-            let inline_end = if hard_break {
-                line.content_end - 1
-            } else {
-                line.content_end
-            };
-            self.parse_inlines(line.start, inline_end);
-            if hard_break {
-                self.start(SyntaxKind::HARD_BREAK);
-                self.token(SyntaxKind::ESCAPE, inline_end, line.content_end);
-                self.token(SyntaxKind::NEWLINE, line.content_end, line.end);
-                self.finish();
-            } else {
-                self.token(SyntaxKind::SOFT_BREAK, line.content_end, line.end);
-            }
+            inlines.push(InlineLine::new(line, line.start));
             current += 1;
         }
+        self.flush_inline_lines(&mut inlines, SyntaxKind::SOFT_BREAK);
         self.finish();
         current
     }
@@ -787,6 +840,134 @@ impl<'a> Parser<'a> {
         );
     }
 
+    fn parse_inlines(&mut self, start: usize, end: usize) {
+        InlineParser {
+            text: self.text,
+            source: self.text,
+            builder: &mut self.builder,
+            pieces: &[],
+            piece_index: 0,
+            literal_end: end,
+        }
+        .parse_inlines(start, end);
+    }
+
+    fn flush_inline_lines(&mut self, lines: &mut Vec<InlineLine>, final_break: SyntaxKind) {
+        let Some(last) = lines.last().copied() else {
+            return;
+        };
+        let last_hard_break = last.content_start < last.line.content_end
+            && self.text.as_bytes()[last.line.content_end - 1] == b'\\'
+            && last.line.content_end < last.line.end;
+        if lines.len() == 1 && !last_hard_break {
+            if let Some(marker) = last.quote_marker {
+                self.emit_quote_prefix(last.line, marker, last.content_start);
+            } else {
+                self.token(SyntaxKind::WHITESPACE, last.line.start, last.content_start);
+            }
+            self.parse_inlines(last.content_start, last.line.content_end);
+            self.token(final_break, last.line.content_end, last.line.end);
+            lines.clear();
+            return;
+        }
+        let mut text = String::new();
+        let mut pieces = Vec::new();
+        for (index, inline) in lines.iter().enumerate() {
+            let line = inline.line;
+            let mut prefix = |kind, start, end| {
+                if start < end {
+                    pieces.push(InlinePiece {
+                        logical: text.len()..text.len(),
+                        source: start..end,
+                        kind: InlinePieceKind::Prefix(kind),
+                    });
+                }
+            };
+            if let Some(marker) = inline.quote_marker {
+                prefix(SyntaxKind::WHITESPACE, line.start, marker);
+                prefix(SyntaxKind::QUOTE_MARKER, marker, marker + 1);
+                prefix(SyntaxKind::WHITESPACE, marker + 1, inline.content_start);
+            } else {
+                prefix(SyntaxKind::WHITESPACE, line.start, inline.content_start);
+            }
+            if inline.content_start < line.content_end {
+                let start = text.len();
+                text.push_str(&self.text[inline.content_start..line.content_end]);
+                pieces.push(InlinePiece {
+                    logical: start..text.len(),
+                    source: inline.content_start..line.content_end,
+                    kind: InlinePieceKind::Content,
+                });
+            }
+            let hard_break = inline.content_start < line.content_end
+                && self.text.as_bytes()[line.content_end - 1] == b'\\'
+                && line.content_end < line.end;
+            if index + 1 < lines.len() || hard_break {
+                let start = text.len();
+                text.push(if hard_break { '\n' } else { ' ' });
+                pieces.push(InlinePiece {
+                    logical: start..text.len(),
+                    source: line.content_end..line.end,
+                    kind: if hard_break {
+                        InlinePieceKind::HardBreak
+                    } else {
+                        InlinePieceKind::SoftBreak
+                    },
+                });
+            }
+        }
+        let mut parser = InlineParser {
+            text: &text,
+            source: self.text,
+            builder: &mut self.builder,
+            pieces: &pieces,
+            piece_index: 0,
+            literal_end: text.find('\n').unwrap_or(text.len()),
+        };
+        parser.parse_inlines(0, text.len());
+        // An empty final line can leave only its container prefix unconsumed.
+        for piece in &pieces[parser.piece_index..] {
+            if let InlinePieceKind::Prefix(kind) = piece.kind {
+                self.token(kind, piece.source.start, piece.source.end);
+            }
+        }
+        if !last_hard_break {
+            self.token(final_break, last.line.content_end, last.line.end);
+        }
+        lines.clear();
+    }
+
+    fn start(&mut self, kind: SyntaxKind) {
+        self.builder
+            .start_node(DocumentationLanguage::kind_to_raw(kind));
+    }
+
+    fn finish(&mut self) {
+        self.builder.finish_node();
+    }
+
+    fn token(&mut self, kind: SyntaxKind, start: usize, end: usize) {
+        if start < end {
+            self.builder.token(
+                DocumentationLanguage::kind_to_raw(kind),
+                &self.text[start..end],
+            );
+        }
+    }
+}
+
+// Inline recognition uses paragraph text, while token emission retains the
+// original bytes and container prefixes at their decoded-text offsets.
+struct InlineParser<'a, 'b> {
+    text: &'a str,
+    source: &'a str,
+    builder: &'b mut GreenNodeBuilder<'static>,
+    pieces: &'a [InlinePiece],
+    piece_index: usize,
+    literal_end: usize,
+}
+
+impl InlineParser<'_, '_> {
     fn parse_inlines(&mut self, start: usize, end: usize) {
         let mut cursor = start;
         let mut text_start = start;
@@ -845,12 +1026,20 @@ impl<'a> Parser<'a> {
             return None;
         }
         let ch = self.text[next..end].chars().next()?;
+        if ch == '\n' {
+            self.start(SyntaxKind::HARD_BREAK);
+            self.token(SyntaxKind::ESCAPE, start, next);
+            self.token(SyntaxKind::NEWLINE, next, next + 1);
+            self.finish();
+            return Some((SyntaxKind::HARD_BREAK, next + 1));
+        }
         "\\`*_#+-.!{}[]()$"
             .contains(ch)
             .then_some((SyntaxKind::ESCAPE, next + ch.len_utf8()))
     }
 
     fn emit_image(&mut self, start: usize, end: usize) -> Option<(SyntaxKind, usize)> {
+        let end = self.literal_inline_end(start, end);
         let label_end = find_closing(self.text, start + 2, end, b'[', b']')?;
         let mut open = label_end + 1;
         while open < end && self.text.as_bytes()[open].is_ascii_whitespace() {
@@ -862,7 +1051,7 @@ impl<'a> Parser<'a> {
         let destination_end = find_closing(self.text, open + 1, end, b'(', b')')?;
         self.start(SyntaxKind::IMAGE);
         self.token(SyntaxKind::MARKER, start, start + 2);
-        self.token(SyntaxKind::TEXT, start + 2, label_end);
+        self.literal_token(SyntaxKind::TEXT, start + 2, label_end);
         self.token(SyntaxKind::MARKER, label_end, open + 1);
         self.token(SyntaxKind::LINK_DESTINATION, open + 1, destination_end);
         self.token(SyntaxKind::MARKER, destination_end, destination_end + 1);
@@ -871,6 +1060,7 @@ impl<'a> Parser<'a> {
     }
 
     fn emit_link_or_footnote(&mut self, start: usize, end: usize) -> Option<(SyntaxKind, usize)> {
+        let end = self.literal_inline_end(start, end);
         if start + 2 < end && self.text.as_bytes()[start + 1] == b'^' {
             let close = self.text[start + 2..end].find(']')? + start + 2;
             if self.text[start + 2..close]
@@ -903,6 +1093,7 @@ impl<'a> Parser<'a> {
     }
 
     fn emit_autolink(&mut self, start: usize, end: usize) -> Option<(SyntaxKind, usize)> {
+        let end = self.literal_inline_end(start, end);
         let close = self.text[start + 1..end].find('>')? + start + 1;
         let destination = &self.text[start + 1..close];
         if !is_autolink(destination) {
@@ -941,6 +1132,7 @@ impl<'a> Parser<'a> {
     }
 
     fn emit_backticks(&mut self, start: usize, end: usize) -> Option<(SyntaxKind, usize)> {
+        let end = self.literal_inline_end(start, end);
         let mut open_end = start;
         while open_end < end && self.text.as_bytes()[open_end] == b'`' {
             open_end += 1;
@@ -981,12 +1173,34 @@ impl<'a> Parser<'a> {
         let expression_end = interpolation_end(self.text, start, end)?;
         self.start(SyntaxKind::INTERPOLATION);
         self.token(SyntaxKind::MARKER, start, start + 1);
-        self.token(SyntaxKind::TEXT, start + 1, expression_end);
+        self.literal_token(SyntaxKind::TEXT, start + 1, expression_end);
         self.finish();
         Some((SyntaxKind::INTERPOLATION, expression_end))
     }
 
+    fn literal_inline_end(&mut self, start: usize, end: usize) -> usize {
+        // Julia's literal inline readers stop at hard breaks. Ordinary wraps
+        // have already become spaces, so they do not truncate these readers.
+        if start > self.literal_end {
+            self.literal_end = self.text[start..]
+                .find('\n')
+                .map_or(self.text.len(), |offset| start + offset);
+        }
+        end.min(self.literal_end)
+    }
+
     fn start(&mut self, kind: SyntaxKind) {
+        // A container prefix precedes an opener on the next line, so it
+        // belongs outside that new inline node's source range.
+        while let Some(piece) = self.pieces.get(self.piece_index)
+            && let InlinePieceKind::Prefix(kind) = piece.kind
+        {
+            self.builder.token(
+                DocumentationLanguage::kind_to_raw(kind),
+                &self.source[piece.source.clone()],
+            );
+            self.piece_index += 1;
+        }
         self.builder
             .start_node(DocumentationLanguage::kind_to_raw(kind));
     }
@@ -996,11 +1210,63 @@ impl<'a> Parser<'a> {
     }
 
     fn token(&mut self, kind: SyntaxKind, start: usize, end: usize) {
-        if start < end {
+        let soft_break = if kind == SyntaxKind::TEXT {
+            SyntaxKind::SOFT_BREAK
+        } else {
+            kind
+        };
+        self.mapped_token(kind, start, end, soft_break);
+    }
+
+    fn literal_token(&mut self, kind: SyntaxKind, start: usize, end: usize) {
+        self.mapped_token(kind, start, end, kind);
+    }
+
+    fn mapped_token(&mut self, kind: SyntaxKind, start: usize, end: usize, soft_break: SyntaxKind) {
+        if start == end {
+            return;
+        }
+        if self.pieces.is_empty() {
             self.builder.token(
                 DocumentationLanguage::kind_to_raw(kind),
-                &self.text[start..end],
+                &self.source[start..end],
             );
+            return;
+        }
+        let mut cursor = start;
+        while cursor < end {
+            let piece = &self.pieces[self.piece_index];
+            let (source_start, source_end, token_kind, next) = match piece.kind {
+                InlinePieceKind::Content => {
+                    let next = end.min(piece.logical.end);
+                    (
+                        piece.source.start + cursor - piece.logical.start,
+                        piece.source.start + next - piece.logical.start,
+                        kind,
+                        next,
+                    )
+                }
+                InlinePieceKind::SoftBreak => {
+                    (piece.source.start, piece.source.end, soft_break, cursor + 1)
+                }
+                InlinePieceKind::HardBreak => (
+                    piece.source.start,
+                    piece.source.end,
+                    SyntaxKind::NEWLINE,
+                    cursor + 1,
+                ),
+                InlinePieceKind::Prefix(prefix_kind) => {
+                    (piece.source.start, piece.source.end, prefix_kind, cursor)
+                }
+            };
+            self.builder.token(
+                DocumentationLanguage::kind_to_raw(token_kind),
+                &self.source[source_start..source_end],
+            );
+            cursor = next;
+            if cursor == piece.logical.end {
+                self.piece_index += 1;
+            }
         }
     }
 }
@@ -1276,14 +1542,12 @@ fn thematic_break(content: &str) -> bool {
 
 fn math_block(line: Line, text: &str) -> Option<(usize, usize, usize, usize)> {
     let raw = line.content(text);
-    let leading = raw.len() - raw.trim_start().len();
-    let trailing = raw.trim_end().len();
-    let trimmed = &raw[leading..trailing];
+    let trimmed = raw.trim();
     if trimmed.len() < 2 || !trimmed.starts_with('$') || !trimmed.ends_with('$') {
         return None;
     }
-    let open = line.start + leading;
-    let close = line.start + trailing;
+    let open = line.start + raw.len() - raw.trim_start().len();
+    let close = open + trimmed.len();
     Some((open, open + 1, close - 1, close))
 }
 

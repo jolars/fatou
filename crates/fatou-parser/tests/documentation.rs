@@ -1,6 +1,6 @@
 use fatou_parser::documentation::ast::{
     Block, CodeBlock, Document, DocumenterDirective, DocumenterLinkKind, FenceKind, Heading,
-    Inline, Link, List,
+    Inline, InlineCode, Link, List,
 };
 use fatou_parser::documentation::syntax::SyntaxKind;
 use fatou_parser::documentation::{DiagnosticKind, parse, reconstruct};
@@ -29,18 +29,268 @@ fn documentation_parse_is_lossless_for_every_byte() {
 
 #[test]
 fn documentation_parse_is_lossless_at_utf8_boundaries() {
-    let input = "α [`β`](@ref Γ.δ) -- $x$\n!!! note \"λ\"\n    `μ` and $(f(ν))\n";
-    let boundaries: Vec<_> = input
-        .char_indices()
-        .map(|(offset, _)| offset)
-        .chain(std::iter::once(input.len()))
-        .collect();
+    for input in [
+        "α [`β`](@ref Γ.δ) -- $x$\n!!! note \"λ\"\n    `μ` and $(f(ν))\n",
+        "- [α\r\n  β](@ref\r\n  Γ.δ) **λ\r\n  μ** `ν\r\n  ξ`\r\n",
+        "> [α\n> β](@ref)\n> `λ\n> μ`\n",
+    ] {
+        let boundaries: Vec<_> = input
+            .char_indices()
+            .map(|(offset, _)| offset)
+            .chain(std::iter::once(input.len()))
+            .collect();
 
-    for (start_index, &start) in boundaries.iter().enumerate() {
-        for &end in &boundaries[start_index..] {
-            let source = &input[start..end];
-            assert_eq!(reconstruct(&parse(source).cst), source);
+        for (start_index, &start) in boundaries.iter().enumerate() {
+            for &end in &boundaries[start_index..] {
+                let source = &input[start..end];
+                assert_eq!(reconstruct(&parse(source).cst), source);
+            }
         }
+    }
+}
+
+#[test]
+fn wrapped_inlines_preserve_utf8_ranges_and_container_prefixes() {
+    let body = concat!(
+        "Intro\n",
+        "[API α\nReference β](@ref Main.δ) with **bold α\ntext β**, ",
+        "*italic α\ntext β*, and `code α\ntext β`.",
+    );
+    for (header, first_prefix, continuation) in [
+        ("", "", ""),
+        ("", "- ", "  "),
+        ("", "1. ", "   "),
+        ("!!! note\n", "    ", "    "),
+        ("", "> ", "> "),
+        ("", "> - ", ">   "),
+        ("", "[^note]: ", "    "),
+    ] {
+        for newline in ["\n", "\r\n"] {
+            for trailing_newline in [false, true] {
+                let mut input = format!(
+                    "{header}{first_prefix}{}",
+                    body.replace('\n', &format!("\n{continuation}"))
+                );
+                if trailing_newline {
+                    input.push('\n');
+                }
+                let input = input.replace('\n', newline);
+                let parsed = parse(&input);
+                assert!(
+                    parsed.diagnostics.is_empty(),
+                    "{input:?}: {:?}",
+                    parsed.diagnostics
+                );
+                assert_eq!(reconstruct(&parsed.cst), input);
+                let link = parsed
+                    .cst
+                    .descendants()
+                    .find_map(Link::cast)
+                    .expect("wrapped link");
+                let label = link
+                    .label()
+                    .map(|inline| match inline {
+                        Inline::Text(token) => token.text().to_string(),
+                        Inline::SoftBreak(token) => {
+                            assert_eq!(token.text(), newline);
+                            " ".to_string()
+                        }
+                        other => panic!("unexpected label inline: {other:?}"),
+                    })
+                    .collect::<String>();
+                assert_eq!(label, "API α Reference β");
+                assert_eq!(link.destination(), "@ref Main.δ");
+                let link_range = link.syntax().text_range();
+                assert_eq!(usize::from(link_range.start()), input.find("[API").unwrap());
+                assert_eq!(
+                    &input[usize::from(link_range.start())..usize::from(link_range.end())],
+                    format!("[API α{newline}{continuation}Reference β](@ref Main.δ)")
+                );
+                let destination = link.destination_range().unwrap();
+                assert_eq!(
+                    &input[usize::from(destination.start())..usize::from(destination.end())],
+                    "@ref Main.δ"
+                );
+
+                let code = parsed
+                    .cst
+                    .descendants()
+                    .find_map(InlineCode::cast)
+                    .expect("wrapped inline code");
+                assert_eq!(code.content(), "code α text β");
+                for kind in [SyntaxKind::STRONG, SyntaxKind::EMPHASIS] {
+                    let node = parsed
+                        .cst
+                        .descendants()
+                        .find(|node| node.kind() == kind)
+                        .expect("wrapped emphasis");
+                    assert!(
+                        node.children_with_tokens()
+                            .any(|element| element.kind() == SyntaxKind::SOFT_BREAK)
+                    );
+                }
+                for token in parsed
+                    .cst
+                    .descendants_with_tokens()
+                    .filter_map(|element| element.into_token())
+                {
+                    let range = token.text_range();
+                    assert_eq!(
+                        &input[usize::from(range.start())..usize::from(range.end())],
+                        token.text()
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn inline_delimiters_do_not_cross_block_boundaries() {
+    for (open, close, kind) in [
+        ("[open", "close](@ref)", SyntaxKind::LINK),
+        ("**open", "close**", SyntaxKind::STRONG),
+        ("`open", "close`", SyntaxKind::INLINE_CODE),
+    ] {
+        let cases = [
+            format!("{open}\n\n{close}\n"),
+            format!("{open}\n# Heading\n{close}\n"),
+            format!("{open}\n> quoted\n{close}\n"),
+            format!("{open}\n- item\n{close}\n"),
+            format!("{open}\n!!! note\n    body\n{close}\n"),
+            format!("{open}\n```julia\nx = 1\n```\n{close}\n"),
+            format!("- {open}\n- {close}\n"),
+            format!("- {open}\n\n  {close}\n"),
+            format!("- {open}\n  - nested\n  {close}\n"),
+            format!("- {open}\n  ```julia\n  x = 1\n  ```\n  {close}\n"),
+            format!("- {open}\n\n      x = 1\n\n  {close}\n"),
+            format!("!!! note\n    {open}\n\n    {close}\n"),
+            format!("!!! note\n    {open}\n    - item\n    {close}\n"),
+            format!("!!! note\n    {open}\n{close}\n"),
+            format!("> {open}\n>\n> {close}\n"),
+            format!("> {open}\n> - item\n> {close}\n"),
+            format!("> - {open}\n> - {close}\n"),
+            format!("[^note]: {open}\n\n    {close}\n"),
+        ];
+        for input in cases {
+            for input in [input.clone(), input.replace('\n', "\r\n")] {
+                let parsed = parse(&input);
+                assert_eq!(reconstruct(&parsed.cst), input);
+                assert!(
+                    !parsed.cst.descendants().any(|node| node.kind() == kind),
+                    "{input:?}\n{:#?}",
+                    parsed.cst
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn wrapped_inline_ranges_compose_with_docstring_decoding() {
+    for (header, first_prefix, continuation) in [
+        ("", "", ""),
+        ("", "- ", "  "),
+        ("!!! note\n", "    ", "    "),
+        ("", "> ", "> "),
+    ] {
+        let markdown = format!(
+            "{header}{first_prefix}[API α\n{continuation}Reference \\u03b2](@ref\n{continuation}Main.\\u0066) and `code\n{continuation}\\u0066`."
+        );
+        let source = format!(
+            "\"\"\"\n    {}\n    \"\"\"\nf() = 1\n",
+            markdown.replace('\n', "\n    ")
+        );
+        for source in [source.clone(), source.replace('\n', "\r\n")] {
+            let julia = parse_julia(&source);
+            let attachment = julia
+                .cst
+                .descendants()
+                .find_map(DocAttachment::cast)
+                .unwrap();
+            let DocText::Static(decoded) = attachment.text() else {
+                panic!("static docstring");
+            };
+            let markdown = parse(decoded.as_str());
+            assert_eq!(reconstruct(&markdown.cst), decoded.as_str());
+            let link = markdown.cst.descendants().find_map(Link::cast).unwrap();
+            assert_eq!(link.destination(), "@ref Main.f");
+            let reference = link.documenter_link().unwrap();
+            assert_eq!(reference.kind(), DocumenterLinkKind::Ref);
+            assert_eq!(reference.target(), Some("Main.f"));
+            let range = reference.target_range().unwrap();
+            assert_eq!(
+                &decoded.as_str()[usize::from(range.start())..usize::from(range.end())],
+                "Main.f"
+            );
+            let mapped = decoded.source_map().source_range(range).unwrap();
+            assert_eq!(
+                &source[usize::from(mapped.start())..usize::from(mapped.end())],
+                r"Main.\u0066"
+            );
+            let mapped = decoded
+                .source_map()
+                .source_range(link.syntax().text_range())
+                .unwrap();
+            assert_eq!(usize::from(mapped.start()), source.find("[API").unwrap());
+            assert_eq!(usize::from(mapped.end()), source.find(") and").unwrap() + 1);
+            let label = link
+                .label()
+                .find_map(|inline| match inline {
+                    Inline::Text(token) if token.text().contains('β') => Some(token),
+                    _ => None,
+                })
+                .unwrap();
+            let mapped = decoded
+                .source_map()
+                .source_range(label.text_range())
+                .unwrap();
+            assert_eq!(
+                &source[usize::from(mapped.start())..usize::from(mapped.end())],
+                r"Reference \u03b2"
+            );
+            let code = markdown
+                .cst
+                .descendants()
+                .find_map(InlineCode::cast)
+                .unwrap();
+            assert_eq!(code.content(), "code f");
+            let content = code
+                .syntax()
+                .children_with_tokens()
+                .filter_map(|element| element.into_token())
+                .find(|token| token.kind() == SyntaxKind::CODE_CONTENT && token.text() == "f")
+                .unwrap();
+            let mapped = decoded
+                .source_map()
+                .source_range(content.text_range())
+                .unwrap();
+            assert_eq!(
+                &source[usize::from(mapped.start())..usize::from(mapped.end())],
+                r"\u0066"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_wrapped_documenter_target_covers_its_original_bytes() {
+    for newline in ["\n", "\r\n"] {
+        let input = format!("- [API](@ref \"API α{newline}  Reference β\")\n");
+        let parsed = parse(&input);
+        let link = parsed.cst.descendants().find_map(Link::cast).unwrap();
+        let destination = link.destination_range().unwrap();
+        assert_eq!(
+            &input[usize::from(destination.start())..usize::from(destination.end())],
+            format!("@ref \"API α{newline}  Reference β\"")
+        );
+        let reference = link.documenter_link().unwrap();
+        assert_eq!(reference.target(), Some("\"API α Reference β\""));
+        let target = reference.target_range().unwrap();
+        assert_eq!(
+            &input[usize::from(target.start())..usize::from(target.end())],
+            format!("\"API α{newline}  Reference β\"")
+        );
     }
 }
 

@@ -5,6 +5,11 @@
 //! Julia docstring can compose them with [`crate::ast::DocSourceMap`]. Parsing
 //! is entirely local and never evaluates Julia or invokes a Julia process.
 //!
+//! Inline constructs span paragraph continuations. The CST retains original
+//! newlines and container prefixes, while typed payload accessors join ordinary
+//! continuations with spaces. Wrapped payloads can have multiple content tokens;
+//! each token retains its exact decoded-text range.
+//!
 //! Inline `--` and `---` follow Julia 1.13's en-dash and em-dash semantics.
 //! Their CST tokens retain the original spelling; typed navigation exposes
 //! [`ast::Inline::EnDash`] and [`ast::Inline::EmDash`], and heading content

@@ -397,30 +397,38 @@ impl TableCell {
 }
 
 impl InlineCode {
-    /// Return the code without its backtick delimiters.
+    /// Return the code without delimiters, joining wrapped lines with spaces.
     pub fn content(&self) -> String {
         inline_payload(self.syntax(), SyntaxKind::CODE_CONTENT)
     }
 }
 
 impl InlineMath {
-    /// Return the formula without its double-backtick delimiters.
+    /// Return the formula without delimiters, joining wrapped lines with spaces.
     pub fn content(&self) -> String {
         inline_payload(self.syntax(), SyntaxKind::MATH_CONTENT)
     }
 }
 
 impl Link {
-    /// Return the raw link destination.
+    /// Return the link destination, joining paragraph continuations with spaces.
     pub fn destination(&self) -> String {
-        token(self.syntax(), SyntaxKind::LINK_DESTINATION)
-            .map(|token| token.text().to_string())
-            .unwrap_or_default()
+        payload_text(self.syntax(), SyntaxKind::LINK_DESTINATION)
     }
 
-    /// Return the exact decoded-text range of the destination inside `(…)`.
+    /// Return the decoded-text range covering the destination inside `(…)`.
+    ///
+    /// Wrapped destinations include the intervening newline and container
+    /// prefixes. Individual `LINK_DESTINATION` tokens exclude those prefixes.
     pub fn destination_range(&self) -> Option<TextRange> {
-        token(self.syntax(), SyntaxKind::LINK_DESTINATION).map(|token| token.text_range())
+        let mut tokens = payload_tokens(self.syntax(), SyntaxKind::LINK_DESTINATION);
+        let first = tokens.next()?.text_range();
+        Some(TextRange::new(
+            first.start(),
+            tokens
+                .last()
+                .map_or(first.end(), |token| token.text_range().end()),
+        ))
     }
 
     /// Iterate the link label's inline content.
@@ -432,25 +440,19 @@ impl Link {
 impl Image {
     /// Return the image's alternative text.
     pub fn alt(&self) -> String {
-        token(self.syntax(), SyntaxKind::TEXT)
-            .map(|token| token.text().to_string())
-            .unwrap_or_default()
+        payload_text(self.syntax(), SyntaxKind::TEXT)
     }
 
-    /// Return the raw image destination.
+    /// Return the image destination, joining wrapped lines with spaces.
     pub fn destination(&self) -> String {
-        token(self.syntax(), SyntaxKind::LINK_DESTINATION)
-            .map(|token| token.text().to_string())
-            .unwrap_or_default()
+        payload_text(self.syntax(), SyntaxKind::LINK_DESTINATION)
     }
 }
 
 impl Autolink {
     /// Return the destination between angle brackets.
     pub fn destination(&self) -> String {
-        token(self.syntax(), SyntaxKind::LINK_DESTINATION)
-            .map(|token| token.text().to_string())
-            .unwrap_or_default()
+        payload_text(self.syntax(), SyntaxKind::LINK_DESTINATION)
     }
 }
 
@@ -473,9 +475,7 @@ impl FootnoteReference {
 impl Interpolation {
     /// Return the unevaluated Julia expression text after `$`.
     pub fn expression(&self) -> String {
-        token(self.syntax(), SyntaxKind::TEXT)
-            .map(|token| token.text().to_string())
-            .unwrap_or_default()
+        payload_text(self.syntax(), SyntaxKind::TEXT)
     }
 }
 
@@ -529,25 +529,25 @@ pub enum DocumenterDirective {
 impl Link {
     /// Return Documenter link metadata for an `@ref`, `@id`, or extension URL.
     pub fn documenter_link(&self) -> Option<DocumenterLink> {
-        let destination = token(self.syntax(), SyntaxKind::LINK_DESTINATION)?;
-        destination
-            .text()
-            .trim_start()
+        let text = self.destination();
+        let destination = self.syntax().clone();
+        text.trim_start()
             .starts_with('@')
-            .then_some(DocumenterLink { destination })
+            .then_some(DocumenterLink { destination, text })
     }
 }
 
-/// A Documenter-style link destination retained as source text.
+/// A Documenter-style link destination with its decoded source ranges.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DocumenterLink {
-    destination: SyntaxToken,
+    destination: SyntaxNode,
+    text: String,
 }
 
 impl DocumenterLink {
     /// Return the core or extension link kind.
     pub fn kind(&self) -> DocumenterLinkKind<'_> {
-        let (name, _) = split_at_word(self.destination.text().trim());
+        let (name, _) = split_at_word(self.text.trim());
         match name {
             "@ref" => DocumenterLinkKind::Ref,
             "@id" => DocumenterLinkKind::Id,
@@ -557,13 +557,13 @@ impl DocumenterLink {
 
     /// Return an explicit target. `None` means Documenter infers it from the label.
     pub fn target(&self) -> Option<&str> {
-        let (_, rest) = split_at_word(self.destination.text().trim());
+        let (_, rest) = split_at_word(self.text.trim());
         (!rest.is_empty()).then_some(rest)
     }
 
     /// Return the explicit target's decoded-text range.
     pub fn target_range(&self) -> Option<TextRange> {
-        let raw = self.destination.text();
+        let raw = &self.text;
         let trimmed_start = raw.len() - raw.trim_start().len();
         let trimmed = raw.trim();
         let name_end = trimmed.find(char::is_whitespace)?;
@@ -573,11 +573,12 @@ impl DocumenterLink {
             return None;
         }
         let target_end = trimmed.trim_end().len();
-        let base: u32 = self.destination.text_range().start().into();
-        Some(TextRange::new(
-            TextSize::from(base + (trimmed_start + target_start) as u32),
-            TextSize::from(base + (trimmed_start + target_end) as u32),
-        ))
+        payload_range(
+            &self.destination,
+            SyntaxKind::LINK_DESTINATION,
+            trimmed_start + target_start,
+            trimmed_start + target_end,
+        )
     }
 }
 
@@ -730,9 +731,58 @@ fn inline_children(node: &SyntaxNode) -> impl Iterator<Item = Inline> + '_ {
 }
 
 fn inline_payload(node: &SyntaxNode, kind: SyntaxKind) -> String {
-    token(node, kind)
-        .map(|token| token.text().trim().to_string())
-        .unwrap_or_default()
+    payload_text(node, kind).trim().to_string()
+}
+
+fn payload_tokens(node: &SyntaxNode, kind: SyntaxKind) -> impl Iterator<Item = SyntaxToken> + '_ {
+    node.children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(move |token| token.kind() == kind || token.kind() == SyntaxKind::NEWLINE)
+}
+
+fn payload_text(node: &SyntaxNode, kind: SyntaxKind) -> String {
+    let mut out = String::new();
+    for token in payload_tokens(node, kind) {
+        if token.kind() == SyntaxKind::NEWLINE {
+            out.push('\n');
+        } else if matches!(token.text(), "\n" | "\r\n") {
+            out.push(' ');
+        } else {
+            out.push_str(token.text());
+        }
+    }
+    out
+}
+
+fn payload_range(
+    node: &SyntaxNode,
+    kind: SyntaxKind,
+    start: usize,
+    end: usize,
+) -> Option<TextRange> {
+    let mut offset = 0;
+    let mut source_start = None;
+    for token in payload_tokens(node, kind) {
+        let length = if matches!(token.text(), "\n" | "\r\n") {
+            1
+        } else {
+            token.text().len()
+        };
+        if source_start.is_none() && start < offset + length {
+            source_start =
+                Some(token.text_range().start() + TextSize::from((start - offset) as u32));
+        }
+        if end <= offset + length {
+            let source_end = if end == offset + length {
+                token.text_range().end()
+            } else {
+                token.text_range().start() + TextSize::from((end - offset) as u32)
+            };
+            return Some(TextRange::new(source_start?, source_end));
+        }
+        offset += length;
+    }
+    None
 }
 
 fn uppercase_first(text: &str) -> String {
