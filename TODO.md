@@ -130,14 +130,6 @@ style remains project policy rather than language correctness.
   CRLF, losslessness, and exact docstring source maps have regression tests.
   Reference resolution remains in `../diplodocus/`.
 
-- [ ] Release the parser fixes needed by Diplodocus in `../diplodocus/`. Its
-  exact `fatou-parser = "=0.8.2"` pin remains unchanged until publication. Then
-  update `../diplodocus/Cargo.toml` and `../diplodocus/Cargo.lock`, enable the
-  two pending integration tests, and run
-  `../diplodocus/examples/eunoia/julia.py --require-list-fences` from the
-  Diplodocus environment to verify both examples in detached HTML and Markdown
-  output. Parser and root linter changes belong in separate release commits.
-
 - [x] Recognize fenced code blocks inside admonitions in
   `emit_indented_container_blocks`, including `@example gallery`. Preserve
   fence classification, body indentation, lossless four-space or tab prefixes,
