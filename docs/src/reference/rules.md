@@ -5,12 +5,16 @@
 `fatou lint` runs a set of built-in rules over each file and reports a
 diagnostic for every finding. This page is the catalogue: one section per rule,
 keyed by its stable **rule ID**. That ID is what appears in a diagnostic, what
-`[lint]` `select`/`ignore` (and `--select`/`--ignore`) target, what
+`[lint]` `select`/`extend-select`/`ignore` target, what
 `[lint.severity]` re-grades, and what a `# fatou-ignore <id>` comment
 suppresses.
 
-Most rules are on by default. The few that are opt-in say so in their
-description; name one in `select` to run it.
+Most rules are on by default. Workspace package files also enable
+project-resolution rules, and declared script programs enable `undefined-name`.
+See [Configuration](configuration.md#lint) for rule selection.
+Other rules that require explicit selection say so in their description.
+An explicit `select` replaces every context's defaults; `extend-select` adds
+rules, and `ignore` disables them.
 
 Where a rewrite is unambiguous a rule carries an **autofix**: a *safe* fix
 (shown below as "After applying the fix") is applied by `fatou lint --fix`; an
@@ -121,7 +125,7 @@ warning: unused-argument
 
 ## `undefined-name`
 
-Flag an identifier that no resolution tier provides: not a local or a file binding, not a same-module global from included files, not a whole-module `using`'s export, and not a Base/Core name. For standalone programs, declare `[project] entry-points = ["main.jl"]` to enable this rule by default, follow static includes, and resolve ordinary global assignments. An explicit `[lint] select` replaces the defaults, and `ignore = ["undefined-name"]` disables the rule. Each entry point and host module is checked independently; findings name the failing contexts. Dynamic includes, `eval`, unresolved whole-module `using`s, and broken include closures suppress findings for that entry. Value reads inside macro calls and quoted code remain exempt. Without entry points, opt in with `[lint] extend-select = ["undefined-name"]`; standalone files containing includes are skipped. The language server also enables this rule for workspace package files.
+Flag an identifier that no resolution tier provides: not a local or a file binding, not a same-module global from included files, not a whole-module `using`'s export, and not a Base/Core name. For standalone programs, declare `[project] entry-points = ["main.jl"]` to enable this rule by default, follow static includes, and resolve ordinary global assignments. An explicit `[lint] select` replaces the defaults, and `ignore = ["undefined-name"]` disables the rule. Each entry point and host module is checked independently; findings name the failing contexts. Dynamic includes, `eval`, unresolved whole-module `using`s, and broken include closures suppress findings for that entry. Value reads inside macro calls and quoted code remain exempt. Without entry points, standalone files can opt in with `[lint] extend-select = ["undefined-name"]`; files containing includes are skipped. The rule also runs by default for workspace package files.
 
 `raduis` is a typo; no tier resolves it:
 
@@ -431,7 +435,7 @@ error: julia-version-compat
 
 ## `call-arity`
 
-Flag a call that no visible method of the function accepts: a positional count outside every method's range, or a keyword argument no positionally-matching method declares. Such a call raises `MethodError` at runtime. The method table unions every tier name resolution sees — the file's own definitions, the workspace package, and the harvested library, qualified extensions included — so an unknown method always silences the check rather than triggering it. Calls that splat arguments, carry `do` blocks, sit in macro calls or quoted code, or target constructors and callable values are exempt, and a file that `eval`s or `include`s outside a known workspace is skipped entirely. Off by default: the rule needs project context to be sound, so the language server enables it for workspace member files, while the CLI leaves it opt-in for self-contained scripts.
+Flag a call that no visible method of the function accepts: a positional count outside every method's range, or a keyword argument no positionally-matching method declares. Such a call raises `MethodError` at runtime. The method table unions every tier name resolution sees — the file's own definitions, the workspace package, and the harvested library, qualified extensions included — so an unknown method always silences the check rather than triggering it. Calls that splat arguments, carry `do` blocks, sit in macro calls or quoted code, or target constructors and callable values are exempt, and a file that `eval`s or `include`s outside a known workspace is skipped entirely. The rule runs by default for workspace package files. Other files require explicit selection because they may be fragments whose siblings add methods.
 
 `half` has no two-argument method:
 
@@ -451,7 +455,7 @@ warning: call-arity
 
 ## `function-has-no-methods`
 
-Flag a call to a function whose every visible definition is a bodyless `function f end` declaration. Such a function has an empty method table, so the call raises `MethodError` whatever it passes. Only a name the closed world defines is checked — one belonging to this file or to the enclosing workspace package — since the owner of a `using`'d or Base/Core name may add methods elsewhere. A declaration the package `export`s or declares `public` is exempt as an interface hook for a package extension or a downstream package to implement, as is a name that also names a type. The file is skipped entirely when it `eval`s, `include`s outside a known workspace, or `using`s a module the library cannot resolve, and call sites in macro calls or quoted code are exempt. Off by default: like `call-arity` the rule needs project context to be sound, so the language server enables it for workspace member files while the CLI leaves it opt-in.
+Flag a call to a function whose every visible definition is a bodyless `function f end` declaration. Such a function has an empty method table, so the call raises `MethodError` whatever it passes. Only a name the closed world defines is checked — one belonging to this file or to the enclosing workspace package — since the owner of a `using`'d or Base/Core name may add methods elsewhere. A declaration the package `export`s or declares `public` is exempt as an interface hook for a package extension or a downstream package to implement, as is a name that also names a type. The file is skipped entirely when it `eval`s, `include`s outside a known workspace, or `using`s a module the library cannot resolve, and call sites in macro calls or quoted code are exempt. The rule runs by default for workspace package files. Other files require explicit selection because their siblings may define the methods.
 
 `normalize` is declared but never given a method:
 
@@ -505,7 +509,7 @@ warning: redefined-constant
 
 ## `type-piracy`
 
-Flag a method definition that extends a function the current module does not own, using only argument types it does not own either ("type piracy"). Because Julia dispatches on one global method table, such a method silently changes behavior for every other user of those types the moment the module loads. A definition is fine as long as it owns the function or at least one argument type (a type parameter or `where` bound counts). The rule is sound-first: it flags only when it can prove the function and every readable argument type are foreign, withholding on anything unknown, and it skips the whole file when a whole-module `using` cannot be resolved. Off by default: it needs project context, so the language server enables it for workspace member files while the CLI leaves it opt-in via `--select`.
+Flag a method definition that extends a function the current module does not own, using only argument types it does not own either ("type piracy"). Because Julia dispatches on one global method table, such a method silently changes behavior for every other user of those types the moment the module loads. A definition is fine as long as it owns the function or at least one argument type (a type parameter or `where` bound counts). The rule is sound-first: it flags only when it can prove the function and every readable argument type are foreign, withholding on anything unknown, and it skips the whole file when a whole-module `using` cannot be resolved. Off by default. Without a harvested library, ownership checks use only the built-in Base/Core snapshot.
 
 Extending `Base.show` for only Base types is piracy:
 
@@ -565,7 +569,7 @@ warning: unreachable-code
 
 ## `unresolved-import`
 
-Flag a `using`/`import` of a module the enclosing project cannot load: a name that is neither in its `Project.toml` `[deps]` nor provided by the harvested environment (the standard library included). Julia resolves a bare `using Foo` against the active project, so an undeclared name raises `ArgumentError: Package Foo not found in current path` when the module loads. Relative paths (`using .Sub`), interpolated paths, and loads inside quoted code or macro calls are exempt, and a name the harvest resolved is always accepted — so a transitive dependency goes unreported rather than risking a false positive. Off by default: the rule needs the project context that only a package source file carries, so the language server enables it for workspace member files while the CLI leaves it opt-in.
+Flag a `using`/`import` of a module the enclosing project cannot load: a name that is neither in its `Project.toml` `[deps]` nor provided by the harvested environment (the standard library included). Julia resolves a bare `using Foo` against the active project, so an undeclared name raises `ArgumentError: Package Foo not found in current path` when the module loads. Relative paths (`using .Sub`), interpolated paths, and loads inside quoted code or macro calls are exempt, and a name the harvest resolved is always accepted — so a transitive dependency goes unreported rather than risking a false positive. The rule runs by default for workspace package files, which carry the required project context.
 
 The project declares `LinearAlgebra` in `[deps]`, but not `Frobnicate`:
 
@@ -620,7 +624,7 @@ error: kwarg-default-mismatch
 
 ## `invalid-type-declaration`
 
-Flag a `::` type declaration whose declared type is a function. The right side of a `::` must be a type, and Julia checks it eagerly: `f(x::g)` for a generic function `g` raises a `TypeError` when the method is defined, and a value-position `x::g` raises one as soon as it runs. The rule is deliberately partial, since only a closed answer about a name is trustworthy: it fires for a function defined in this file and for a top-level function of the enclosing workspace package, and stays silent for a Base/Core name (the export snapshot records no kinds), an imported name, and any binding that could hold a type such as a variable or a `const` alias. A same-named type, `const`, or module anywhere in the file or the package withholds the finding, so an outer constructor (`Foo(x::Int) = …`, which binds `Foo` as a function too) is never flagged. The file is skipped entirely when it `eval`s, `include`s outside a known workspace, or `using`s a module the library cannot resolve, and annotations inside a macro call or quoted code are exempt. Off by default: like the other resolution-gated rules it needs project context, so the language server enables it for workspace member files while the CLI leaves it opt-in via `--select`.
+Flag a `::` type declaration whose declared type is a function. The right side of a `::` must be a type, and Julia checks it eagerly: `f(x::g)` for a generic function `g` raises a `TypeError` when the method is defined, and a value-position `x::g` raises one as soon as it runs. The rule is deliberately partial, since only a closed answer about a name is trustworthy: it fires for a function defined in this file and for a top-level function of the enclosing workspace package, and stays silent for a Base/Core name (the export snapshot records no kinds), an imported name, and any binding that could hold a type such as a variable or a `const` alias. A same-named type, `const`, or module anywhere in the file or the package withholds the finding, so an outer constructor (`Foo(x::Int) = …`, which binds `Foo` as a function too) is never flagged. The file is skipped entirely when it `eval`s, `include`s outside a known workspace, or `using`s a module the library cannot resolve, and annotations inside a macro call or quoted code are exempt. The rule runs by default for workspace package files. Other files require explicit selection and a resolution context.
 
 `scale` is a function, so declaring `y::scale` is a `TypeError`:
 
@@ -685,7 +689,7 @@ warning: docstring-argument-mismatch
 
 ## `unresolved-docstring-reference`
 
-Flag an explicit, code-labeled Documenter `@ref` target when project resolution can prove that no such Julia symbol exists. Local Markdown anchors are accepted, and inferred references, prose-labeled links, unknown packages, dynamic definitions, unresolved `using`s, opaque docstrings, and unsupported target shapes stay silent rather than risk a false positive. Off by default: the rule needs project context to be sound, so the language server enables it for workspace member files, while the CLI leaves it opt-in.
+Flag an explicit, code-labeled Documenter `@ref` target when project resolution can prove that no such Julia symbol exists. Local Markdown anchors are accepted, and inferred references, prose-labeled links, unknown packages, dynamic definitions, unresolved `using`s, opaque docstrings, and unsupported target shapes stay silent rather than risk a false positive. The rule runs by default for workspace package files. Other files require explicit selection and a resolution context.
 
 The explicit target retains the same typo as its code label:
 
@@ -995,7 +999,7 @@ warning: shadowed-base-name
 
 ## `non-public-access`
 
-Flag a qualified read of a name the target module neither `export`s nor declares `public`. Those two statements are how a Julia module says what its API is — `public` (1.11) declares intent without attaching the name to a `using` — so everything else is internal and free to change in a patch release. Only a qualifier that really names a module is checked: a local, a parameter, a name an item list bound (`import Foo: Bar`), and any plain field access are values, not modules. Two kinds of module are left alone: one that declares no public API at all, whose whole surface is reached qualified by design, and one that re-exports with `Reexport.jl`, whose `@reexport using Bar` is a macro call the index cannot follow. So is the package under development, whose own internals its files may use. A Base/Core export reaches through any module, since every module but a `baremodule` implicitly does `using Base` — `Threads.ReentrantLock` is Base's type — and so do the `eval` and `include` every module binds for itself. Definition sites are not reads: `Base.show(io, x) = …` extends a function and `Foo.bar = 1` writes one, and code inside a quote or a macro call is exempt as everywhere else. Off by default: the rule needs the harvested library that only project context provides, and it reports what a module *declared*, so a package whose documented interface is qualified and unexported is reported too. No fix — the caller cannot make someone else's name public.
+Flag a qualified read of a name the target module neither `export`s nor declares `public`. Those two statements are how a Julia module says what its API is — `public` (1.11) declares intent without attaching the name to a `using` — so everything else is internal and free to change in a patch release. Only a qualifier that really names a module is checked: a local, a parameter, a name an item list bound (`import Foo: Bar`), and any plain field access are values, not modules. Two kinds of module are left alone: one that declares no public API at all, whose whole surface is reached qualified by design, and one that re-exports with `Reexport.jl`, whose `@reexport using Bar` is a macro call the index cannot follow. So is the package under development, whose own internals its files may use. A Base/Core export reaches through any module, since every module but a `baremodule` implicitly does `using Base` — `Threads.ReentrantLock` is Base's type — and so do the `eval` and `include` every module binds for itself. Definition sites are not reads: `Base.show(io, x) = …` extends a function and `Foo.bar = 1` writes one, and code inside a quote or a macro call is exempt as everywhere else. The rule runs by default for workspace package files. Other files require explicit selection and a harvested library. The rule reports what a module *declared*, so a package whose documented interface is qualified and unexported is reported too. No fix — the caller cannot make someone else's name public.
 
 `summarysize` is part of Base's public API; `unwrap_unionall` is not:
 

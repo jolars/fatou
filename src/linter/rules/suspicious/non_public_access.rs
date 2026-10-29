@@ -50,8 +50,9 @@
 //! `Tables.getcolumn`, `Parsers.xparse` — is reported all the same, because
 //! nothing in its source separates that interface from its internals; `public`
 //! (1.11) is exactly the statement that would. That, plus an `export` list a
-//! module generates with `@eval`, is why the rule is off by default. There is
-//! no fix: the caller cannot make someone else's name public.
+//! module generates with `@eval`, is why the rule is off by default for loose
+//! files. Workspace package files enable it by default. There is no fix: the
+//! caller cannot make someone else's name public.
 
 use smol_str::SmolStr;
 
@@ -76,10 +77,7 @@ impl Rule for NonPublicAccess {
     }
 
     fn default_enabled(&self) -> bool {
-        // Meaningful only against a harvested library: the rule has to read the
-        // target module's `export`/`public` statements. The language server
-        // turns it on for workspace member files; on the CLI `--select` both
-        // enables it and triggers the project harvest.
+        // The check needs the target module's harvested API declarations.
         false
     }
 
@@ -101,9 +99,10 @@ impl Rule for NonPublicAccess {
          is Base's type — and so do the `eval` and `include` every module \
          binds for itself. Definition sites are not reads: `Base.show(io, x) = \
          …` extends a function and `Foo.bar = 1` writes one, and code inside a \
-         quote or a macro call is exempt as everywhere else. Off by default: \
-         the rule needs the harvested library that only project context \
-         provides, and it reports what a module *declared*, so a package whose \
+         quote or a macro call is exempt as everywhere else. The rule runs by \
+         default for workspace package files. Other files require explicit \
+         selection and a harvested library. \
+         The rule reports what a module *declared*, so a package whose \
          documented interface is qualified and unexported is reported too. No \
          fix — the caller cannot make someone else's name public."
     }

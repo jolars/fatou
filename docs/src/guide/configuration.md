@@ -216,9 +216,11 @@ line-ending choices, command-line overrides, and deprecated key spellings.
 ## Choosing Lint Rules
 
 By default most rules run; the [rule reference](../reference/rules.md) lists the
-few that are opt-in. Use `extend-select` to enable additional rules while
-keeping the defaults. For example, to report undefined names in self-contained
-files without configuring entry points or losing unused-variable warnings:
+few that are opt-in for loose files. Workspace package files also enable
+project-resolution rules, and declared script programs enable `undefined-name`.
+Use `extend-select` to enable additional rules while keeping the defaults. For
+example, to report undefined names in self-contained files without configuring
+entry points or losing unused-variable warnings:
 
 ```toml
 [lint]
@@ -226,8 +228,9 @@ extend-select = ["undefined-name"]
 ```
 
 Use `select` to replace the defaults and `ignore` to turn individual rules off.
-See the [lint reference](../reference/configuration.md#lint) for selection
-order, empty selections, and language-server behavior.
+An explicit `select` also replaces defaults enabled by package or script
+context. See the [lint reference](../reference/configuration.md#lint) for
+selection order and empty selections.
 
 `[lint.severity]` changes how loudly a rule reports, without changing whether it
 runs. Rules you do not list keep their default severity:

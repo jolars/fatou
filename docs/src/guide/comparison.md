@@ -172,9 +172,9 @@ Fatou cannot resolve, the rule skips the file rather than guess.
 [`call-arity`](../reference/rules.md#call-arity) treats an unknown method as a
 reason to say nothing.
 
-Both rules need project context to be sound, so the CLI leaves them opt-in and
-the language server turns them on for workspace member files. The bargain is
-that Fatou misses real problems a type-aware linter would catch, and rarely
+Both rules run by default for workspace package files and remain opt-in for
+loose files. Declared script programs also enable `undefined-name`. The bargain
+is that Fatou misses real problems a type-aware linter would catch, and rarely
 cries wolf. StaticLint's `MissingReference` has the opposite reputation: false
 positives on valid `using` and `import` code.
 

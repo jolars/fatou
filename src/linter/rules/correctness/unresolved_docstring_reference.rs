@@ -26,9 +26,8 @@ impl Rule for UnresolvedDocstringReference {
          anchors are accepted, and inferred references, prose-labeled links, \
          unknown packages, dynamic definitions, unresolved `using`s, opaque \
          docstrings, and unsupported target shapes stay silent rather than \
-         risk a false positive. Off by default: the rule needs project context \
-         to be sound, so the language server enables it for workspace member \
-         files, while the CLI leaves it opt-in."
+         risk a false positive. The rule runs by default for workspace package \
+         files. Other files require explicit selection and a resolution context."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -39,11 +38,7 @@ impl Rule for UnresolvedDocstringReference {
     }
 
     fn default_enabled(&self) -> bool {
-        // Sound only with project context, like every other resolution rule: a
-        // bare file cannot tell a missing binding from one its project defines
-        // elsewhere. The language server turns the rule on for workspace member
-        // files; on the CLI `--select` both enables it and triggers the project
-        // harvest that the default lint deliberately does not pay for.
+        // A missing binding may be defined in another file.
         false
     }
 

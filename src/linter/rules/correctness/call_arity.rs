@@ -13,7 +13,7 @@
 //! inventing them. The method set is an over-approximation: all same-name
 //! groups in each consulted tree are unioned, qualified extensions
 //! (`Base.show(io, x) = ...`) included, so a method the rule cannot place
-//! precisely still clears the call. On the CLI's baked-in Base/Core snapshot
+//! precisely still clears the call. With the baked-in Base/Core snapshot
 //! (names without signatures) library calls simply find no methods and stay
 //! silent.
 //!
@@ -28,10 +28,10 @@
 //! placeholder (methods live elsewhere by design) or generated methods (other
 //! overloads may evade the harvest).
 //!
-//! Off by default, like `undefined-name`: a bare file may be an `include`d
-//! fragment whose siblings add methods. The language server enables the rule
-//! for workspace member files; on the CLI it is opt-in via `--select`, sound
-//! for self-contained scripts.
+//! Off by default for loose files, like `undefined-name`: a bare file may be
+//! an `include`d fragment whose siblings add methods. Workspace package files
+//! enable the rule by default. Self-contained files can opt in with
+//! `[lint] extend-select = ["call-arity"]`.
 
 use crate::ast::AstToken;
 use crate::index::harvest_tree;
@@ -56,10 +56,7 @@ impl Rule for CallArity {
     }
 
     fn default_enabled(&self) -> bool {
-        // Sound only with project context: an `include`d fragment's siblings
-        // may add methods to any function defined here. The language server
-        // turns the rule on for workspace member files; CLI users opt in for
-        // self-contained scripts.
+        // An included fragment's siblings may define additional methods.
         false
     }
 
@@ -74,9 +71,9 @@ impl Rule for CallArity {
          Calls that splat arguments, carry `do` blocks, sit in macro calls or \
          quoted code, or target constructors and callable values are exempt, \
          and a file that `eval`s or `include`s outside a known workspace is \
-         skipped entirely. Off by default: the rule needs project context to \
-         be sound, so the language server enables it for workspace member \
-         files, while the CLI leaves it opt-in for self-contained scripts."
+         skipped entirely. The rule runs by default for workspace package \
+         files. Other files require explicit selection because they may be \
+         fragments whose siblings add methods."
     }
 
     fn examples(&self) -> &'static [Example] {

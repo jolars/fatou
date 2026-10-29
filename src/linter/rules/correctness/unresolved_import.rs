@@ -35,10 +35,8 @@
 //! loose script, and a `test/`, `docs/`, or `benchmark/` file, whose deps live
 //! in their own project (or the package's `[extras]`).
 //!
-//! Off by default, like the other project-gated rules: the language server
-//! enables it for workspace member files, where it carries the project context;
-//! on the CLI it is opt-in via `--select`, which is also what makes `fatou lint`
-//! harvest the enclosing project.
+//! The rule runs by default for workspace package files, where the enclosing
+//! project supplies the dependency set.
 
 use crate::linter::diagnostic::Diagnostic;
 use crate::linter::rules::{Example, Rule, RuleContext};
@@ -56,10 +54,7 @@ impl Rule for UnresolvedImport {
     }
 
     fn default_enabled(&self) -> bool {
-        // Meaningful only with project context: the rule needs the enclosing
-        // package's `Project.toml` to know what may be loaded. The language
-        // server turns it on for workspace member files; on the CLI `--select`
-        // both enables it and triggers the project harvest.
+        // Dependency checks require the enclosing package's `Project.toml`.
         false
     }
 
@@ -73,9 +68,8 @@ impl Rule for UnresolvedImport {
          interpolated paths, and loads inside quoted code or macro calls are \
          exempt, and a name the harvest resolved is always accepted — so a \
          transitive dependency goes unreported rather than risking a false \
-         positive. Off by default: the rule needs the project context that only \
-         a package source file carries, so the language server enables it for \
-         workspace member files while the CLI leaves it opt-in."
+         positive. The rule runs by default for workspace package files, which \
+         carry the required project context."
     }
 
     fn examples(&self) -> &'static [Example] {

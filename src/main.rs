@@ -480,7 +480,7 @@ fn run_lint(
     // enclosing project so a sibling file's `using`/`import`, same-module
     // globals, and documentation targets resolve exactly as in the language
     // server.
-    let library = if wants_project_resolution(&config.lint, !entry_points.is_empty()) {
+    let library = if wants_project_resolution(&config.lint) {
         harvest_project(&paths)
     } else {
         None
@@ -544,14 +544,11 @@ fn run_lint(
 
 /// Whether any effectively enabled rule needs project-wide name resolution.
 ///
-/// Use the same defaults and selection precedence as the eventual lint run,
-/// including script defaults when entry points are configured.
-fn wants_project_resolution(config: &fatou::config::LintConfig, scripts: bool) -> bool {
-    let (rules, _) = if scripts {
-        linter::ResolvedRules::resolve_for_scripts(config)
-    } else {
-        linter::ResolvedRules::resolve(config)
-    };
+/// Resolve the workspace defaults before discovering membership, so disabling
+/// a loose-file default cannot accidentally prevent package analysis. Script
+/// defaults are a subset of these rules, and explicit selections still win.
+fn wants_project_resolution(config: &fatou::config::LintConfig) -> bool {
+    let (rules, _) = linter::ResolvedRules::resolve_for_workspace(config);
     fatou::linter::rules::RESOLUTION_RULES
         .iter()
         .any(|id| rules.enabled().contains(id))
@@ -626,6 +623,8 @@ fn run_lint_fix(
     let script_sources = fatou::script_loading::load_sources(entry_points, &Default::default());
     let (rules, _) = linter::ResolvedRules::resolve(&config.lint);
     let rules = rules.with_julia_target(julia_target);
+    let (workspace_rules, _) = linter::ResolvedRules::resolve_for_workspace(&config.lint);
+    let workspace_rules = workspace_rules.with_julia_target(julia_target);
     let (script_rules, _) = linter::ResolvedRules::resolve_for_scripts(&config.lint);
     let script_rules = script_rules.with_julia_target(julia_target);
 
@@ -635,6 +634,11 @@ fn run_lint_fix(
         .par_iter()
         .map(|path| {
             let original = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+            let rules = if library.and_then(|lib| lib.workspace_member(path)).is_some() {
+                &workspace_rules
+            } else {
+                &rules
+            };
             let outcome = if entry_points.is_empty() && library.is_none() {
                 linter::fix_source(Some(path), &original, &config.lint, unsafe_fixes)
             } else if entry_points.is_empty() {
@@ -642,7 +646,7 @@ fn run_lint_fix(
                     linter::check::check_text(
                         Some(path),
                         text,
-                        &rules,
+                        rules,
                         linter::ProjectContext::Harvested(library.expect("library is present")),
                     )
                 })
@@ -660,7 +664,7 @@ fn run_lint_fix(
                     let rules = if scripts.applies(path) {
                         &script_rules
                     } else {
-                        &rules
+                        rules
                     };
                     linter::check::check_text(
                         Some(path),
@@ -885,38 +889,39 @@ mod tests {
 
     #[test]
     fn project_harvest_tracks_effectively_enabled_resolution_rules() {
-        // Default unused-import findings need the package include closure.
-        // Explicit programs also enable undefined-name by default.
-        assert!(wants_project_resolution(&LintConfig::default(), false));
-        assert!(wants_project_resolution(&LintConfig::default(), true));
+        assert!(wants_project_resolution(&LintConfig::default()));
 
         let syntax_only = LintConfig {
             select: Some(vec!["invalid-docstring-code".to_string()]),
             ..Default::default()
         };
-        assert!(!wants_project_resolution(&syntax_only, false));
-        assert!(!wants_project_resolution(&syntax_only, true));
+        assert!(!wants_project_resolution(&syntax_only));
 
         let selected = LintConfig {
             select: Some(vec!["undefined-name".to_string()]),
             ..Default::default()
         };
-        assert!(wants_project_resolution(&selected, false));
+        assert!(wants_project_resolution(&selected));
 
         let ignored = LintConfig {
             select: Some(vec!["undefined-name".to_string()]),
             ignore: vec!["undefined-name".to_string()],
             ..Default::default()
         };
-        assert!(!wants_project_resolution(&ignored, false));
-        assert!(!wants_project_resolution(&ignored, true));
-        assert!(!wants_project_resolution(
-            &LintConfig {
-                ignore: vec!["undefined-name".into(), "unused-import".into()],
-                ..Default::default()
-            },
-            true
-        ));
+        assert!(!wants_project_resolution(&ignored));
+        // Workspace defaults still need a harvest when these loose-file and
+        // script defaults are disabled.
+        assert!(wants_project_resolution(&LintConfig {
+            ignore: vec!["undefined-name".into(), "unused-import".into()],
+            ..Default::default()
+        }));
+        assert!(!wants_project_resolution(&LintConfig {
+            ignore: fatou::linter::rules::RESOLUTION_RULES
+                .iter()
+                .map(|id| (*id).into())
+                .collect(),
+            ..Default::default()
+        }));
     }
 
     #[test]
@@ -932,20 +937,23 @@ mod tests {
                 extend_select: vec!["undefined-name".to_string()],
                 ..Default::default()
             };
-            assert!(wants_project_resolution(&config, false));
-            assert!(wants_project_resolution(&config, true));
+            assert!(wants_project_resolution(&config));
             config.ignore.push("undefined-name".to_string());
-            assert_eq!(wants_project_resolution(&config, false), keeps_defaults);
-            assert_eq!(wants_project_resolution(&config, true), keeps_defaults);
+            assert_eq!(wants_project_resolution(&config), keeps_defaults);
             config.ignore.push("unused-import".to_string());
-            assert!(!wants_project_resolution(&config, false));
-            assert!(!wants_project_resolution(&config, true));
+            assert_eq!(wants_project_resolution(&config), keeps_defaults);
+            config.ignore.extend(
+                fatou::linter::rules::RESOLUTION_RULES
+                    .iter()
+                    .map(|id| (*id).into()),
+            );
+            assert!(!wants_project_resolution(&config));
         }
 
         let syntax_only = LintConfig {
             select: Some(vec!["unused-argument".to_string()]),
             ..Default::default()
         };
-        assert!(!wants_project_resolution(&syntax_only, false));
+        assert!(!wants_project_resolution(&syntax_only));
     }
 }

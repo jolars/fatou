@@ -170,6 +170,9 @@ pub fn check_paths_with_config(
     let files = collect_julia_files(paths, exclude).map_err(LintError::Discovery)?;
     let (rules, unknown_rules) = ResolvedRules::resolve(config);
     let rules = rules.with_julia_target(julia_target);
+    let workspace_rules = ResolvedRules::resolve_for_workspace(config)
+        .0
+        .with_julia_target(julia_target);
     let script_rules = match project {
         ProjectContext::Scripts { .. } => Some(
             ResolvedRules::resolve_for_scripts(config)
@@ -233,6 +236,12 @@ pub fn check_paths_with_config(
             let rules = match (project, &script_rules) {
                 (ProjectContext::Scripts { scripts, .. }, Some(rules)) if scripts.applies(path) => {
                     rules
+                }
+                _ if project
+                    .resolution_for(Some(path))
+                    .is_some_and(|r| r.workspace.is_some()) =>
+                {
+                    &workspace_rules
                 }
                 _ => &rules,
             };

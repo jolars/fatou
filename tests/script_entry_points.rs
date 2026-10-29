@@ -75,6 +75,64 @@ fn script_entries_enable_undefined_names_by_default() {
 }
 
 #[test]
+fn package_defaults_and_overrides_apply_to_cli_check_and_fix() {
+    let dir = project(&[]);
+    write(
+        dir.path(),
+        "Project.toml",
+        "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+    );
+    write(
+        dir.path(),
+        "src/MyPkg.jl",
+        "module MyPkg\ninclude(\"member.jl\")\nend\n",
+    );
+    let text = "half(x) = x\nhalf(1, 2)\nfunction pending end\npending()\nf() = missing_name\n";
+    write(dir.path(), "src/member.jl", text);
+    write(dir.path(), "loose.jl", text);
+
+    for (config, expected) in [
+        (
+            "",
+            vec!["call-arity", "function-has-no-methods", "undefined-name"],
+        ),
+        (
+            "[project]\nentry-points = [\"loose.jl\"]\n",
+            vec![
+                "call-arity",
+                "function-has-no-methods",
+                "undefined-name",
+                "undefined-name",
+            ],
+        ),
+        ("[lint]\nselect = []\n", vec![]),
+        ("[lint]\nselect = [\"unused-binding\"]\n", vec![]),
+        (
+            "[lint]\nignore = [\"call-arity\", \"function-has-no-methods\", \"unused-import\"]\n",
+            vec!["undefined-name"],
+        ),
+        (
+            "[lint]\nselect = []\nextend-select = [\"undefined-name\", \"call-arity\"]\nignore = [\"call-arity\"]\n[lint.severity]\nundefined-name = \"hint\"\n",
+            vec!["undefined-name", "undefined-name"],
+        ),
+    ] {
+        write(dir.path(), "fatou.toml", config);
+        for args in [vec!["."], vec!["--fix", "."]] {
+            let findings = lint(dir.path(), &args);
+            let mut ids: Vec<_> = findings
+                .iter()
+                .map(|d| d["rule"].as_str().unwrap())
+                .collect();
+            ids.sort_unstable();
+            assert_eq!(ids, expected, "{config}: {args:?}: {findings:#?}");
+            if config.contains("severity") {
+                assert!(findings.iter().all(|d| d["severity"] == "hint"));
+            }
+        }
+    }
+}
+
+#[test]
 fn macro_implicit_arguments_are_local_to_the_macro() {
     let dir = project(&["main.jl"]);
     write(

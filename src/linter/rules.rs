@@ -164,11 +164,11 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
 }
 
 /// The rules whose full behavior needs a project-wide resolution context.
-/// They withhold findings that require unavailable context. The CLI harvests the
-/// environment when any one is effectively enabled; the language server adds
-/// the default-off members for workspace files, where it carries the context;
-/// and `outdated-suppression` declines to call a directive naming one of them
-/// stale when the context is missing.
+/// They are defaults for workspace package files and withhold findings that
+/// require unavailable context. Harvest the environment when any one could
+/// be enabled for the targets.
+/// `outdated-suppression` declines to call a directive naming one of them stale
+/// when the context is missing.
 ///
 /// The single list — every consumer reads it rather than repeating it.
 pub const RESOLUTION_RULES: &[&str] = &[
@@ -776,15 +776,28 @@ pub struct ResolvedRules {
 }
 
 impl ResolvedRules {
+    /// Resolve rules for a workspace package file. Project-resolution rules
+    /// join the defaults because the package supplies the file's host module
+    /// and include context. Explicit `select` replaces these defaults too.
+    pub fn resolve_for_workspace(config: &LintConfig) -> (Self, Vec<String>) {
+        Self::resolve_with_defaults(config, RESOLUTION_RULES)
+    }
+
     /// Resolve rules for an explicit script program. Its known entry point
     /// makes `undefined-name` a default, while `select` still replaces defaults
     /// and `ignore` still disables any selected rule.
     pub fn resolve_for_scripts(config: &LintConfig) -> (Self, Vec<String>) {
+        Self::resolve_with_defaults(config, &["undefined-name"])
+    }
+
+    fn resolve_with_defaults(config: &LintConfig, defaults: &[&str]) -> (Self, Vec<String>) {
         if config.select.is_some() {
             return Self::resolve(config);
         }
         let mut config = config.clone();
-        config.extend_select.push("undefined-name".into());
+        config
+            .extend_select
+            .extend(defaults.iter().map(|id| (*id).into()));
         Self::resolve(&config)
     }
 

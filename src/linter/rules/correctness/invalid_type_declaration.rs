@@ -35,8 +35,8 @@
 //! `include`, an unresolvable `using`. A macro call or quoted code may be
 //! reshaped before it runs, so annotations inside one are skipped.
 //!
-//! Off by default, like the other resolution-gated rules: without a project
-//! context there is no resolver to ask.
+//! Off by default for loose files, like the other resolution-gated rules.
+//! Workspace package files enable the rule by default.
 
 use crate::ast::{AstNode, AstToken, Expr, TypeAnnotation};
 use crate::index::model::ModuleIndex;
@@ -54,9 +54,7 @@ impl Rule for InvalidTypeDeclaration {
     }
 
     fn default_enabled(&self) -> bool {
-        // Needs a resolution context to tell a function from a type at all;
-        // the language server turns it on for workspace member files, and the
-        // CLI leaves it to an explicit `--select`.
+        // Distinguishing a function from a type requires a resolution context.
         false
     }
 
@@ -76,10 +74,8 @@ impl Rule for InvalidTypeDeclaration {
          function too) is never flagged. The file is skipped entirely when it \
          `eval`s, `include`s outside a known workspace, or `using`s a module \
          the library cannot resolve, and annotations inside a macro call or \
-         quoted code are exempt. Off by default: like the other \
-         resolution-gated rules it needs project context, so the language \
-         server enables it for workspace member files while the CLI leaves it \
-         opt-in via `--select`."
+         quoted code are exempt. The rule runs by default for workspace package \
+         files. Other files require explicit selection and a resolution context."
     }
 
     fn examples(&self) -> &'static [Example] {

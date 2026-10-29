@@ -27,12 +27,12 @@
 //! code (`:(…)`, `quote … end`) is exempt entirely, and the module-implicit
 //! names `eval`, `include`, `new`, and `ccall` always resolve.
 //!
-//! Off by default: without project context a bare file may be an `include`d
-//! fragment reading its host's globals. The language server enables the rule
-//! for workspace member files, where the include graph pins the file's host
-//! module and the harvested library answers the remaining tiers. Explicit
-//! `[project] entry-points` provide independent script contexts to both CLI
-//! and LSP callers. Script selection remains opt-in with `extend-select`.
+//! Off by default for loose files: without project context a bare file may be
+//! an `include`d fragment reading its host's globals. Workspace package files
+//! enable the rule by default, with the include graph pinning the file's host
+//! module and the harvested library answering the remaining tiers. Explicit
+//! `[project] entry-points` provide independent script contexts and enable the
+//! rule by default for those programs too.
 
 use crate::linter::diagnostic::Diagnostic;
 use crate::linter::rules::{Example, Rule, RuleContext};
@@ -51,10 +51,7 @@ impl Rule for UndefinedName {
     }
 
     fn default_enabled(&self) -> bool {
-        // Sound only with project context: a bare file may be an `include`d
-        // fragment reading its host's globals. Explicit script programs add
-        // this rule to their defaults; the language server also enables it
-        // for workspace member files.
+        // A loose file may read globals defined by its host or siblings.
         false
     }
 
@@ -70,9 +67,9 @@ impl Rule for UndefinedName {
          Dynamic includes, `eval`, unresolved whole-module `using`s, and broken \
          include closures suppress findings for that entry. Value reads inside \
          macro calls and quoted code remain exempt. Without entry points, \
-         opt in with `[lint] extend-select = [\"undefined-name\"]`; standalone \
-         files containing includes are skipped. The language server \
-         also enables this rule for workspace package files."
+         standalone files can opt in with \
+         `[lint] extend-select = [\"undefined-name\"]`; files containing includes \
+         are skipped. The rule also runs by default for workspace package files."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -374,9 +371,8 @@ mod tests {
 
     #[test]
     fn without_workspace_a_sibling_read_would_flag() {
-        // The same source with no workspace context flags both — which is
-        // exactly why the rule is gated to member files by the server and
-        // opt-in on the CLI.
+        // Missing workspace context makes legitimate sibling reads appear
+        // undefined.
         let lib = base(&[]);
         let msgs = messages("f() = helper() + helprr()\n", &lib, None);
         assert_eq!(msgs.len(), 2, "{msgs:?}");

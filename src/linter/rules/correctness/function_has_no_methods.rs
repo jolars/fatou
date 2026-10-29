@@ -31,10 +31,9 @@
 //! unresolvable `using`. A call site inside a macro call or quoted code is
 //! skipped too.
 //!
-//! Off by default, like `call-arity`: outside a workspace a file may be an
-//! `include`d fragment whose siblings define the methods. The language server
-//! enables it for workspace member files; on the CLI it is opt-in via
-//! `--select`.
+//! Off by default for loose files, like `call-arity`: outside a workspace a
+//! file may be an `include`d fragment whose siblings define the methods.
+//! Workspace package files enable the rule by default.
 
 use crate::ast::AstToken;
 use crate::index::harvest_tree;
@@ -54,9 +53,7 @@ impl Rule for FunctionHasNoMethods {
     }
 
     fn default_enabled(&self) -> bool {
-        // Sound only with project context: an `include`d fragment's siblings
-        // may define the methods this file cannot see. The language server
-        // turns the rule on for workspace member files; CLI users opt in.
+        // An included fragment's siblings may define the methods.
         false
     }
 
@@ -72,9 +69,9 @@ impl Rule for FunctionHasNoMethods {
          as is a name that also names a type. The file is skipped entirely \
          when it `eval`s, `include`s outside a known workspace, or `using`s a \
          module the library cannot resolve, and call sites in macro calls or \
-         quoted code are exempt. Off by default: like `call-arity` the rule \
-         needs project context to be sound, so the language server enables it \
-         for workspace member files while the CLI leaves it opt-in."
+         quoted code are exempt. The rule runs by default for workspace \
+         package files. Other files require explicit selection because their \
+         siblings may define the methods."
     }
 
     fn examples(&self) -> &'static [Example] {

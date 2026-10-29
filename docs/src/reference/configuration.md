@@ -160,8 +160,16 @@ and all available rule IDs. An unrecognized ID in `select`, `extend-select`,
 Fatou starts with the defaults, or `select` when set, adds `extend-select`, and
 then removes rules in `ignore`. Repeated IDs do not run a rule more than once.
 An empty `select = []` disables the defaults; `extend-select` can still add
-rules. For workspace package files, the language server also enables rules that
-need project resolution, unless they are ignored.
+rules.
+
+Default rule selection depends on the file context:
+
+- Workspace package files also enable rules that need project resolution.
+- Declared script entry points and their static includes also enable
+  `undefined-name`.
+- Loose files use the conservative defaults listed in the rule reference.
+
+An explicit `select` replaces all of these context-dependent defaults.
 
 `[lint.severity]` maps a rule ID to the severity its findings report, one of
 `"error"`, `"warning"`, `"info"`, or `"hint"`. Rules not listed keep their

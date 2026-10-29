@@ -20,7 +20,7 @@ use lsp_types::{
 use crate::config::LintConfig;
 use crate::incremental::Analysis;
 use crate::linter::docs::rule_doc_url;
-use crate::linter::rules::{RESOLUTION_RULES, ResolutionContext, is_shipped_rule};
+use crate::linter::rules::{ResolutionContext, is_shipped_rule};
 use crate::linter::{self, ResolvedRules, Severity};
 use crate::parser::parse;
 use crate::resolve::PackageSource;
@@ -185,16 +185,8 @@ fn lint_findings_with_context(
     )
 }
 
-/// The rules whose full behavior needs the resolution context a workspace
-/// member file carries. The server adds any default-off entries to the member
-/// rule set; default-on entries are already present but stay in this single
-/// authoritative list for resolution gating and suppression handling.
-const WORKSPACE_MEMBER_RULES: &[&str] = RESOLUTION_RULES;
-
-/// The rule sets the server lints with, resolved once per configuration (the
-/// dispatch table included) rather than per lint run: the configured set
-/// as-is, a variant with [`WORKSPACE_MEMBER_RULES`] added for workspace members,
-/// and a variant with script defaults for explicit programs.
+/// Rule sets resolved once per configuration for loose files, workspace package
+/// files, and explicit script programs.
 pub(crate) struct ServerRules {
     pub(crate) entry_points: Vec<std::path::PathBuf>,
     plain: ResolvedRules,
@@ -203,25 +195,12 @@ pub(crate) struct ServerRules {
 }
 
 impl ServerRules {
-    /// Resolve the rule sets from `lint`, returning the unknown rule IDs the
-    /// configuration named (for the caller to log). The member variant unions
-    /// [`WORKSPACE_MEMBER_RULES`] into the effective enabled set before
-    /// resolving, so `ignore` still subtracts afterward (a user who ignores
-    /// `call-arity` keeps it off even for members) and `severity` overrides
-    /// carry through.
+    /// Resolve rule sets and return unknown IDs for logging.
     pub(crate) fn from_config(lint: &LintConfig) -> (Self, Vec<String>) {
         let (plain, unknown) = ResolvedRules::resolve(lint);
-        let (defaults, _) = ResolvedRules::resolve(&LintConfig::default());
-        let mut member_config = lint.clone();
-        member_config.extend_select.extend(
-            WORKSPACE_MEMBER_RULES
-                .iter()
-                .filter(|id| !defaults.enabled().contains(id))
-                .map(|id| id.to_string()),
-        );
         // Report unknown IDs from the plain resolve only: the other variants
         // repeat the user's IDs and would duplicate those warnings.
-        let (member, _) = ResolvedRules::resolve(&member_config);
+        let (member, _) = ResolvedRules::resolve_for_workspace(lint);
         let (script, _) = ResolvedRules::resolve_for_scripts(lint);
         (
             Self {
@@ -348,13 +327,115 @@ mod tests {
     const UNUSED_LOCAL: &str = "function f(x)\n    tmp = x + 1\n    return x\nend\n";
 
     #[test]
-    fn workspace_context_does_not_reenable_deselected_default_rules() {
-        let (rules, _) = ServerRules::from_config(&LintConfig {
-            select: Some(vec!["unused-binding".into()]),
+    fn workspace_context_honors_explicit_rule_selection() {
+        for selected in [vec![], vec!["unused-binding".to_string()]] {
+            let (rules, _) = ServerRules::from_config(&LintConfig {
+                select: Some(selected.clone()),
+                ..Default::default()
+            });
+            for rule in linter::all_rules() {
+                assert_eq!(
+                    rules.get(true).enabled().contains(rule.id()),
+                    selected.iter().any(|id| id == rule.id()),
+                    "{} with select = {selected:?}",
+                    rule.id(),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cli_and_lsp_share_package_script_and_loose_file_policies() {
+        use crate::file_discovery::ExcludeFilter;
+        use crate::index::{HarvestedLibrary, build_system_index, harvest_package_named};
+        use crate::linter::{ProjectContext, check_paths_with_config};
+        use std::collections::BTreeMap;
+
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir(&src).unwrap();
+        let entry = src.join("MyPkg.jl");
+        std::fs::write(&entry, "module MyPkg\ninclude(\"member.jl\")\nend\n").unwrap();
+        let member = src.join("member.jl");
+        let loose = dir.path().join("loose.jl");
+        let script = dir.path().join("script.jl");
+        let text = "half(x) = x\nhalf(1, 2)\nfunction pending end\npending()\nf() = missing_name\n";
+        for path in [&member, &loose, &script] {
+            std::fs::write(path, text).unwrap();
+        }
+        let mut library = HarvestedLibrary {
+            packages: build_system_index(None),
+            roots: BTreeMap::from([("MyPkg".into(), dir.path().to_path_buf())]),
+            workspaces: vec!["MyPkg".into()],
             ..Default::default()
-        });
-        assert!(!rules.get(true).enabled().contains("unused-import"));
-        assert!(rules.get(true).enabled().contains("undefined-name"));
+        };
+        library.packages.insert(
+            "MyPkg".into(),
+            Arc::new(harvest_package_named(dir.path(), "MyPkg")),
+        );
+        let mut db = IncrementalDatabase::default();
+        db.set_library(
+            library.packages.clone(),
+            library.roots.clone(),
+            library.workspaces.clone(),
+        );
+        db.seed_workspace_members();
+        for path in [&loose, &script] {
+            db.upsert_file(path, text.to_string());
+        }
+        let entries = vec![script];
+        let sources = crate::script_loading::load_sources(&entries, &BTreeMap::new());
+        db.set_script_sources(&entries, &sources, &BTreeMap::new());
+        let scripts = crate::project::scripts::ScriptAnalysis::from_sources(&entries, &sources);
+        let buffer = TextBuffer::from(text);
+
+        for (config, counts) in [
+            (LintConfig::default(), [3, 0, 1]),
+            (
+                LintConfig {
+                    select: Some(vec![]),
+                    ..Default::default()
+                },
+                [0, 0, 0],
+            ),
+            (
+                LintConfig {
+                    select: Some(vec!["call-arity".into()]),
+                    severity: [("call-arity".into(), Severity::Hint)].into(),
+                    ..Default::default()
+                },
+                [1, 1, 0],
+            ),
+            (
+                LintConfig {
+                    extend_select: vec!["unused-argument".into()],
+                    ignore: vec!["call-arity".into(), "function-has-no-methods".into()],
+                    severity: [("undefined-name".into(), Severity::Error)].into(),
+                    ..Default::default()
+                },
+                [1, 0, 1],
+            ),
+        ] {
+            let (mut rules, unknown) = ServerRules::from_config(&config);
+            assert!(unknown.is_empty());
+            rules.entry_points.clone_from(&entries);
+            for (path, expected) in [&member, &loose, &entries[0]].into_iter().zip(counts) {
+                let cli = check_paths_with_config(
+                    std::slice::from_ref(path),
+                    &config,
+                    &ExcludeFilter::none(),
+                    None,
+                    ProjectContext::Scripts {
+                        library: Some(&library),
+                        scripts: &scripts,
+                    },
+                )
+                .unwrap();
+                let lsp = lint_findings_via_db(&db.snapshot(), path, &buffer, &rules);
+                assert_eq!(lsp.len(), expected, "{path:?}: {config:?}: {lsp:?}");
+                assert_eq!(cli.reports[0].diagnostics, lsp, "{path:?}: {config:?}");
+            }
+        }
     }
 
     #[test]

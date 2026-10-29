@@ -36,10 +36,8 @@
 //! Untyped positional arguments are `Any` (a Base type), so they never rescue a
 //! definition from being pirating.
 //!
-//! Off by default: like `undefined-name`, the rule needs project context to be
-//! sound. The language server enables it for workspace member files; on the CLI
-//! it resolves against the built-in Base/Core snapshot and is opt-in via
-//! `--select`.
+//! Opt-in. Without a resolved library, ownership checks can use only the
+//! built-in Base/Core snapshot.
 
 use std::collections::HashSet;
 
@@ -95,9 +93,8 @@ impl Rule for TypePiracy {
     }
 
     fn default_enabled(&self) -> bool {
-        // Sound only with project context: without a resolved library the rule
-        // cannot tell an owned type from a foreign one. The language server
-        // enables it for workspace member files; the CLI leaves it opt-in.
+        // Without a resolved library, ownership checks cannot distinguish
+        // every owned type from a foreign one.
         false
     }
 
@@ -111,9 +108,9 @@ impl Rule for TypePiracy {
          parameter or `where` bound counts). The rule is sound-first: it flags \
          only when it can prove the function and every readable argument type \
          are foreign, withholding on anything unknown, and it skips the whole \
-         file when a whole-module `using` cannot be resolved. Off by default: \
-         it needs project context, so the language server enables it for \
-         workspace member files while the CLI leaves it opt-in via `--select`."
+         file when a whole-module `using` cannot be resolved. Off by default. \
+         Without a harvested library, ownership checks use only the built-in \
+         Base/Core snapshot."
     }
 
     fn examples(&self) -> &'static [Example] {

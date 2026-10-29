@@ -126,12 +126,16 @@ rule's `description()`/`examples()` in `src/linter/rules/` and regenerate. -->
 `fatou lint` runs a set of built-in rules over each file and reports a
 diagnostic for every finding. This page is the catalogue: one section per rule,
 keyed by its stable **rule ID**. That ID is what appears in a diagnostic, what
-`[lint]` `select`/`ignore` (and `--select`/`--ignore`) target, what
+`[lint]` `select`/`extend-select`/`ignore` target, what
 `[lint.severity]` re-grades, and what a `# fatou-ignore <id>` comment
 suppresses.
 
-Most rules are on by default. The few that are opt-in say so in their
-description; name one in `select` to run it.
+Most rules are on by default. Workspace package files also enable
+project-resolution rules, and declared script programs enable `undefined-name`.
+See [Configuration](configuration.md#lint) for rule selection.
+Other rules that require explicit selection say so in their description.
+An explicit `select` replaces every context's defaults; `extend-select` adds
+rules, and `ignore` disables them.
 
 Where a rewrite is unambiguous a rule carries an **autofix**: a *safe* fix
 (shown below as \"After applying the fix\") is applied by `fatou lint --fix`; an

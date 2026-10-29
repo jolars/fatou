@@ -1526,9 +1526,7 @@ fn undefined_name_leaves_string_macros_alone() {
 
 #[test]
 fn undefined_name_is_opt_in() {
-    // Too noisy without project context (a bare file may be an `include`d
-    // fragment reading its host's globals), so the CLI leaves it off unless
-    // selected; the language server enables it for workspace member files.
+    // A loose file may be an included fragment reading its host's globals.
     let report = check_source(None, "x = undefined_var\n", &LintConfig::default());
     assert!(
         report.diagnostics.is_empty(),
@@ -5158,9 +5156,7 @@ fn non_public_access_ignores_field_accesses_and_unknown_modules() {
 
 #[test]
 fn non_public_access_is_opt_in() {
-    // The rule needs the harvested library that only project context provides,
-    // so the CLI leaves it off unless selected; the language server enables it
-    // for workspace member files.
+    // A loose file may lack the target module's API declarations.
     let report = check_source(None, "Base.unwrap_unionall(T)\n", &LintConfig::default());
     assert!(
         report.diagnostics.is_empty(),
