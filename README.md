@@ -1,16 +1,13 @@
 # Fatou <img src='https://raw.githubusercontent.com/jolars/fatou/main/assets/logo.png' align="right" width="139" />
 
-[![Build and
-Test](https://github.com/jolars/fatou/actions/workflows/build-and-test.yml/badge.svg?branch=main)](https://github.com/jolars/fatou/actions/workflows/build-and-test.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/jolars/fatou/build-and-test.yml?branch=main&label=CI)](https://github.com/jolars/fatou/actions/workflows/build-and-test.yml)
 [![Crates.io](https://img.shields.io/crates/v/fatou.svg?logo=rust)](https://crates.io/crates/fatou)
 [![Open
 VSX](https://img.shields.io/open-vsx/v/jolars/fatou?logo=vsix)](https://open-vsx.org/extension/jolars/fatou)
 [![VS
 Code](https://vsmarketplacebadges.dev/version-short/jolars.fatou.svg?logo=vsix)](https://marketplace.visualstudio.com/items?itemName=jolars.fatou)
-[![PyPI
-version](https://badge.fury.io/py/fatou.svg?icon=si%3Apython)](https://pypi.org/project/fatou/)
-[![npm
-version](https://badge.fury.io/js/@fatou-cli%2Ffatou-cli.svg?icon=si%3Anpm)](https://www.npmjs.com/package/fatou-cli)
+[![PyPi](https://img.shields.io/pypi/v/fatou?logo=python&label=PyPi)](https://pypi.org/project/fatou/)
+[![npm](https://img.shields.io/npm/v/fatou-cli?logo=npm&label=npm)](https://www.npmjs.com/package/fatou-cli)
 
 Fatou is a language server, formatter, and linter for
 [Julia](https://julialang.org) that never has to run Julia itself. It bundles
