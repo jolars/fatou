@@ -212,7 +212,7 @@ update the formatter bundled in the plugin. To get matching output from both,
 use releases with the same `fatou-formatter` version and equivalent settings.
 
 The plugin provides formatting. For linting and the full language server, use
-the [Fatou CLI](getting-started.md) and [editor integration](editors.md).
+the [Fatou CLI](../installation.md) and [editor integration](editors.md).
 
 ## Using with Panache
 

@@ -30,10 +30,10 @@ highlighting. Dynamic or custom `@doc` metadata remains opaque.
 
 ## Prerequisites
 
-Install Fatou (see [Getting Started](getting-started.md)) and make sure the
-`fatou` binary is on your `PATH`, or note its absolute path. The VS Code family
-is an exception, since the extension bundles a binary, and so is Zed, whose
-extension downloads one when it finds nothing on the `PATH`.
+Install Fatou (see [Installation](../installation.md)) and make sure the `fatou`
+binary is on your `PATH`, or note its absolute path. The VS Code family is an
+exception, since the extension bundles a binary, and so is Zed, whose extension
+downloads one when it finds nothing on the `PATH`.
 
 ## VS Code
 

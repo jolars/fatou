@@ -93,7 +93,7 @@ assert.match(performance, /\| Tool \|/);
 assert.match(performance, /LanguageServer\.jl/);
 const home = readFileSync(resolve(outputRoot, "index.md"), "utf8");
 assert.match(home, /Julia tooling, ready when you are/);
-assert.match(home, /Semantic linting/);
+assert.match(home, /Find problems early/);
 assert.doesNotMatch(home, /layout: home/);
 console.log(
   `Validated ${html.size} HTML pages, ${Object.keys(legacy).length} legacy routes, all legacy headings, internal links, Markdown, metadata, and downloads.`,

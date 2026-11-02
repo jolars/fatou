@@ -1,8 +1,7 @@
 # Linting
 
 Fatou checks Julia source without executing it. After
-[installation](getting-started.md#installation), run the linter from your
-project directory.
+[installation](../installation.md), run the linter from your project directory.
 
 ## Check Files
 

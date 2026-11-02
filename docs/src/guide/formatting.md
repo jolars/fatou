@@ -1,8 +1,7 @@
 # Formatting
 
 Fatou formats Julia source without starting Julia. After
-[installation](getting-started.md#installation), run it from your project
-directory.
+[installation](../installation.md), run it from your project directory.
 
 ## Format Files
 

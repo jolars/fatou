@@ -1,143 +1,83 @@
 # Getting Started
 
-## Installation
+Run Fatou from the root of an existing Julia project. The commands below use the
+default settings unless your project already has a `fatou.toml`.
 
-Fatou runs on Linux, macOS, and Windows (x86_64 and arm64), and is available
-from several sources.
+See [Installation](../installation.md) if you need the CLI, or [Editor
+Setup](editors.md) to use Fatou directly in your editor.
 
-### Cargo
+## Check Your Project {#first-run}
 
-Install from [crates.io](https://crates.io/crates/fatou) with Cargo:
-
-```bash
-cargo install fatou
-```
-
-### Homebrew
-
-On macOS or Linux:
-
-```bash
-brew install jolars/tap/fatou
-```
-
-### npm
-
-The `fatou-cli` package bundles a prebuilt binary:
-
-```bash
-npm install -g fatou-cli
-```
-
-### PyPI
-
-Install the binary as a Python tool:
-
-```bash
-uv tool install fatou
-# or
-pipx install fatou
-```
-
-### AUR
-
-On Arch Linux, install the prebuilt
-[`fatou-bin`](https://aur.archlinux.org/packages/fatou-bin) package with an AUR
-helper:
-
-```bash
-paru -S fatou-bin
-```
-
-### Nix
-
-Fatou is available as `fatou` in
-[Nixpkgs](https://search.nixos.org/packages?channel=unstable&show=fatou). For a
-shell with Fatou available:
-
-```bash
-nix shell nixpkgs#fatou
-```
-
-For a persistent NixOS installation, add `pkgs.fatou` to
-`environment.systemPackages`.
-
-### mise and Aqua
-
-[mise](https://mise.jdx.dev/dev-tools/backends/aqua.html) can install Fatou
-through its Aqua backend:
-
-```bash
-mise use aqua:jolars/fatou
-```
-
-Commit the resulting `mise.toml` to share the selected version. With
-[Aqua](https://aquaproj.github.io/docs/tutorial/) directly, run `aqua init` if
-the project has no `aqua.yaml`, then add and install Fatou:
-
-```bash
-aqua g -i jolars/fatou
-aqua install
-```
-
-Commit `aqua.yaml` to share the selected version. Both tools use the
-[`jolars/fatou` registry
-entry](https://github.com/aquaproj/aqua-registry/tree/main/pkgs/jolars/fatou).
-
-### Install script
-
-The installer selects the release for your platform and installs to a user-local
-directory. On macOS or Linux:
+Check formatting and report lint findings without changing files:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -sSf https://fatou.dev/install | sh
+fatou format --check .
+fatou lint .
 ```
 
-On Windows, run this in PowerShell:
+The formatter prints diffs for files that need formatting. The linter reports
+findings with source locations, rule IDs, and explanations. Formatting changes,
+lint findings, and parse errors cause a nonzero exit status, so these commands
+can gate CI too.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://fatou.dev/install.ps1 | iex"
+Directory walks honor `.gitignore` and the project's configured exclusions. Pass
+a file or subdirectory instead of `.` to narrow the scope.
+
+## Apply Changes
+
+Apply available safe fixes, then format the result:
+
+```sh
+fatou lint --fix .
+fatou format .
 ```
 
-### Prebuilt binaries
+Some findings need manual changes. Review the diagnostics and the diff, then
+rerun the checks above. Fix parse errors before expecting lint rules to run on a
+file.
 
-Download an archive for your platform from the [releases
-page](https://github.com/jolars/fatou/releases) and put the `fatou` binary on
-your `PATH`.
+See [Linting](linting.md) for rule selection and suppressions, and
+[Formatting](formatting.md) for standard input and other options.
 
-### From source
+## Share Project Settings
 
-Clone the repository and build a release binary:
+Fatou works without configuration. To customize the defaults, create a
+`fatou.toml` at your project root. For example:
 
-```bash
-git clone https://github.com/jolars/fatou
-cd fatou
-cargo build --release
+```toml
+[format]
+line-width = 100
+
+[lint]
+ignore = ["unused-argument"]
 ```
 
-The binary is written to `target/release/fatou`.
+The CLI and language server use the same project configuration. See
+[Configuration](configuration.md) for common settings and discovery rules,
+including how to declare entry points for standalone scripts spread across
+included files.
 
-### dprint
+## Use Fatou in Your Workflow
 
-To format Julia files with dprint, add the [Fatou dprint
-plugin](integrations.md#dprint). It bundles the formatter and requires neither
-Julia nor the Fatou CLI. Follow the linked recipe for setup and configuration.
+Follow [Editor Setup](editors.md) for formatting, diagnostics, and navigation
+while editing. See [Integrations](integrations.md) to run the checks in CI or a
+pre-commit hook.
 
-## First Run
+## Installation
 
-Format a file in place, then check it for lint findings:
+Installation options have moved to the [Installation](../installation.md) page:
 
-```bash
-fatou format file.jl
-fatou lint file.jl
-```
-
-Lint findings cause a nonzero exit status. To apply fixes, follow the
-[fix-and-format workflow](linting.md#apply-fixes).
-
-Continue with [Formatting](formatting.md) for directory runs, checks without
-writing, and preservation verification, or [Linting](linting.md) for rule
-selection and suppressions. Use [Configuration](configuration.md) to share
-project settings, [Editor Setup](editors.md) to connect the language server, and
-[Integrations](integrations.md) to automate checks. The [CLI
-Reference](../reference/cli.md) lists all commands and options.
+- <span id="cargo"></span>[Cargo](../installation.md#cargo)
+- <span id="homebrew"></span>[Homebrew](../installation.md#homebrew)
+- <span id="npm"></span>[npm](../installation.md#npm)
+- <span id="pypi"></span>[PyPI](../installation.md#pypi)
+- <span id="aur"></span>[AUR](../installation.md#aur)
+- <span id="nix"></span>[Nix](../installation.md#nix)
+- <span id="mise-and-aqua"></span>[mise and
+  Aqua](../installation.md#mise-and-aqua)
+- <span id="install-script"></span>[Install
+  script](../installation.md#install-script)
+- <span id="prebuilt-binaries"></span>[Prebuilt
+  binaries](../installation.md#prebuilt-binaries)
+- <span id="from-source"></span>[From source](../installation.md#from-source)
+- <span id="dprint"></span>[dprint](../installation.md#dprint)

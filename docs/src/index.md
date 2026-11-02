@@ -4,10 +4,13 @@ title: Fatou
 hero:
   name: Fatou
   text: Julia tooling, ready when you are.
-  tagline: A language server, formatter, and linter for Julia, written in Rust.
+  tagline: A formatter, linter, and language server for Julia, written in Rust.
+    Keep your code consistent and get feedback as you write, without starting Julia.
   image:
     src: /images/logo.png
     alt: Fatou logo
+    width: 192
+    height: 192
   actions:
     - theme: brand
       text: Get Started
@@ -19,40 +22,69 @@ hero:
       text: View on GitHub
       link: https://github.com/jolars/fatou
 features:
-  - title: Language server
-    details: Completion, diagnostics, navigation, and refactoring powered by incremental analysis.
-    link: /guide/editors.html
-  - title: Canonical formatting
-    details: Consistent Julia formatting for individual files and entire projects.
+  - title: Format consistently
+    details: Apply canonical formatting to individual Julia files or entire projects, and check formatting in CI.
     link: /guide/formatting.html
-  - title: Semantic linting
-    details: Find bugs and apply safe fixes without running Julia.
+  - title: Find problems early
+    details: Catch common mistakes with semantic lint rules, apply safe fixes, and share checks through project configuration.
     link: /guide/linting.html
+  - title: Work in your editor
+    details: Get completion, diagnostics, navigation, and refactoring through the language server, with formatting on save.
+    link: /guide/editors.html
 ---
 
 <span id="fatou"></span>
 
 ## Quick Start
 
-Install with Cargo:
+Install Fatou for your platform:
 
-```bash
-cargo install fatou
+::: code-group
+
+```sh [macOS/Linux]
+curl --proto '=https' --tlsv1.2 -sSf https://fatou.dev/install | sh
 ```
 
-Format your first file:
+```powershell [Windows]
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://fatou.dev/install.ps1 | iex"
+```
 
-```bash
+:::
+
+See [Installation](installation.md) for Homebrew, npm, PyPI, Cargo, Nix, and
+other installation options.
+
+After installation, format and lint a file:
+
+```sh
 fatou format file.jl
+fatou lint file.jl
 ```
 
-For full installation options (npm, PyPI, prebuilt binaries, and source builds),
-see [Getting Started](guide/getting-started.md).
+Using VS Code? Install the [Fatou extension](guide/editors.md#vs-code), which
+includes the binary. For Zed, Neovim, Helix, and other editors, see [Editor
+Setup](guide/editors.md).
+
+## Built on Your Code
+
+Fatou parses Julia into a lossless syntax tree and updates its analysis as you
+type. The same parser powers the formatter, linter, and language server.
+Formatting is deterministic, and formatting an already-formatted file changes
+nothing.
+
+Analysis runs without evaluating your code or starting Julia. Fatou reads your
+project's package environment statically to resolve names across files and
+installed dependencies. In your editor, it also checks `Project.toml` and
+`Manifest.toml` and helps you navigate dependencies.
+
+Share formatting settings and lint rules in
+[`fatou.toml`](guide/configuration.md), and use the same commands locally and in
+[CI](guide/integrations.md).
 
 ## Where to Go Next
 
-- [Getting Started](guide/getting-started.md): complete installation and
-  first-run walkthrough.
+- [Getting Started](guide/getting-started.md): check and format an existing
+  Julia project.
 - [Editor Setup](guide/editors.md): connect the language server to your editor.
 - [Configuration](guide/configuration.md): set up `fatou.toml` for your project.
 - [Configuration Reference](reference/configuration.md): every `fatou.toml` key.

@@ -1,36 +1,39 @@
-# Fatou
+# Overview
 
-<img src="/images/logo-small.png" alt="Fatou logo" class="right" style="width: 139px; padding-left: 10px; padding-bottom: 10px;" />
+<span id="fatou"></span>
 
-Fatou is a language server, formatter, and linter for the
-[Julia](https://julialang.org) language, written in Rust. It follows the
-rust-analyzer design (a lossless [`rowan`](https://crates.io/crates/rowan) CST,
-[`salsa`](https://crates.io/crates/salsa) for incremental computation, and
-[`lsp-server`](https://crates.io/crates/lsp-server) for the language-server
-transport).
+Fatou is a formatter, linter, and language server for
+[Julia](https://julialang.org), written in Rust. It keeps formatting consistent,
+finds common mistakes, and provides diagnostics and navigation in your editor.
+It also checks Julia project and manifest files and helps you navigate package
+dependencies. Analysis runs without evaluating your code or starting Julia.
 
-## Quick Start
+## Choose Your Setup {#quick-start}
 
-Install with Cargo:
+- **VS Code:** install the [Fatou extension](guide/editors.md#vs-code). It
+  includes the binary and starts the language server for you. The same extension
+  is available for VSCodium and other Code OSS editors.
+- **Zed:** install the [Fatou extension](guide/editors.md#zed), which can use an
+  installed binary or download one for your platform.
+- **Other editors:** follow [Editor Setup](guide/editors.md) to connect your
+  editor to the language server. The guide includes Neovim, Helix, and Vim.
+- **Terminal or CI:** [install the CLI](installation.md), then follow [Getting
+  Started](guide/getting-started.md) to check and format an existing Julia
+  project.
 
-```bash
-cargo install fatou
-```
-
-Format your first file:
-
-```bash
-fatou format file.jl
-```
-
-For full installation options (npm, PyPI, prebuilt binaries, and source builds),
-see [Getting Started](guide/getting-started.md).
+The [Installation](installation.md) page covers the standalone installer,
+package managers, source builds, and the dprint plugin.
 
 ## Where to Go Next
 
-- [Getting Started](guide/getting-started.md): complete installation and
-  first-run walkthrough.
-- [Editor Setup](guide/editors.md): connect the language server to your editor.
-- [Configuration](guide/configuration.md): set up `fatou.toml` for your project.
-- [Configuration Reference](reference/configuration.md): every `fatou.toml` key.
-- [CLI Reference](reference/cli.md): every command and option.
+- [Getting Started](guide/getting-started.md): a workflow for an existing Julia
+  project.
+- [Formatting](guide/formatting.md) and [Linting](guide/linting.md): format
+  code, choose checks, and apply fixes.
+- [Configuration](guide/configuration.md): share project settings in
+  `fatou.toml`.
+- [Integrations](guide/integrations.md): run checks in CI or a pre-commit hook.
+
+For individual commands, settings, and diagnostics, see the [CLI
+Reference](reference/cli.md), [Configuration
+Reference](reference/configuration.md), and [Lint Rules](reference/rules.md).
