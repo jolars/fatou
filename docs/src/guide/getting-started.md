@@ -3,8 +3,24 @@
 Run Fatou from the root of an existing Julia project. The commands below use the
 default settings unless your project already has a `fatou.toml`.
 
-See [Installation](../installation.md) if you need the CLI, or [Editor
-Setup](editors.md) to use Fatou directly in your editor.
+## Install Fatou
+
+Use the installer to download Fatou for your platform:
+
+::: code-group
+
+```sh [macOS/Linux]
+curl --proto '=https' --tlsv1.2 -sSf https://fatou.dev/install | sh
+```
+
+```powershell [Windows]
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://fatou.dev/install.ps1 | iex"
+```
+
+:::
+
+See [Installation](../installation.md) for package managers and other options,
+or [Editor Setup](editors.md) to use Fatou directly in your editor.
 
 ## Check Your Project {#first-run}
 

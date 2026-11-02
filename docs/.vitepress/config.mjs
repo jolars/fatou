@@ -94,8 +94,8 @@ export default defineConfig({
     sidebar: [
       group("Introduction", [
         ["Overview", "introduction"],
-        ["Installation", "installation"],
         ["Getting Started", "guide/getting-started"],
+        ["Installation", "installation"],
       ]),
       group("Guide", [
         ["Formatting", "guide/formatting"],
