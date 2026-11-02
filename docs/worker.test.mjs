@@ -2,97 +2,104 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import worker, { acceptsMarkdown } from "./worker.mjs";
 
-test("negotiates explicit markdown, including a weighted media range", () => {
+function assets(handler) {
+  return { ASSETS: { fetch: handler } };
+}
+
+test("negotiates explicit Markdown with nonzero weights", () => {
   assert.equal(acceptsMarkdown("text/html, text/markdown;q=0.8"), true);
   assert.equal(acceptsMarkdown("TEXT/MARKDOWN; charset=utf-8"), true);
   assert.equal(acceptsMarkdown("text/markdown;q=0"), false);
   assert.equal(acceptsMarkdown("text/html, */*"), false);
 });
 
-test("serves Markdown at the page URL and leaves other requests on the origin", async () => {
-  const fetched = [];
-  globalThis.fetch = async (request) => {
-    fetched.push(request.url);
-    return new Response(
-      request.url.endsWith(".md") ? "# Fatou\n" : "<h1>Fatou</h1>",
-      {
-        headers: {
-          "Content-Type": request.url.endsWith(".md")
-            ? "text/plain"
-            : "text/html",
-        },
-      },
-    );
-  };
-
-  const markdown = await worker.fetch(
-    new Request("https://fatou.dev/guide/editors.html", {
-      headers: { Accept: "text/markdown" },
-    }),
-  );
-  assert.equal(await markdown.text(), "# Fatou\n");
-  assert.match(markdown.headers.get("Content-Type"), /^text\/markdown/);
-  assert.equal(markdown.headers.get("Vary"), "Accept");
-  assert.equal(fetched[0], "https://fatou.dev/guide/editors.md");
-
-  const html = await worker.fetch(new Request("https://fatou.dev/"));
-  assert.equal(await html.text(), "<h1>Fatou</h1>");
-  assert.equal(html.headers.get("Vary"), "Accept");
-  assert.equal(fetched[1], "https://fatou.dev/");
-
-  await worker.fetch(
-    new Request("https://fatou.dev/install", {
-      headers: { Accept: "text/markdown" },
-    }),
-  );
-  assert.equal(fetched[2], "https://fatou.dev/install");
-});
-
-test("falls back to origin HTML when a Markdown page is absent", async () => {
-  globalThis.fetch = async (request) =>
-    request.url.endsWith(".md")
-      ? new Response("missing", { status: 404 })
-      : new Response("<h1>Page</h1>", { headers: { Vary: "Accept-Encoding" } });
-  const response = await worker.fetch(
-    new Request("https://fatou.dev/moved.html", {
-      headers: { Accept: "text/markdown" },
-    }),
-  );
-  assert.equal(await response.text(), "<h1>Page</h1>");
-  assert.equal(response.headers.get("Vary"), "Accept-Encoding, Accept");
-});
-
-test("advertises the homepage Markdown in Link response headers", async () => {
-  globalThis.fetch = async () =>
-    new Response("Fatou", {
-      headers: { Link: '<https://fatou.dev/>; rel="canonical"' },
-    });
-
+test("serves GET and HEAD Markdown through the assets binding", async () => {
   for (const method of ["GET", "HEAD"]) {
+    const env = assets(async (request) => {
+      assert.equal(new URL(request.url).pathname, "/guide/editors.md");
+      assert.equal(request.method, method);
+      for (const header of [
+        "Accept",
+        "If-None-Match",
+        "If-Modified-Since",
+        "Range",
+        "If-Range",
+      ])
+        assert.equal(request.headers.has(header), false);
+      return new Response(method === "HEAD" ? null : "# Editors\n");
+    });
     const response = await worker.fetch(
-      new Request("https://fatou.dev/", { method }),
+      new Request("https://fatou.dev/guide/editors.html", {
+        method,
+        headers: {
+          Accept: "text/markdown",
+          "If-None-Match": '"html"',
+          Range: "bytes=0-3",
+        },
+      }),
+      env,
     );
-    assert.equal(
-      response.headers.get("Link"),
-      '<https://fatou.dev/>; rel="canonical", </index.md>; rel="describedby"; type="text/markdown"',
-    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Vary"), "Accept");
+    assert.match(response.headers.get("Content-Type"), /^text\/markdown/);
+    assert.equal(await response.text(), method === "HEAD" ? "" : "# Editors\n");
   }
+});
 
-  const markdown = await worker.fetch(
-    new Request("https://fatou.dev/", {
+test("keeps HTML, downloads, and missing pages on the assets binding", async () => {
+  const env = assets(async (request) => {
+    const path = new URL(request.url).pathname;
+    return new Response(path, {
+      status: path.startsWith("/missing") ? 404 : 200,
+      headers: { Vary: "Accept-Encoding" },
+    });
+  });
+  for (const path of ["/", "/install", "/missing.html"]) {
+    const response = await worker.fetch(
+      new Request(`https://fatou.dev${path}`),
+      env,
+    );
+    assert.equal(await response.text(), path === "/" ? "/index.html" : path);
+    assert.equal(response.status, path === "/missing.html" ? 404 : 200);
+  }
+  const response = await worker.fetch(new Request("https://fatou.dev/"), env);
+  assert.equal(response.headers.get("Vary"), "Accept-Encoding, Accept");
+  assert.match(response.headers.get("Link"), /<\/index.md>/);
+});
+
+test("redirects legacy routes while preserving queries and fragments", async () => {
+  for (const path of ["/getting-started.html", "/comparison/formatters.html"]) {
+    const response = await worker.fetch(
+      new Request(`https://fatou.dev${path}?from=old#installation`),
+      assets(() => {
+        throw Error("unexpected asset lookup");
+      }),
+    );
+    assert.equal(response.status, 301);
+    const destination = new URL(response.headers.get("Location"));
+    assert.equal(
+      destination.pathname,
+      path.startsWith("/comparison")
+        ? "/guide/comparison.html"
+        : "/guide/getting-started.html",
+    );
+    assert.equal(destination.search, "?from=old");
+    assert.equal(destination.hash, "#installation");
+  }
+});
+
+test("falls back to HTML when Markdown is missing", async () => {
+  const response = await worker.fetch(
+    new Request("https://fatou.dev/missing.html", {
       headers: { Accept: "text/markdown" },
     }),
+    assets(
+      async (request) =>
+        new Response(request.url.endsWith(".md") ? "no Markdown" : "no HTML", {
+          status: 404,
+        }),
+    ),
   );
-  assert.match(
-    markdown.headers.get("Link"),
-    /<\/index\.md>; rel="describedby"; type="text\/markdown"/,
-  );
-
-  const other = await worker.fetch(
-    new Request("https://fatou.dev/guide/editors.html"),
-  );
-  assert.equal(
-    other.headers.get("Link"),
-    '<https://fatou.dev/>; rel="canonical"',
-  );
+  assert.equal(response.status, 404);
+  assert.equal(await response.text(), "no HTML");
 });

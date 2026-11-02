@@ -9,8 +9,18 @@ devenv.local.yaml
 # pre-commit
 .pre-commit-config.yaml
 
-# mdBook build output
-/docs/book
+# Documentation dependencies and generated output.
+/docs/node_modules
+/docs/.vitepress/dist
+/docs/.vitepress/cache
+/docs/.vitepress/benchmarks.json
+/docs/.wrangler
+/docs/src/public/fatou.schema.json
+/docs/src/public/install
+/docs/src/public/install.ps1
+/docs/.env*
+/docs/.dev.vars*
+/docs/worker.log
 
 # Added by cargo
 

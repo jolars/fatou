@@ -1,54 +1,103 @@
 name: Documentation
-
 on:
   workflow_dispatch:
   push:
     tags: ["v*"]
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
-
+  pull_request:
+    paths:
+      - "docs/**"
+      - "bench/*.json"
+      - "scripts/fatou-installer.*"
+      - "fatou.schema.json"
+      - "CONTRIBUTING.md"
+      - "build.rs"
+      - "src/cli.rs"
+      - "src/linter/**"
+      - "examples/docgen.rs"
+      - ".github/workflows/docs.yml"
+permissions:
+  contents: read
 jobs:
-  docs:
-    name: Build Documentation
+  build:
+    name: Build and Check Documentation
     runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    defaults:
+      run:
+        working-directory: docs
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # full history so sitemap <lastmod> can come from git
+          fetch-depth: 0
       - name: Install Rust
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
-      - name: Install mdBook
-        uses: peaceiris/actions-mdbook@v2
         with:
-          mdbook-version: latest
-      - name: Build mdBook
-        run: mdbook build docs
-      - name: Prepare HTML and Markdown pages
-        run: bash scripts/prepare-docs-site.sh
-      - name: Inject canonical links
-        run: cargo run --quiet --example canonical -- docs/book https://fatou.dev/
-      - name: Generate sitemap
-        run: cargo run --quiet --example sitemap -- docs/book https://fatou.dev/
-      - name: Publish installers
+          workspaces: |
+            . -> target
+            docs/doc-utils -> target
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: docs/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: docs/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm build
+      - name: Verify installer syntax
+        run: sh -n .vitepress/dist/install
+      - name: Check deployment bundle
+        run: pnpm deploy:check
+      - name: Check local Worker
+        shell: bash
         run: |
-          install -m 0644 scripts/fatou-installer.sh docs/book/install
-          install -m 0644 scripts/fatou-installer.ps1 docs/book/install.ps1
-          cmp scripts/fatou-installer.sh docs/book/install
-          cmp scripts/fatou-installer.ps1 docs/book/install.ps1
-          sh -n docs/book/install
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
+          pnpm preview:worker > worker.log 2>&1 &
+          worker_pid=$!
+          trap 'kill "$worker_pid"; cat worker.log' EXIT
+          for ((attempt = 0; attempt < 30; attempt++)); do
+            if curl --fail --silent http://127.0.0.1:8787/ > /dev/null; then
+              pnpm check:worker
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - uses: actions/upload-artifact@v7
         with:
-          path: docs/book
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
+          name: docs-site
+          path: docs/.vitepress/dist
+          include-hidden-files: true
+  deploy:
+    name: Deploy to Cloudflare Workers
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: docs-production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: docs
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: docs/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: docs/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with:
+          name: docs-site
+          path: docs/.vitepress/dist
+      - run: pnpm deploy
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Verify live site
+        run: pnpm check:worker https://fatou.dev

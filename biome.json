@@ -4,7 +4,7 @@
     "includes": [
       "**",
       "!bench/results.json",
-      "!docs/theme/vendor",
+      "!docs/src/public/theme/vendor",
       "!fatou.schema.json"
     ]
   },

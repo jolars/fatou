@@ -1,7 +1,23 @@
 name = "fatou-docs-markdown"
 main = "worker.mjs"
-compatibility_date = "2026-10-05"
+compatibility_date = "2026-11-02"
+workers_dev = false
+preview_urls = false
 
 [[routes]]
-pattern = "fatou.dev/*"
-zone_name = "fatou.dev"
+pattern = "fatou.dev"
+custom_domain = true
+
+[assets]
+directory = ".vitepress/dist"
+binding = "ASSETS"
+run_worker_first = ["/", "/*.html", "/*.md"]
+html_handling = "none"
+not_found_handling = "404-page"
+
+[observability]
+enabled = true
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 0.01

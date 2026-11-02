@@ -1,21 +1,7 @@
-//! Preprocessor for the Fatou docs (benchmark chart + metadata markers).
+//! Render benchmark markers as JSON for the documentation build.
 
-fn main() {
-    let mut args = std::env::args().skip(1);
-    match args.next().as_deref() {
-        Some("supports") => {
-            // Supports all renderers.
-            return;
-        }
-        Some(arg) => {
-            eprintln!("unknown argument: {arg}");
-            std::process::exit(1);
-        }
-        None => {}
-    }
-
-    if let Err(e) = doc_utils::handle_preprocessing() {
-        eprintln!("{e:?}");
-        std::process::exit(1);
-    }
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    serde_json::to_writer(std::io::stdout(), &doc_utils::render(&project_root))?;
+    Ok(())
 }

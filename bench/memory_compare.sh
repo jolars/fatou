@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Language-server speed and memory benchmark: Fatou against the two Julia
 # language servers, plus Fatou's own one-shot CLI memory runs. Results land in
-# bench/memory.json, which the docs `doc-utils` mdBook preprocessor reads to
+# bench/memory.json, which the docs `doc-utils` documentation renderer reads to
 # render the language-server section of the performance page.
 #
 # Two scopes, because Fatou is used two ways:

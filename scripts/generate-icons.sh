@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 # Derive the site icons from the master logo (assets/logo.png).
 #
-# The logo is a Newton fractal, and its basin boundary is infinitely intricate
-# -- generate-logo.jl renders newton mode raster-only, so there is no vector
-# original. favicon.svg is therefore a thin wrapper around a small embedded
-# PNG: mdBook always links `rel="icon"` at favicon.svg, so shipping one is the
-# only way to keep its own default icon from winning over ours.
+# The Newton fractal has no vector original, so favicon.svg wraps an embedded
+# PNG. VitePress links both icon formats from its site configuration.
 #
 # Outputs (all overwritten):
-#   docs/theme/favicon.png         32x32    mdBook `rel="shortcut icon"`
-#   docs/theme/favicon.svg         64x64    mdBook `rel="icon"`
-#   docs/src/apple-touch-icon.png  180x180  iOS home screen, linked from head.hbs
+#   docs/src/public/theme/favicon.png     32x32
+#   docs/src/public/theme/favicon.svg     64x64
+#   docs/src/public/apple-touch-icon.png  180x180
 #
 # Usage: scripts/generate-icons.sh
 set -euo pipefail
@@ -30,8 +27,8 @@ resize() {
   magick "$logo" -resize "$1x$1" -strip -define png:compression-level=9 "$2"
 }
 
-resize 32 docs/theme/favicon.png
-resize 180 docs/src/apple-touch-icon.png
+resize 32 docs/src/public/theme/favicon.png
+resize 180 docs/src/public/apple-touch-icon.png
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -43,6 +40,6 @@ resize 64 "$tmp/favicon.png"
   printf '  <image width="64" height="64" href="data:image/png;base64,%s"/>\n' \
     "$(base64 -w0 "$tmp/favicon.png")"
   echo '</svg>'
-} >docs/theme/favicon.svg
+} >docs/src/public/theme/favicon.svg
 
-echo "wrote docs/theme/favicon.png docs/theme/favicon.svg docs/src/apple-touch-icon.png"
+echo "wrote docs/src/public/theme/favicon.png docs/src/public/theme/favicon.svg docs/src/public/apple-touch-icon.png"

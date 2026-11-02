@@ -5,7 +5,7 @@
 # Each tool is timed in a warm loop inside its own runtime (Rust for Fatou, a
 # long-lived Julia process for Runic and JuliaFormatter), so process startup and
 # first-call JIT are excluded. Results land in bench/results.json, which the docs
-# `doc-utils` mdBook preprocessor reads to render the performance page.
+# `doc-utils` documentation renderer reads to render the performance page.
 #
 # Corpora (see bench/corpus/download.sh): JuliaSyntax.jl, the parser Fatou
 # targets for parity, and DataFrames.jl, ordinary docstring- and macro-heavy

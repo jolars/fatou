@@ -1,4 +1,4 @@
-//! mdBook preprocessor for the Fatou docs.
+//! Benchmark renderer for the Fatou docs.
 //!
 //! It substitutes four markers on the performance page with content rendered
 //! from the committed benchmark artifact `bench/results.json` (produced by
@@ -14,8 +14,8 @@
 //!                                   (fresh-process) time relative to Fatou per
 //!                                   tool, plus a collapsed fallback table.
 //!
-//! The chart itself is drawn client-side by `docs/theme/bench-charts.js` from an
-//! inline JSON payload; this crate only shapes the data and the fallback.
+//! The chart itself is drawn client-side by the VitePress theme from an inline
+//! JSON payload; this crate only shapes the data and the fallback.
 //!
 //! The same page's language-server speed and memory markers come from a second
 //! artifact and live in
@@ -23,59 +23,16 @@
 
 mod memory;
 
-use mdbook_preprocessor::book::Book;
-use mdbook_preprocessor::errors::Result;
-use mdbook_preprocessor::{Preprocessor, PreprocessorContext};
-use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::io;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 
-/// Preprocessing entry point.
-pub fn handle_preprocessing() -> Result<()> {
-    let pre = DocUtils;
-    let (ctx, book) = mdbook_preprocessor::parse_input(io::stdin())?;
-
-    let book_version = Version::parse(&ctx.mdbook_version)?;
-    let version_req = VersionReq::parse(mdbook_preprocessor::MDBOOK_VERSION)?;
-    if !version_req.matches(&book_version) {
-        eprintln!(
-            "warning: The {} plugin was built against version {} of mdbook, \
-             but we're being called from version {}",
-            pre.name(),
-            mdbook_preprocessor::MDBOOK_VERSION,
-            ctx.mdbook_version
-        );
-    }
-
-    let processed_book = pre.run(&ctx, book)?;
-    serde_json::to_writer(io::stdout(), &processed_book)?;
-    Ok(())
-}
-
-struct DocUtils;
-
-impl Preprocessor for DocUtils {
-    fn name(&self) -> &str {
-        "doc-utils"
-    }
-
-    fn run(&self, _ctx: &PreprocessorContext, mut book: Book) -> Result<Book> {
-        insert_benchmarks(&mut book);
-        memory::insert(&mut book, project_root());
-        Ok(book)
-    }
-}
-
-/// The project root, one level up from the book root (`docs/`), which is the
-/// working directory mdbook runs preprocessors in.
-fn project_root() -> PathBuf {
-    std::env::current_dir()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf()
+/// Render the committed benchmark artifacts without running measurements.
+pub fn render(project_root: &Path) -> BTreeMap<&'static str, String> {
+    let mut replacements = BTreeMap::new();
+    insert_benchmarks(&mut replacements, project_root);
+    memory::insert(&mut replacements, project_root);
+    replacements
 }
 
 // --- Benchmark artifact schema (mirrors bench/merge.py output) ---------------
@@ -257,7 +214,7 @@ struct ColdPoint {
 /// Substitute the benchmark markers with content rendered from the committed
 /// `bench/results.json`. The JSON is read but never regenerated here, so the
 /// benchmark is only ever run manually (via `task bench`), not at build time.
-fn insert_benchmarks(book: &mut Book) {
+fn insert_benchmarks(replacements: &mut BTreeMap<&'static str, String>, project_root: &Path) {
     const MARKERS: &[&str] = &[
         BENCH_META_MARKER,
         BENCH_RESULTS_SINGLE_MARKER,
@@ -265,20 +222,7 @@ fn insert_benchmarks(book: &mut Book) {
         BENCH_COLD_MARKER,
     ];
 
-    let needs_render = {
-        let mut found = false;
-        book.for_each_chapter_mut(|ch| {
-            if MARKERS.iter().any(|m| ch.content.contains(m)) {
-                found = true;
-            }
-        });
-        found
-    };
-    if !needs_render {
-        return;
-    }
-
-    let path = project_root().join("bench/results.json");
+    let path = project_root.join("bench/results.json");
     let rendered: Vec<String> = match std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str::<Benchmarks>(&s).ok())
@@ -298,13 +242,9 @@ fn insert_benchmarks(book: &mut Book) {
         }
     };
 
-    book.for_each_chapter_mut(|ch| {
-        for (marker, content) in MARKERS.iter().zip(&rendered) {
-            if ch.content.contains(marker) {
-                ch.content = ch.content.replace(marker, content);
-            }
-        }
-    });
+    for (&marker, content) in MARKERS.iter().zip(rendered) {
+        replacements.insert(marker, content);
+    }
 }
 
 /// A scenario's display name within its own scope's chart: the label the
@@ -370,7 +310,7 @@ fn render_meta(meta: &Meta) -> String {
 }
 
 /// One scope's results marker becomes an interactive dot plot (Vega-Lite, driven
-/// by `docs/theme/bench-charts.js` and wired via `book.toml`'s `additional-js`)
+/// by `docs/.vitepress/theme/bench-charts.js` in the VitePress theme)
 /// plus an HTML data table that collapses after the chart renders.
 /// Single files and projects get a chart each: they measure different work at
 /// different sizes, and a shared axis buries that.

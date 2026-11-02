@@ -12,9 +12,9 @@
 //! each gets its own plot. The inline data uses the same vendored Vega runtime
 //! as the formatter plots; the underlying tables collapse after the charts render.
 
-use mdbook_preprocessor::book::Book;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::path::Path;
 
 pub const META_MARKER: &str = "{{ memory-meta }}";
 pub const SPEED_MARKER: &str = "{{ lsp-speed }}";
@@ -241,17 +241,7 @@ fn render_chart(
 }
 
 /// Substitute the memory markers, if the page uses any.
-pub fn insert(book: &mut Book, project_root: PathBuf) {
-    let mut needed = false;
-    book.for_each_chapter_mut(|ch| {
-        if MARKERS.iter().any(|m| ch.content.contains(m)) {
-            needed = true;
-        }
-    });
-    if !needed {
-        return;
-    }
-
+pub fn insert(replacements: &mut BTreeMap<&'static str, String>, project_root: &Path) {
     let path = project_root.join("bench/memory.json");
     let rendered: Vec<String> = match std::fs::read_to_string(&path)
         .ok()
@@ -272,13 +262,9 @@ pub fn insert(book: &mut Book, project_root: PathBuf) {
         }
     };
 
-    book.for_each_chapter_mut(|ch| {
-        for (marker, content) in MARKERS.iter().zip(&rendered) {
-            if ch.content.contains(marker) {
-                ch.content = ch.content.replace(marker, content);
-            }
-        }
-    });
+    for (&marker, content) in MARKERS.iter().zip(rendered) {
+        replacements.insert(marker, content);
+    }
 }
 
 fn render_meta(m: &Memory) -> String {

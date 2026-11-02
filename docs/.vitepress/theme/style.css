@@ -1,0 +1,16 @@
+:root {
+  --vp-c-brand-1: #496bd8;
+  --vp-c-brand-2: #3656bf;
+  --vp-c-brand-3: #496bd8;
+}
+.dark {
+  --vp-c-brand-1: #a9bbff;
+  --vp-c-brand-2: #839def;
+  --vp-c-brand-3: #496bd8;
+}
+.bench-data[hidden] {
+  display: none;
+}
+.vp-doc .bench-table {
+  overflow-x: auto;
+}

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Merge the Fatou and Julia warm-loop harness outputs into results.json, the
-artifact the docs `doc-utils` mdBook preprocessor reads to render the benchmark
+artifact the docs `doc-utils` documentation renderer reads to render the benchmark
 chart and fallback tables.
 
 Scenarios are supplied by `compare_format.sh`, one `--scenario` group per

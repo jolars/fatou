@@ -1,5 +1,7 @@
 {
   inputs,
+  config,
+  lib,
   pkgs,
   ...
 }:
@@ -9,6 +11,14 @@
   # (`Project.toml` + `Manifest.toml`), searching upward from the cwd.
   env.JULIA_PROJECT = "@.";
 
+  # The npm workerd binary needs the Nix dynamic loader on Linux.
+  env.MINIFLARE_WORKERD_PATH = lib.mkIf pkgs.stdenv.isLinux "${pkgs.writeShellScript "fatou-workerd" ''
+    cd "${config.devenv.root}/docs"
+    binary=$(node -e 'const {createRequire}=require("node:module"); const wrangler=createRequire(require.resolve("wrangler/package.json")); const miniflare=createRequire(wrangler.resolve("miniflare/package.json")); process.stdout.write(miniflare("workerd").default);')
+    loader=$(cat "$NIX_CC/nix-support/dynamic-linker")
+    exec "$loader" "$binary" "$@"
+  ''}";
+
   packages = [
     pkgs.perf
     pkgs.cargo-flamegraph
@@ -17,7 +27,6 @@
     pkgs.cargo-deny
     pkgs.cargo-insta
     pkgs.go-task
-    pkgs.mdbook
     pkgs.llvmPackages.bintools
     pkgs.prettier
     pkgs.ruff
@@ -60,6 +69,8 @@
 
     javascript = {
       enable = true;
+      package = pkgs.nodejs_24;
+      directory = "./docs";
 
       pnpm = {
         enable = true;

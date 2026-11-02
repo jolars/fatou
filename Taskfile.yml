@@ -82,31 +82,26 @@ tasks:
       - ./bench/lsenv/setup.sh
 
   docs-preview:
-    desc: Serve the docs site locally with live reload
+    desc: Serve VitePress locally with live reload
     cmds:
-      - mdbook serve docs --open
+      - pnpm --dir docs dev
 
   docs-build:
-    desc: Build HTML and Markdown docs with canonical links and sitemap
+    desc: Build and validate the documentation site
     cmds:
-      - mdbook build docs
-      - bash scripts/prepare-docs-site.sh
-      - task: docs-canonical
-      - task: docs-sitemap
+      - pnpm --dir docs build
 
-  docs-canonical:
-    desc: Inject <link rel="canonical"> into each rendered page
+  docs-worker:
+    desc: Preview the built site through Cloudflare Workers locally
     cmds:
-      - >-
-        cargo run --quiet --example canonical --
-        docs/book https://fatou.dev/
+      - pnpm --dir docs preview:worker
 
-  docs-sitemap:
-    desc: Generate docs/book/sitemap.xml from the rendered book
+  docs-check:
+    desc: Check Worker behavior against a running local preview
     cmds:
-      - >-
-        cargo run --quiet --example sitemap --
-        docs/book https://fatou.dev/
+      - pnpm --dir docs test
+      - pnpm --dir docs check:worker {{.CLI_ARGS}}
+      - pnpm --dir docs deploy:check
 
   aur:push:
     desc: "Manually publish fatou-bin to the AUR (CI fallback; args: [version] [pkgrel])"
@@ -132,8 +127,8 @@ tasks:
       - assets/logo.png
       - scripts/generate-icons.sh
     generates:
-      - docs/theme/favicon.png
-      - docs/theme/favicon.svg
-      - docs/src/apple-touch-icon.png
+      - docs/src/public/theme/favicon.png
+      - docs/src/public/theme/favicon.svg
+      - docs/src/public/apple-touch-icon.png
     cmds:
       - ./scripts/generate-icons.sh

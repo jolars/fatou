@@ -1,0 +1,11 @@
+/fatou.schema.json
+  Content-Type: application/json; charset=utf-8
+  Access-Control-Allow-Origin: *
+/install
+  Content-Type: application/octet-stream
+  Access-Control-Allow-Origin: *
+/install.ps1
+  Content-Type: application/octet-stream
+  Access-Control-Allow-Origin: *
+/*.md
+  Content-Type: text/markdown; charset=utf-8

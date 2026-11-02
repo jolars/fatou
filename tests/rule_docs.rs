@@ -2,7 +2,7 @@
 //! (`docs/src/reference/rules.md`) is rendered from the rule metadata by
 //! running the real linter, and pinned by snapshot so the docs cannot drift
 //! from behavior. The generator (`examples/docgen.rs`) writes the same
-//! `render_reference_page` output to the mdBook source tree.
+//! `render_reference_page` output to the documentation source tree.
 
 use fatou::config::LintConfig;
 use fatou::linter::{all_rules, check_source_in_project, render_reference_page, render_rule_doc};

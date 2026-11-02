@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Merge the language-server and CLI outputs into memory.json, the artifact the
-docs `doc-utils` mdBook preprocessor reads to render speed and memory results.
+docs `doc-utils` documentation renderer reads to render speed and memory results.
 
 `lsp_memory.py` reports per-server readiness, request latency, returned work,
 and memory milestones over a scripted editing session; `cli_memory.py` reports

@@ -10,10 +10,10 @@ approach.
 
 The repository ships a [devenv](https://devenv.sh) (Nix) environment
 (`devenv.nix`) that provides the pinned Rust toolchain, a Julia interpreter,
-`mdbook`, [`task`](https://taskfile.dev), and the auxiliary cargo tools. Enter
-it with `devenv shell`. Julia packages (JuliaSyntax.jl, the parser oracle, plus
-the formatter-comparison tools) are managed by Julia's own package manager via
-the repo's pinned `Project.toml`/`Manifest.toml`, not by Nix.
+Node.js, pnpm, [`task`](https://taskfile.dev), and the auxiliary cargo tools.
+Enter it with `devenv shell`. Julia packages (JuliaSyntax.jl, the parser oracle,
+plus the formatter-comparison tools) are managed by Julia's own package manager
+via the repo's pinned `Project.toml`/`Manifest.toml`, not by Nix.
 
 Nix is not required, though. Rust 1.89 or newer is enough to build Fatou; the
 development toolchain tracks stable through `rust-toolchain.toml`:
@@ -84,13 +84,28 @@ fix.
 
 ## Documentation
 
-The documentation site ([fatou.dev](https://fatou.dev)) is an
-[mdBook](https://rust-lang.github.io/mdBook/) under `docs/`. Preview it locally
-with:
+The documentation site ([fatou.dev](https://fatou.dev)) uses
+[VitePress](https://vitepress.dev/) and Cloudflare Workers. Install its locked
+Node dependencies, then preview it locally:
 
 ```sh
-task docs-preview        # mdbook serve docs --open
+pnpm --dir docs install --frozen-lockfile
+task docs-preview
 ```
+
+`task docs-build` generates the rule reference and benchmark charts, builds the
+site, and checks links, historical URLs and headings, Markdown exports, and
+public downloads. It reads the committed benchmark artifacts without running
+measurements. The output is `docs/.vitepress/dist/`.
+
+Run `task docs-worker` after building to preview the actual Worker, then run
+`task docs-check` in a second terminal to check Markdown negotiation, redirects,
+404 responses, installers, and the schema. On NixOS, the devenv shell supplies
+the dynamic loader for Cloudflare's local runtime.
+
+Add pages under `docs/src/` and navigation entries in
+`docs/.vitepress/config.mjs`. Keep static assets in `docs/src/public/`.
+`docs/README.md` describes deployment and the initial hosting cutover.
 
 ## Commits and versioning
 

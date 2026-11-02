@@ -1,0 +1,23 @@
+{
+  "name": "fatou-docs",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "prepare:content": "node scripts/prepare-content.mjs",
+    "dev": "pnpm prepare:content && vitepress dev --host 127.0.0.1",
+    "build": "pnpm prepare:content && vitepress build && node scripts/publish-content.mjs && node scripts/check-site.mjs",
+    "preview": "vitepress preview --host 127.0.0.1",
+    "preview:worker": "wrangler dev --ip 127.0.0.1",
+    "test": "node --test worker.test.mjs",
+    "check:worker": "node scripts/check-worker.mjs",
+    "deploy:check": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "cheerio": "1.2.0",
+    "vitepress": "1.6.4",
+    "vue": "^3.5.13",
+    "wrangler": "4.156.2"
+  }
+}

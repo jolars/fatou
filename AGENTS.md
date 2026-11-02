@@ -360,11 +360,13 @@ configuration types and validates representative accepted and rejected input.
 
 ### Documentation and assets
 
-The mdBook source lives under `docs/`; `docs/book/` is ignored output. Add
-hand-written pages to `docs/src/SUMMARY.md`, route canonical links and sitemap
-entries through `postbuild::collect_pages`, and keep publishing utilities in
-`examples/`. Asset generation is manual through `task icons` and `task logo` and
-requires Julia.
+The VitePress source lives under `docs/src/`; `docs/.vitepress/dist/` is ignored
+output. Add hand-written pages to `docs/.vitepress/config.mjs` navigation. That
+configuration owns canonical metadata; `docs/scripts/publish-content.mjs` owns
+Markdown exports and the sitemap. Benchmark rendering stays in `docs/doc-utils/`
+and reads only committed artifacts. Cloudflare Workers serves the entire site
+through `docs/wrangler.toml`. Asset generation is manual through `task icons`
+and `task logo` and requires Julia.
 
 ### Performance work
 

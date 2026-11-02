@@ -1,8 +1,8 @@
-//! Generate the mdBook lint-rule reference from rule metadata.
+//! Generate the documentation lint-rule reference from rule metadata.
 //!
 //! Run with `cargo run --example docgen`. It renders the same markdown the
 //! snapshot test pins ([`fatou::linter::docs::render_reference_page`]) and
-//! writes it to the mdBook source tree as a single page, one section per rule.
+//! writes it to the documentation source tree as a single page, one section per rule.
 //!
 //! Living as an `examples/` target (not a `[[bin]]`) keeps `fatou` a single,
 //! publishable crate: `examples/` is outside the Cargo `include` whitelist, so

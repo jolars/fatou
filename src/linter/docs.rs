@@ -23,13 +23,12 @@ fn example_path() -> PathBuf {
 }
 
 /// The published rule reference. [`render_reference_page`] writes
-/// `docs/src/reference/rules.md`, which mdBook serves from here.
+/// `docs/src/reference/rules.md`, which VitePress serves from here.
 pub const RULE_REFERENCE_URL: &str = "https://fatou.dev/reference/rules.html";
 
-/// The deep link to `rule`'s section of the published reference. The anchor is
-/// mdBook's slug for the `## `<id>`` heading [`render_rule_doc`] writes, which
-/// is the ID verbatim. Only meaningful for a registry rule
-/// ([`crate::linter::rules::is_shipped_rule`]) — every one of those has a
+/// The deep link to `rule`'s section of the published reference. The anchor for
+/// the `## `<id>`` heading [`render_rule_doc`] writes is the ID verbatim. Only
+/// meaningful for a registry rule ([`crate::linter::rules::is_shipped_rule`]) — every one of those has a
 /// section, guaranteed by the `every_rule_is_documented` test.
 pub fn rule_doc_url(rule: &str) -> String {
     format!("{RULE_REFERENCE_URL}#{rule}")
