@@ -3,7 +3,7 @@
 Fatou formats Julia source without starting Julia. After
 [installation](../installation.md), run it from your project directory.
 
-## Format Files
+## Format files
 
 Format one file in place, or pass a directory to format its `.jl` files:
 
@@ -17,7 +17,7 @@ and the exclusions in `fatou.toml`. Explicitly named files are still processed
 unless you add `--force-exclude`; see [excluding
 files](configuration.md#excluding-files).
 
-## Check Without Writing
+## Check without writing
 
 Use `--check` to verify formatting in CI or before committing:
 
@@ -29,7 +29,7 @@ The command prints diffs and exits nonzero if any file would change. Add
 `--quiet` to keep the file list and summary without printing diffs. See
 [Integrations](integrations.md) for GitHub Actions, pre-commit, and dprint.
 
-## Verify Preservation Before Writing
+## Verify preservation before writing
 
 Use `--safe` to require verification that formatting preserves the parsed
 program and comments:
@@ -46,7 +46,7 @@ flag with `--check` to verify preservation and check layout without writes:
 fatou format --safe --check .
 ```
 
-## Format Standard Input
+## Format standard input
 
 Pass `-` to read a buffer from standard input and write the formatted result to
 standard output:
@@ -56,9 +56,9 @@ cat src/example.jl | fatou format -
 ```
 
 `--check` requires file paths. For formatting inside an editor, follow [Editor
-Setup](editors.md).
+setup](editors.md).
 
-## Choose Formatting Settings
+## Choose formatting settings
 
 Put shared settings in `fatou.toml`:
 

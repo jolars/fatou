@@ -17,7 +17,7 @@ compiled Rust binary that never starts Julia. It reads your code the way
 rust-analyzer reads Rust, rather than loading it into a running session.
 Everything below follows from that. All of these tools are MIT-licensed.
 
-## Language Servers
+## Language servers
 
   |                          | Fatou                 | LanguageServer.jl                      | JETLS.jl                             |
   | ------------------------ | --------------------- | -------------------------------------- | ------------------------------------ |
@@ -199,14 +199,14 @@ rule IDs in categories, `select`/`ignore` and per-rule severity in `[lint]`,
 `concise`, or `json` output from the CLI. See the [rule
 reference](../reference/rules.md) for the catalogue.
 
-## Running Them Together
+## Running them together
 
 Fatou and a Julia-native server coexist happily: Fatou formats and runs its
 static checks instantly and everywhere, including CI via
 [fatou-action](https://github.com/jolars/fatou-action) or
 [pre-commit](https://pre-commit.com) with no Julia setup, and the Julia server
 contributes the type-aware analysis that needs a running compiler. [Editor
-Setup](editors.md) shows how to give Fatou formatting while another server keeps
+setup](editors.md) shows how to give Fatou formatting while another server keeps
 the rest.
 
 For formatting throughput and cold-start numbers against Runic and

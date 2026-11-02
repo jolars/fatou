@@ -1,4 +1,4 @@
-# Getting Started
+# Getting started
 
 Run Fatou from the root of an existing Julia project. The commands below use the
 default settings unless your project already has a `fatou.toml`.
@@ -20,9 +20,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://fatou.dev/in
 :::
 
 See [Installation](../installation.md) for package managers and other options,
-or [Editor Setup](editors.md) to use Fatou directly in your editor.
+or [Editor setup](editors.md) to use Fatou directly in your editor.
 
-## Check Your Project {#first-run}
+## Check your project {#first-run}
 
 Check formatting and report lint findings without changing files:
 
@@ -39,7 +39,7 @@ can gate CI too.
 Directory walks honor `.gitignore` and the project's configured exclusions. Pass
 a file or subdirectory instead of `.` to narrow the scope.
 
-## Apply Changes
+## Apply changes
 
 Apply available safe fixes, then format the result:
 
@@ -55,7 +55,7 @@ file.
 See [Linting](linting.md) for rule selection and suppressions, and
 [Formatting](formatting.md) for standard input and other options.
 
-## Share Project Settings
+## Share project settings
 
 Fatou works without configuration. To customize the defaults, create a
 `fatou.toml` at your project root. For example:
@@ -73,9 +73,9 @@ The CLI and language server use the same project configuration. See
 including how to declare entry points for standalone scripts spread across
 included files.
 
-## Use Fatou in Your Workflow
+## Use Fatou in your workflow
 
-Follow [Editor Setup](editors.md) for formatting, diagnostics, and navigation
+Follow [Editor setup](editors.md) for formatting, diagnostics, and navigation
 while editing. See [Integrations](integrations.md) to run the checks in CI or a
 pre-commit hook.
 

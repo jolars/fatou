@@ -13,10 +13,10 @@ hero:
     height: 192
   actions:
     - theme: brand
-      text: Get Started
+      text: Get started
       link: /guide/getting-started.html
     - theme: alt
-      text: Editor Setup
+      text: Editor setup
       link: /guide/editors.html
     - theme: alt
       text: View on GitHub
@@ -35,7 +35,7 @@ features:
 
 <span id="fatou"></span>
 
-## Quick Start
+## Quick start
 
 Install Fatou for your platform:
 
@@ -63,9 +63,9 @@ fatou lint file.jl
 
 Using VS Code? Install the [Fatou extension](guide/editors.md#vs-code), which
 includes the binary. For Zed, Neovim, Helix, and other editors, see [Editor
-Setup](guide/editors.md).
+setup](guide/editors.md).
 
-## Built on Your Code
+## Built on your code
 
 Fatou parses Julia into a lossless syntax tree and updates its analysis as you
 type. The same parser powers the formatter, linter, and language server.
@@ -81,11 +81,11 @@ Share formatting settings and lint rules in
 [`fatou.toml`](guide/configuration.md), and use the same commands locally and in
 [CI](guide/integrations.md).
 
-## Where to Go Next
+## Where to go next
 
-- [Getting Started](guide/getting-started.md): check and format an existing
+- [Getting started](guide/getting-started.md): check and format an existing
   Julia project.
-- [Editor Setup](guide/editors.md): connect the language server to your editor.
+- [Editor setup](guide/editors.md): connect the language server to your editor.
 - [Configuration](guide/configuration.md): set up `fatou.toml` for your project.
-- [Configuration Reference](reference/configuration.md): every `fatou.toml` key.
-- [CLI Reference](reference/cli.md): every command and option.
+- [Configuration reference](reference/configuration.md): every `fatou.toml` key.
+- [CLI reference](reference/cli.md): every command and option.

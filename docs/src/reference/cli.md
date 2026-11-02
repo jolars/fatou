@@ -1,4 +1,4 @@
-# Command-Line Help for `fatou`
+# Command-line help for `fatou`
 
 Fatou: a language server, formatter, and linter for Julia
 

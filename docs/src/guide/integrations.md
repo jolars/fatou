@@ -1,7 +1,7 @@
 # Integrations
 
 Use Fatou in CI, Git hooks, and other formatting tools. For editor setup, see
-[Editor Setup](editors.md).
+[Editor setup](editors.md).
 
 ## GitHub Actions
 

@@ -360,6 +360,9 @@ configuration types and validates representative accepted and rejected input.
 
 ### Documentation and assets
 
+Use sentence case for documentation titles, headings, and navigation labels.
+Preserve proper names, acronyms, and code identifiers.
+
 The VitePress source lives under `docs/src/`; `docs/.vitepress/dist/` is ignored
 output. Add hand-written pages to `docs/.vitepress/config.mjs` navigation. That
 configuration owns canonical metadata; `docs/scripts/publish-content.mjs` owns

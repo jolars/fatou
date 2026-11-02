@@ -3,7 +3,7 @@
 Fatou checks Julia source without executing it. After
 [installation](../installation.md), run the linter from your project directory.
 
-## Check Files
+## Check files
 
 Check one file or a directory of Julia files:
 
@@ -29,9 +29,9 @@ fatou lint --output concise .
 fatou lint --output json .
 ```
 
-## Choose Rules
+## Choose rules
 
-The [Lint Rules](../reference/rules.md) reference lists each rule and whether it
+The [Lint rules](../reference/rules.md) reference lists each rule and whether it
 runs by default. Change the selection in `fatou.toml`:
 
 ```toml
@@ -60,7 +60,7 @@ that file. See [checking standalone
 scripts](configuration.md#checking-standalone-scripts) for the limits of static
 analysis.
 
-## Apply Fixes
+## Apply fixes
 
 Apply safe fixes in place, then format the rewritten code:
 
@@ -77,7 +77,7 @@ To also apply fixes marked unsafe, use `fatou lint --fix --unsafe-fixes .`.
 These can change behavior and need review. The rule reference describes the
 fixes each rule offers.
 
-## Suppress a Finding
+## Suppress a finding
 
 Put a suppression comment before the code it applies to:
 
@@ -95,5 +95,5 @@ These are line comments, not `#= ... =#` block comments. They suppress lint
 findings without disabling formatting, and they cannot suppress parse errors.
 For a rule the entire project should disable, use `[lint] ignore` instead.
 
-See [Editor Setup](editors.md) for diagnostics and fixes while editing, and
+See [Editor setup](editors.md) for diagnostics and fixes while editing, and
 [Integrations](integrations.md) for automated checks.

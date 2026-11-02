@@ -1,4 +1,4 @@
-# Configuration Reference
+# Configuration reference
 
 This page lists the keys accepted in `fatou.toml`. All keys are optional and
 omitting a key uses its default. Unknown keys are rejected with an error.

@@ -94,22 +94,22 @@ export default defineConfig({
     sidebar: [
       group("Introduction", [
         ["Overview", "introduction"],
-        ["Getting Started", "guide/getting-started"],
+        ["Getting started", "guide/getting-started"],
         ["Installation", "installation"],
       ]),
       group("Guide", [
         ["Formatting", "guide/formatting"],
         ["Linting", "guide/linting"],
         ["Configuration", "guide/configuration"],
-        ["Editor Setup", "guide/editors"],
+        ["Editor setup", "guide/editors"],
         ["Integrations", "guide/integrations"],
         ["Performance", "guide/performance"],
         ["Comparison", "guide/comparison"],
       ]),
       group("Reference", [
-        ["CLI Reference", "reference/cli"],
-        ["Configuration Reference", "reference/configuration"],
-        ["Lint Rules", "reference/rules"],
+        ["CLI reference", "reference/cli"],
+        ["Configuration reference", "reference/configuration"],
+        ["Lint rules", "reference/rules"],
       ]),
       group("Development", [["Contributing", "development/contributing"]]),
     ],

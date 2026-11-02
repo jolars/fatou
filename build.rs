@@ -71,7 +71,7 @@ fn generate_cli_markdown() -> Result<()> {
     let markdown = clapdown::render(
         &cmd,
         &clapdown::Options::new()
-            .title("Command-Line Help for `fatou`")
+            .title("Command-line help for `fatou`")
             .footer(false)
             .table_of_contents(false),
     );

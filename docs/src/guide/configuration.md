@@ -24,7 +24,7 @@ This guide covers the common tasks. For the exhaustive list of keys, their
 types, and their defaults, see the [configuration
 reference](../reference/configuration.md).
 
-## Editor Support
+## Editor support
 
 Fatou publishes a [JSON Schema](https://json-schema.org/) for `fatou.toml`, so
 editors with TOML support can offer key and value completion, inline
@@ -50,7 +50,7 @@ extension installed, add this association to your user or workspace
 }
 ```
 
-### Inline Schema Directive
+### Inline schema directive
 
 Editors that recognize Taplo's schema directive can select the schema from the
 configuration file itself:
@@ -63,7 +63,7 @@ Other editors and language servers, including Helix, Neovim with `taplo-lsp`,
 Zed, and IntelliJ, can use the same URL through their TOML schema association
 settings.
 
-## Where Fatou Looks for a Config
+## Where Fatou looks for a config
 
 For a given file, Fatou walks up from the file's directory through its
 ancestors, and uses the first `fatou.toml` it finds. The usual layout is a
@@ -72,7 +72,7 @@ single `fatou.toml` beside `.git` at the root of the project.
 The search stops at the repository root. See the full [resolution
 order](#resolution-order) below for discovery rules and fallback paths.
 
-### User-Wide Defaults
+### User-Wide defaults
 
 If you want the same settings across projects, do not put a `fatou.toml` above
 your repositories; use a global config instead. When no project `fatou.toml` is
@@ -105,7 +105,7 @@ The language server uses the same discovery rules as the CLI. It watches project
 `fatou.toml` files and files reached through `extend`. An edit to the primary
 global or `FATOU_CONFIG` file is picked up when the server restarts.
 
-### Extending Another Config
+### Extending another config
 
 Use `extend` to inherit settings from a shared file and override only the keys
 this project needs:
@@ -120,13 +120,13 @@ line-width = 100
 The path is relative to this config file. See the reference for [inheritance and
 merge rules](../reference/configuration.md#extending-another-config).
 
-### Bypassing Discovery
+### Bypassing discovery
 
 On the command line, `--config <PATH>` loads an explicit file and skips
 discovery altogether, and `--no-config` ignores every file (project,
 `FATOU_CONFIG`, and global) and runs with the built-in defaults.
 
-### Resolution Order
+### Resolution order
 
 Fatou uses the first source that applies:
 
@@ -223,7 +223,7 @@ line-ending = "lf"
 See the [format reference](../reference/configuration.md#format) for defaults,
 line-ending choices, command-line overrides, and deprecated key spellings.
 
-## Choosing Lint Rules
+## Choosing lint rules
 
 By default most rules run; the [rule reference](../reference/rules.md) lists the
 few that are opt-in for loose files. Workspace package files also enable
@@ -251,7 +251,7 @@ unused-binding = "warning"
 undefined-name = "error"
 ```
 
-## Tuning a Rule
+## Tuning a rule
 
 A rule with a tunable knob reads it from its own table, named after the rule ID.
 For example,

@@ -1,4 +1,4 @@
-# Editor Setup
+# Editor setup
 
 Fatou includes a language server (`fatou lsp`, stdio JSON-RPC) that any LSP
 client can drive. It provides formatting (whole document and range), lint and
@@ -82,7 +82,7 @@ The extension's
 [README](https://github.com/jolars/fatou/blob/main/editors/code/README.md)
 documents the available settings and their defaults.
 
-### Shared User Config
+### Shared user config
 
 To use a shared `fatou.toml` outside your projects, add this to your user
 `settings.json`:
@@ -101,7 +101,7 @@ absolute path; an unset or empty value uses the normal user config location. See
 the [configuration guide](configuration.md#resolution-order) for the full
 resolution order and error behavior.
 
-### Using Only Some Features
+### Using only some features
 
 The formatter, linter, and language features share one server but can be turned
 off independently, so you can adopt just the parts you want:
@@ -128,7 +128,7 @@ selection](../reference/configuration.md#lint) cannot silence. The `fatou.toml`
 route stays the right tool when you want to keep parse errors but mute specific
 lint rules across every editor and the CLI.
 
-## VSCodium and Other Code OSS Editors
+## VSCodium and other Code OSS editors
 
 The same extension is published to the [Open VSX
 Registry](https://open-vsx.org/extension/jolars/fatou), which VSCodium and most
@@ -399,7 +399,7 @@ ignore = ["unused-binding"]
 A discovered `fatou.toml` shadows editor-pushed settings entirely rather than
 merging with them, so a project file always wins.
 
-## Unicode Symbol Input
+## Unicode symbol input
 
 Completion also offers the LaTeX and emoji sequences the Julia REPL substitutes
 on tab, so `\alpha` inserts `α`, `\_1` inserts `₁`, and `\:smile:` inserts 😄.
@@ -416,7 +416,7 @@ Two places stay quiet, so the list does not get in the way:
   second character brings the sequences back, so `\nu` and `\alpha` still work
   in strings and docstrings.
 
-## Check It Works
+## Check it works
 
 Open a `.jl` file containing `x=1` and format the buffer: it becomes `x = 1`. In
 Neovim that is `:lua vim.lsp.buf.format()`, in Helix `:format`, and in the VS

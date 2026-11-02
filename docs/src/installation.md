@@ -7,7 +7,7 @@ The [VS Code extension](guide/editors.md#vs-code) includes the binary and starts
 the language server for you. The [Zed extension](guide/editors.md#zed) can use
 an installed copy or download one automatically.
 
-## Install Script
+## Install script
 
 The installer selects the release for your platform and installs to a user-local
 directory.
@@ -24,7 +24,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://fatou.dev/in
 
 :::
 
-## Package Managers
+## Package managers
 
 ### Cargo
 
@@ -105,13 +105,13 @@ Commit `aqua.yaml` to share the selected version. Both tools use the
 [`jolars/fatou` registry
 entry](https://github.com/aquaproj/aqua-registry/tree/main/pkgs/jolars/fatou).
 
-## Prebuilt Binaries
+## Prebuilt binaries
 
 Download an archive for your platform from the [releases
 page](https://github.com/jolars/fatou/releases) and put the `fatou` binary on
 your `PATH`.
 
-## From Source
+## From source
 
 Clone the repository and build a release binary:
 
@@ -130,7 +130,7 @@ plugin](guide/integrations.md#dprint). It bundles the formatter and requires
 neither Julia nor the Fatou CLI. Follow the linked recipe for setup and
 configuration.
 
-## Verify the Installation
+## Verify the installation
 
 Check that Fatou is available in your terminal:
 
@@ -138,6 +138,6 @@ Check that Fatou is available in your terminal:
 fatou --version
 ```
 
-Continue with [Getting Started](guide/getting-started.md) to check and format an
-existing Julia project, or [Editor Setup](guide/editors.md) to use Fatou while
+Continue with [Getting started](guide/getting-started.md) to check and format an
+existing Julia project, or [Editor setup](guide/editors.md) to use Fatou while
 editing.
