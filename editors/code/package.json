@@ -201,6 +201,7 @@
   "overrides": {
     "@azure/identity": {
       "@azure/msal-node": "^7.1.0"
-    }
+    },
+    "minimatch": "^11.0.1"
   }
 }
