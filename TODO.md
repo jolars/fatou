@@ -65,6 +65,10 @@
 
 ## Formatter
 
+- [x] Keep short-circuit `&&` and `||` guards attached to `return`, `break`, and
+  `continue` when their conditions wrap (#139). Preserve ordinary logical-chain
+  wrapping and allow returned values to wrap independently.
+
 - [x] Harden `format --safe` against lossy projected leaves, non-finite float
   fingerprints, and configured line-ending conversion inside block comments.
 

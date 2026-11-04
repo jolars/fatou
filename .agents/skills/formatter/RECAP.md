@@ -54,6 +54,11 @@ Reversing one is allowed but must be conscious and re-recorded, never drive-by.
   but non-huggable* (wide binary, paren, comparison) breaks at **every** `=>`,
   rather than hugging the spine and breaking the value.
   `chained_pair_grouped_tail`.
+- **Short-circuit control flow stays attached.** `&&` and `||` keep a flat space
+  before `return`, `break`, or `continue`, even when the condition wraps (#139).
+  Earlier conditions in the same logical chain still break uniformly; a returned
+  value keeps its own layout. Comments between the operator and keyword retain
+  the transparent fallback. `short_circuit_guards`.
 - **Only a *sole* item hugs** its enclosing bracket (`suppress_multi_item_hug`);
   positionals and keywords are counted **together**. `pair_list_no_hug`.
 - **A sole nested *call* `f(g(…))` hugs** — a conscious divergence from every
@@ -102,11 +107,12 @@ above for the decisions behind it. Width-driven throughout; the only surviving
 source-break read is the comment-bearing matrix path (debt #1).
 
 - Operators: `lower_binary` (n-ary, tight `^`/`:`/`::`/`.`/`.^`;
-  `rhs_absorbs_break` biases the break into the RHS for assignments and
-  bracket-bottomed pair chains, via `pair_chain_hugs`), `lower_arrow`,
-  `lower_comparison`, `lower_ternary`, `lower_range`, `lower_type_annotation`,
-  `lower_where` (single param atomic, short multi-param via `Ir::CondGroup`),
-  `lower_unary`, `lower_splat`.
+  `operator_stays_flat` leaves wrapping to the operands for assignments,
+  bracket-bottomed pair chains via `pair_chain_hugs`, and short-circuit guards
+  via `is_short_circuit_guard`), `lower_arrow`, `lower_comparison`,
+  `lower_ternary`, `lower_range`, `lower_type_annotation`, `lower_where` (single
+  param atomic, short multi-param via `Ir::CondGroup`), `lower_unary`,
+  `lower_splat`.
 - Calls/collections: `lower_arg_list` (trailing hug + explode fallback, gated by
   `suppress_multi_item_hug`), `lower_keyword_arg`/`lower_parameters`,
   `lower_collection` (`collect_collection_items`/`collection_body`),
@@ -144,20 +150,17 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (`format --safe` verifier hardening)
+## Latest session (short-circuit guards, #139)
 
-`fix(formatter)`. Closed four fail-open/fail-closed gaps in verified formatting.
-Nonstandard identifiers and character literals now carry an exact, separately
-compared opaque payload, float normalization skips `var`/`char` payloads, and
-single-quoted character projections retain whitespace and parentheses as one
-atom. Non-finite float fingerprints are rejected; the parser now diagnoses
-overflowing decimal `Float64`/`Float32` literals as JuliaSyntax
-`ErrorNumericOverflow`, so safe formatting reports input syntax instead of
-emitting malformed Julia. Block-comment CRLF/LF differences normalize before
-comment comparison, allowing configured line-ending conversion in either
-direction. Gate remains 127 of 155. Focused verifier, formatter, parser-oracle,
-and CLI tests, the full workspace, clippy, fmt, and both Wasm builds are green.
-No parser/lexer blocker remains.
+`fix(formatter)`. Short-circuit operators keep a flat gap before `return`,
+`break`, and `continue`. Guard tails stay outside logical-chain flattening so
+earlier conditions retain uniform wrapping without splitting the final guard.
+Conditions and returned values keep their own groups and indentation. Comments
+between the operator and keyword retain the existing transparent fallback.
+`short_circuit_guards` adds one gated fixture; the reporter's exact width-50
+example separately checks idempotence, safe formatting, and reflow from a flat
+input. Gate 127→128 of 157. Formatter gate, stability, AST preservation, full
+workspace tests, clippy, and rustfmt are green. No parser or lexer blocker.
 
 **Ranked next target:** no formatter target is currently queued in `TODO.md`.
 
@@ -194,6 +197,9 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Verifier hardening** (`fix`): compared opaque literal payloads exactly,
+  rejected non-finite float fingerprints, and normalized block-comment line
+  endings. Gate stayed 127.
 - **Verified formatting** (`feat`): added the public `format_verified` API and
   CLI `format --safe`, with projection/comment comparison and batch preflight.
 - **Unary numeric operators** (`fix`): parenthesized decimal numeric operands
