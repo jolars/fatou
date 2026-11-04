@@ -139,6 +139,9 @@ fn lower_trivia(tok: &SyntaxToken, next: Option<&SyntaxElement>) -> Ir {
 ///   with flat spaces (` = `) and emits no group of its own; the break is biased
 ///   into the right-hand side, whose own group absorbs it
 ///   (`x = a +⏎ b`, never `x =⏎ a + b`).
+/// - **Short-circuit guards stay attached.** `&&` and `||` join a following
+///   `return`, `break`, or `continue` with a flat space. The condition and any
+///   returned value keep their own groups, so either can wrap independently.
 ///
 /// Only the clean alternating shape is reshaped; anything else (an interleaved
 /// comment, error recovery, a missing operand) falls back to the
@@ -180,13 +183,14 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
     // into, and the arrow keeps the uniform arrow-tier break it shares with
     // `-->`/`<-->` — which is what a grouped non-bracket value
     // (`k => a + b + c`) and a mixed chain (`a => b --> c`) rely on.
-    let rhs_absorbs_break = node.kind() == SyntaxKind::ASSIGNMENT_EXPR
-        || (is_pair_op(op_kind) && pair_chain_hugs(node));
+    let operator_stays_flat = node.kind() == SyntaxKind::ASSIGNMENT_EXPR
+        || (is_pair_op(op_kind) && pair_chain_hugs(node))
+        || is_short_circuit_guard(node, op_kind);
     // Flatten a same-operator nested chain (`a && b && c`, `a |> b |> c`) into one
     // group so every operator breaks together, matching the parser's own n-ary
-    // folding of `+`/`*`. Tight operators and assignment never break, so they gain
-    // nothing from flattening and keep their nested lowering.
-    let flatten = !rhs_absorbs_break && !is_tight_binop(op_kind);
+    // folding of `+`/`*`. Operators with a flat gap gain nothing from flattening
+    // and keep their nested lowering.
+    let flatten = !operator_stays_flat && !is_tight_binop(op_kind);
     let mut items: Vec<SyntaxElement> = Vec::new();
     if !collect_binary_chain(node, op_kind, flatten, &mut items) {
         return lower_transparent(node);
@@ -229,7 +233,7 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
                     return lower_transparent(node);
                 }
                 // An operator. It sits trailing on the line it ends.
-                let tight = !rhs_absorbs_break
+                let tight = !operator_stays_flat
                     && is_tight_binop(tok.kind())
                     // A `.^` after an integer literal would re-lex the operand's
                     // trailing digit(s) plus the operator's leading `.` as a float.
@@ -242,7 +246,7 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
                     next_sep = None;
                 } else {
                     rest.push(Ir::text(format!(" {}", tok.text())));
-                    next_sep = Some(if rhs_absorbs_break {
+                    next_sep = Some(if operator_stays_flat {
                         Ir::text(" ")
                     } else {
                         Ir::Line
@@ -263,9 +267,9 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     }
 
-    if rhs_absorbs_break {
-        // No break at the operator; the right-hand side's own group absorbs any
-        // break, so this node adds neither a group nor an indent.
+    if operator_stays_flat {
+        // Operand groups absorb the breaks without adding a continuation indent
+        // merely because the operator sits between them.
         let mut parts = vec![first];
         parts.extend(rest);
         return Ir::concat(parts);
@@ -299,6 +303,20 @@ fn binary_op_kind(node: &SyntaxNode) -> Option<SyntaxKind> {
     None
 }
 
+fn is_short_circuit_guard(node: &SyntaxNode, op_kind: SyntaxKind) -> bool {
+    matches!(op_kind, SyntaxKind::AND_AND | SyntaxKind::OR_OR)
+        && node.last_child().is_some_and(|rhs| {
+            matches!(
+                rhs.kind(),
+                SyntaxKind::RETURN_EXPR | SyntaxKind::BREAK_EXPR | SyntaxKind::CONTINUE_EXPR
+            )
+        })
+        // Keep commented chains on the same transparent path as other operators.
+        && !node.children_with_tokens().any(|element| {
+            matches!(element.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT)
+        })
+}
+
 /// Append `node`'s operand / operator alternation to `items`, dropping trivia. When
 /// `flatten` is set, an operand child that is itself a `BINARY_EXPR` whose operator
 /// breaks in the same tier as `op_kind` (see [`same_break_tier`]) is descended into
@@ -328,6 +346,9 @@ fn collect_binary_chain(
                 if flatten
                     && child.kind() == SyntaxKind::BINARY_EXPR
                     && binary_op_kind(&child).is_some_and(|k| same_break_tier(k, op_kind))
+                    // A guard's final operator must keep its flat gap even when
+                    // earlier conditions join the enclosing break group.
+                    && !is_short_circuit_guard(&child, op_kind)
                 {
                     if !collect_binary_chain(&child, op_kind, flatten, items) {
                         return false;

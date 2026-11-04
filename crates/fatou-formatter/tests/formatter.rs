@@ -20,8 +20,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fatou_formatter::format;
 use fatou_formatter::verify::{ast_shape, verify_format};
+use fatou_formatter::{FormatStyle, format, format_with_style};
 use fatou_parser::parser::parse;
 
 /// Fixtures whose shape the formatter is known to move, each with the reason.
@@ -71,6 +71,34 @@ fn fixture_dirs() -> Vec<PathBuf> {
 
 fn slug(case: &Path) -> String {
     case.file_name().unwrap().to_string_lossy().to_string()
+}
+
+#[test]
+fn short_circuit_guard_keeps_return_after_multiline_condition() {
+    let input = "\
+function check_header(lines)
+    any(
+        line -> occursin(HEADER_TAG, line),
+        lines[1:min(end, HEADER_SCAN_LINES)],
+    ) && return
+
+    println(\"Header not found\")
+end
+";
+    let style = FormatStyle {
+        line_width: 50,
+        ..FormatStyle::default()
+    };
+    let formatted = format_with_style(input, style).unwrap();
+    assert_eq!(formatted, input);
+    assert_eq!(format_with_style(&formatted, style).unwrap(), formatted);
+    verify_format(input, &formatted).unwrap();
+
+    let flat = "function check_header(lines); any(line -> occursin(HEADER_TAG, line), lines[1:min(end, HEADER_SCAN_LINES)]) && return; println(\"Header not found\"); end";
+    assert_eq!(
+        format_with_style(flat, style).unwrap(),
+        input.replace("\n\n", "\n")
+    );
 }
 
 /// Gate: every fixture with an `expected.jl` must format to it exactly.
