@@ -8,6 +8,29 @@
   --vp-c-brand-2: #839def;
   --vp-c-brand-3: #496bd8;
 }
+.VPHome .VPHero .image-src {
+  width: 360px;
+  height: auto;
+  max-width: calc(100vw - 32px);
+  max-height: none;
+  mask-image: url("/images/hero-mask.svg");
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+}
+@media (min-width: 640px) {
+  .VPHome .VPHero .image-src {
+    width: 480px;
+  }
+}
+@media (min-width: 960px) {
+  .VPHome .VPHero .image-src {
+    width: 640px;
+    max-width: calc(100% + 80px);
+  }
+  .VPHome .VPHero .image-container {
+    transform: none;
+  }
+}
 .bench-data[hidden] {
   display: none;
 }

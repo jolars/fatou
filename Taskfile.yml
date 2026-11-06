@@ -121,6 +121,12 @@ tasks:
     cmds:
       - julia -t auto scripts/generate-logo.jl {{.CLI_ARGS}}
 
+  logo-hero:
+    desc: Generate the borderless landing page fractal
+    cmds:
+      - julia -t auto scripts/generate-logo.jl mode=newton width=1200 height=630 extent=3 whiten=20 border=0 out=docs/src/public/images/logo-hero
+      - magick docs/src/public/images/logo-hero.png -strip -define png:compression-level=9 docs/src/public/images/logo-hero.png
+
   icons:
     desc: Derive the site icons (favicon, apple-touch-icon) from assets/logo.png
     sources:

@@ -15,6 +15,7 @@
 #   julia scripts/generate-logo.jl
 #   julia scripts/generate-logo.jl c=-0.123,0.745 extent=1.45 out=assets/fatou
 #   julia scripts/generate-logo.jl preset=dendrite
+#   julia scripts/generate-logo.jl mode=newton width=1200 height=630 extent=3 border=0
 #
 # Parameters (key=value):
 #   preset    rabbit | sanmarco | dendrite | airplane   (sets c, overridable)
@@ -23,12 +24,14 @@
 #   extent    Float            half-width of the view   (default 1.45)
 #   maxiter   Int              escape iterations        (default 250)
 #   png       Int              PNG size in px           (default 720)
+#   width     Int              newton: PNG width in px  (default png)
+#   height    Int              newton: PNG height in px (default png)
 #   ss        Int              supersampling factor     (default 3)
 #   grid      Int              SVG marching-squares res (default 640)
 #   smooth    Float            simplify: opening radius as fraction of width,
 #                              e.g. 0.02 drops the boundary filigree (default 0)
-#   border    Float            newton: black frame as fraction of width
-#                              (default 0.025 in newton mode, else 0)
+#   border    Float            newton: black frame as fraction of shorter edge
+#                              (default 0.015 in newton mode, else 0)
 #   out       String           output prefix            (default assets/fatou-logo)
 
 # --- Julia brand colors -----------------------------------------------------
@@ -97,10 +100,10 @@ end
     return true
 end
 
-# Map pixel (row i from top, col j) to the complex plane. Row 0 = top = +im.
+# Keep equal scale on both axes so rectangular renders do not stretch the basins.
 @inline function to_complex(i, j, w, h, cx, cy, extent)
     re = cx + ((j - 0.5) / w * 2 - 1) * extent
-    im = cy + (1 - (i - 0.5) / h * 2) * extent
+    im = cy + (1 - (i - 0.5) / h * 2) * extent * (h / w)
     return complex(re, im)
 end
 
@@ -330,15 +333,15 @@ end
     return (0, maxiter) # undecided → Julia set
 end
 
-function render_newton_png(path, cx, cy, extent, maxiter, size, ss, whiten, border)
+function render_newton_png(path, cx, cy, extent, maxiter, width, height, ss, whiten, border)
     roots = (complex(1.0, 0.0), cispi(2 / 3), cispi(4 / 3))
     tol2 = 1.0e-12
-    W = size * ss
-    H = size * ss
+    W = width * ss
+    H = height * ss
     # Accumulate premultiplied RGB so antialiasing blends basin colors cleanly.
-    acc = zeros(Float64, size, size, 3)
-    Threads.@threads for bi in 1:size
-        @inbounds for bj in 1:size
+    acc = zeros(Float64, height, width, 3)
+    Threads.@threads for bi in 1:height
+        @inbounds for bj in 1:width
             r = 0.0
             g = 0.0
             b = 0.0
@@ -368,19 +371,19 @@ function render_newton_png(path, cx, cy, extent, maxiter, size, ss, whiten, bord
             acc[bi, bj, 3] = b
         end
     end
-    img = zeros(UInt8, size, size, 4)
+    img = zeros(UInt8, height, width, 4)
     inv = 1.0 / (ss * ss)
-    @inbounds for bi in 1:size, bj in 1:size
+    @inbounds for bi in 1:height, bj in 1:width
         img[bi, bj, 1] = round(UInt8, acc[bi, bj, 1] * inv)
         img[bi, bj, 2] = round(UInt8, acc[bi, bj, 2] * inv)
         img[bi, bj, 3] = round(UInt8, acc[bi, bj, 3] * inv)
         img[bi, bj, 4] = 0xff
     end
     # Paint an opaque black frame over the perimeter (full-bleed render).
-    bpx = max(0, round(Int, border * size))
+    bpx = max(0, round(Int, border * min(width, height)))
     if bpx > 0
-        @inbounds for bi in 1:size, bj in 1:size
-            if bi <= bpx || bi > size - bpx || bj <= bpx || bj > size - bpx
+        @inbounds for bi in 1:height, bj in 1:width
+            if bi <= bpx || bi > height - bpx || bj <= bpx || bj > width - bpx
                 img[bi, bj, 1] = 0
                 img[bi, bj, 2] = 0
                 img[bi, bj, 3] = 0
@@ -520,6 +523,8 @@ function main(args)
     extent = parse(Float64, getarg(args, "extent", newton ? "1.6" : "1.45"))
     maxiter = parse(Int, getarg(args, "maxiter", newton ? "60" : "250"))
     png = parse(Int, getarg(args, "png", "720"))
+    width = parse(Int, getarg(args, "width", string(png)))
+    height = parse(Int, getarg(args, "height", string(png)))
     ss = parse(Int, getarg(args, "ss", "3"))
     grid = parse(Int, getarg(args, "grid", "640"))
     smooth = parse(Float64, getarg(args, "smooth", "0.0"))
@@ -535,14 +540,15 @@ function main(args)
         println(
             "  view: center=($cx, $cy) extent=$extent maxiter=$maxiter threads=$(Threads.nthreads())",
         )
-        print("  rendering PNG ($(png)×$(png), ss=$ss) … ")
+        print("  rendering PNG ($(width)×$(height), ss=$ss) … ")
         t = @elapsed render_newton_png(
             "$out.png",
             cx,
             cy,
             extent,
             maxiter,
-            png,
+            width,
+            height,
             ss,
             whiten,
             border,

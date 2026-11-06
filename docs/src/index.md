@@ -7,10 +7,10 @@ hero:
   tagline: A formatter, linter, and language server for Julia, written in Rust.
     Keep your code consistent and get feedback as you write, without starting Julia.
   image:
-    src: /images/logo.png
+    src: /images/logo-hero.png
     alt: Fatou logo
-    width: 192
-    height: 192
+    width: 1200
+    height: 630
   actions:
     - theme: brand
       text: Get started
