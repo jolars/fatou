@@ -4,7 +4,7 @@ expression: render_rule_doc(rule.as_ref())
 ---
 ## `const-local`
 
-Flag a `const` declaration inside a local scope — a function or macro body, a `let`, a `for`/`while` body, a `try`, a closure, or a comprehension. `const` is only meaningful at global scope (the file top level and each `module` body); anywhere else the code parses but always fails at lowering with "unsupported `const` declaration on local variable". A `const` field of a mutable struct is a different construct and is left alone, as is a `const` inside quoted code or a macro argument, which may never be lowered as written.
+Report `const` in a local scope, such as a function, `let`, or loop body. Julia allows constant bindings only at global scope: the file's top level or a module body. A `const` field in a mutable struct is allowed.
 
 `const` inside a function body:
 
@@ -23,7 +23,7 @@ error: const-local
   |     ^^^^^^^^^^^^^^^^ `const` declaration on a local variable
 ```
 
-A `let` body is local too — the declaration belongs at top level:
+`const` inside a `let` block:
 
 ```julia
 let

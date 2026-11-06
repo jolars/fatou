@@ -65,25 +65,10 @@ impl Rule for ShadowedBaseName {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a call to a name the file binds to a value while Base or Core \
-         exports it as a function. Julia has one namespace and no \
-         call-position fallback, so the binding masks the Base name \
-         everywhere: after `length = 3`, a later `length(xs)` raises a \
-         `MethodError` for calling an `Int`, and assigning the other way \
-         round fails too once the module has used the Base name. Both a \
-         binding and a call are required — the binding alone is ordinary \
-         Julia. Only bindings that plainly hold a value count. Method, macro, \
-         type, and module definitions of the name are exempt, as is `import \
-         Base: length`; so is a parameter, since passing a function in under \
-         a Base name (`request(stack::Base.Callable, …)`) is the \
-         higher-order idiom rather than an accident, though a `catch` \
-         variable — which holds the thrown exception — still counts. A \
-         binding the source visibly assigns something callable (a lambda, \
-         another builtin under a new name, or any qualified path such as \
-         `exit = t.__exit__`) is exempt too, as is anything defined or called \
-         inside quoted code or a macro call, where a DSL may spell an \
-         attribute `length = 32` without touching Base. No fix: renaming the \
-         binding means rewriting every reference to it."
+        "Report a call to a Base or Core function whose name has been hidden by a value binding. \
+         For example, after `length = 3`, a call to `length(xs)` tries to call the integer.\n\n\
+         The rule requires both a binding and a call. Parameters, imports, function and type \
+         definitions, and assignments of visibly callable values are exempt."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -93,7 +78,7 @@ impl Rule for ShadowedBaseName {
                 source: "length = 3\nn = length(xs)\n",
             },
             Example {
-                caption: "A `catch` variable can mask a builtin just as well:",
+                caption: "A `catch` variable hiding `error`:",
                 source: "try\n    risky()\ncatch error\n    error(\"failed\")\nend\n",
             },
         ]

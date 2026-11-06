@@ -16,16 +16,14 @@ impl Rule for DocstringArgumentMismatch {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a conventional ``- `name`: ...`` entry in a static docstring's \
-         `# Arguments` section when `name` is not a positional or keyword \
-         parameter of the attached function or macro. Missing entries are not \
-         reported: documentation coverage and less structured argument prose \
-         remain opt-in policy rather than a default correctness check."
+        "Report a ``- `name`: ...`` entry under `# Arguments` in a docstring when the attached \
+         function or macro has no parameter with that name. This catches misspelled or outdated \
+         entries. The rule does not require every parameter to be documented."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[Example {
-            caption: "The signature says `radius`, but the argument entry retained a typo:",
+            caption: "A misspelled argument name:",
             source: "\"\"\"\n# Arguments\n- `raduis`: The radius.\n\"\"\"\narea(radius) = pi * radius^2\n",
         }]
     }

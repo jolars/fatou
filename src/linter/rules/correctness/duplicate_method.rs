@@ -96,25 +96,16 @@ impl Rule for DuplicateMethod {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a method definition whose dispatch signature an earlier \
-         definition in the same file already used. Julia holds one method per \
-         signature, so the later definition silently replaces the earlier one \
-         and the earlier body becomes dead. Signatures are compared on what \
-         dispatch actually sees: the positional argument types (an unannotated \
-         argument is `Any`), the `where` specs, and any type arguments the \
-         definition applies to its own name, as a parameterized constructor \
-         does. Argument names, default \
-         values, keyword arguments, and the declared return type are not part \
-         of a method's identity, so definitions differing only in those still \
-         collide. Definitions with different `where` bounds are separate \
-         methods and are not flagged, and neither are definitions inside a \
-         macro call or a conditional branch, where the written signature is \
-         not evidence of what gets defined."
+        "Report a method definition that replaces an earlier method in the same file. Julia \
+         dispatches on positional argument types and `where` constraints. Changing only parameter \
+         names, defaults, keyword arguments, or the return type does not create a separate \
+         method.\n\n\
+         Definitions inside macro calls or conditional branches are not checked."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[Example {
-            caption: "The second definition replaces the first, so `1` is unreachable:",
+            caption: "A method replacing an earlier definition:",
             source: "f(x::Int) = 1\nf(y::Int) = 2\n",
         }]
     }
@@ -168,8 +159,7 @@ impl DuplicateMethod {
                         self.id(),
                         range,
                         format!(
-                            "`{}` is already defined with this signature earlier in this \
-                             file; the later definition replaces the earlier one",
+                            "this definition of `{}` replaces an earlier method with the same signature",
                             display_name(group.owner.as_deref(), &group.name)
                         ),
                     ));

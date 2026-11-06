@@ -6459,13 +6459,10 @@ fn eager_broadcast_flags_every_reducer_over_a_broadcast() {
 }
 
 #[test]
-fn eager_broadcast_names_both_spellings() {
+fn eager_broadcast_suggests_passing_the_function() {
     assert_eq!(
         findings("eager-broadcast", "a = sum(abs.(xs))\n"),
-        [
-            "call `sum(abs, xs)` instead of `sum(abs.(xs))`, which materializes \
-             the broadcast result"
-        ]
+        ["use `sum(abs, xs)` to avoid allocating the broadcast result"]
     );
 }
 
@@ -6544,10 +6541,7 @@ fn eager_broadcast_falls_back_to_a_one_line_message() {
     let src = "a = sum(abs.([\n    1,\n    2,\n]))\n";
     assert_eq!(
         findings("eager-broadcast", src),
-        [
-            "pass the function to `sum` instead of broadcasting it, which \
-             materializes the broadcast result"
-        ]
+        ["pass the function to `sum` to avoid allocating the broadcast result"]
     );
 }
 
@@ -6711,10 +6705,7 @@ fn length_findall_withholds_the_fix_when_count_is_taken() {
 fn fixed_regex_flags_a_metacharacter_free_pattern() {
     assert_eq!(
         findings("fixed-regex", "if occursin(r\"abc\", s)\n    1\nend\n"),
-        [
-            "use the plain string `\"abc\"` instead of the regex `r\"abc\"`, \
-             whose pattern has no metacharacter"
-        ]
+        ["use the string `\"abc\"` for this literal pattern"]
     );
 }
 
@@ -6774,10 +6765,7 @@ fn fixed_regex_flags_the_contains_forms() {
     // `contains` takes the same two values the other way round.
     assert_eq!(
         findings("fixed-regex", "hit = contains(s, r\"abc\")\n"),
-        [
-            "use the plain string `\"abc\"` instead of the regex `r\"abc\"`, \
-             whose pattern has no metacharacter"
-        ]
+        ["use the string `\"abc\"` for this literal pattern"]
     );
     // Its curried form fixes the *needle*, so its lone argument is a pattern.
     let src = "hits = filter(contains(r\"abc\"), lines)\n";

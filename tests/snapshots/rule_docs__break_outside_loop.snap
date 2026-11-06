@@ -4,9 +4,9 @@ expression: render_rule_doc(rule.as_ref())
 ---
 ## `break-outside-loop`
 
-Flag a `break` or `continue` with no enclosing `for` or `while` loop. The code parses but always fails at lowering with "break or continue outside loop" — including inside a closure, do-block, or comprehension body defined within a loop, since `break` cannot cross a function boundary.
+Report `break` or `continue` outside a `for` or `while` loop. Julia rejects these statements, including inside a closure, do block, or comprehension nested in a loop: they cannot jump across a function boundary.
 
-`break` with no loop in sight:
+`break` outside a loop:
 
 ```julia
 function process(x)
@@ -25,7 +25,7 @@ error: break-outside-loop
   |         ^^^^^ `break` outside of a `for` or `while` loop
 ```
 
-A do-block body is an anonymous function, so the outer loop is out of reach:
+A do block cannot continue its enclosing loop:
 
 ```julia
 for i in 1:3

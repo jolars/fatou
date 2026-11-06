@@ -16,17 +16,16 @@ impl Rule for InvalidDocstringCode {
     }
 
     fn description(&self) -> &'static str {
-        "Flag malformed Julia inside a static docstring's explicit Julia-bearing \
-         fence. Ordinary `julia` and Documenter directive bodies are parsed \
-         directly; `julia-repl` and `jldoctest` transcripts parse only their \
-         Julia inputs, not expected output. Plain and foreign-language fences, \
-         opaque docstrings, and docstrings whose Markdown does not parse \
-         cleanly are left alone."
+        "Report syntax errors in Julia code blocks within docstrings. The rule checks `julia` \
+         blocks and Documenter directives. For `julia-repl` and `jldoctest` transcripts, it \
+         checks the input and skips expected output.\n\n\
+         Other languages, dynamically constructed docstrings, and docstrings with malformed \
+         Markdown are not checked."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[Example {
-            caption: "The declared Julia input is incomplete:",
+            caption: "An incomplete Julia code block:",
             source: "\"\"\"\n~~~julia\nf(\n~~~\n\"\"\"\nf() = 1\n",
         }]
     }

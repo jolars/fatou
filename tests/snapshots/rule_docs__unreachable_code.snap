@@ -4,7 +4,9 @@ expression: render_rule_doc(rule.as_ref())
 ---
 ## `unreachable-code`
 
-Flag a statement no path of execution can reach: the tail after an unconditional `return`, `throw`, `error`, or `rethrow`, after an `if`/`else` that diverges in every arm, or after a `while true` with no `break`. The code runs, but the flagged statement never does, so it is either dead weight or a sign that the divergence above it is misplaced. Reachability comes from the file's control-flow graph, so a `for` that may run zero times, an `if` with no `else`, a `catch` clause, and a conditional `a && return` all keep their tails live. No fix is offered: deleting the statement is a judgment call, and keeping it may be the point when the divergence is the bug.
+Report statements that can never run, such as code after an unconditional `return`, `throw`, `error`, or `rethrow`. The rule also catches code after an `if` whose branches all exit, or a `while true` loop with no `break`.
+
+Check whether the unreachable statement should be removed or the preceding control flow should change.
 
 Nothing after an unconditional `return` can run:
 
@@ -23,7 +25,7 @@ warning: unreachable-code
   |     ^^^^^^^^^^^^^^^^ unreachable code: no path of execution reaches this statement
 ```
 
-Both arms diverge, so the tail is dead too:
+An unreachable statement after two branches that return:
 
 ```julia
 function classify(x)

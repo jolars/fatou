@@ -25,16 +25,14 @@ impl Rule for UnexplainedSuppression {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a `# fatou-ignore` directive that states no reason. The `: \
-         <reason>` part is optional, so this rule is **off by default**; select \
-         it in a project that wants every suppression to record why the finding \
-         was accepted. There is no fix: the reason is the part only the author \
-         can supply."
+        "Require a reason in suppression comments: `# fatou-ignore <rule>: <reason>`.\n\n\
+         Disabled by default because reasons are optional. Enable it to require an explanation \
+         for each suppression."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[Example {
-            caption: "A suppression with nothing to say for itself:",
+            caption: "A suppression without a reason:",
             source: "# fatou-ignore unused-binding\nfunction f()\n    handle = open_device()\n    1\nend\n",
         }]
     }

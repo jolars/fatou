@@ -25,9 +25,8 @@ impl Rule for DuplicateArgument {
     }
 
     fn description(&self) -> &'static str {
-        "Flag the same parameter name declared more than once in a single \
-         signature. Julia rejects such a definition outright, so it is always a \
-         mistake. Positional and keyword parameters share one namespace."
+        "Report a repeated parameter name in a function signature. Positional and keyword \
+         parameters share the same namespace, and Julia rejects duplicates."
     }
 
     fn examples(&self) -> &'static [Example] {

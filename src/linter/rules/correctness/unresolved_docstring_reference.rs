@@ -21,18 +21,16 @@ impl Rule for UnresolvedDocstringReference {
     }
 
     fn description(&self) -> &'static str {
-        "Flag an explicit, code-labeled Documenter `@ref` target when project \
-         resolution can prove that no such Julia symbol exists. Local Markdown \
-         anchors are accepted, and inferred references, prose-labeled links, \
-         unknown packages, dynamic definitions, unresolved `using`s, opaque \
-         docstrings, and unsupported target shapes stay silent rather than \
-         risk a false positive. The rule runs by default for workspace package \
-         files. Other files require explicit selection and a resolution context."
+        "Report a Documenter link such as ``[`Foo.bar`](@ref Foo.bar)`` when the target Julia \
+         symbol cannot be found. Local Markdown anchors are accepted. Inferred references, prose \
+         labels, and targets that cannot be resolved reliably are not checked.\n\n\
+         Enabled by default for workspace package files. Other files require explicit selection \
+         and a resolution context."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[Example {
-            caption: "The explicit target retains the same typo as its code label:",
+            caption: "A misspelled reference target:",
             source: "\"\"\"\nSee [`Base.raduis`](@ref Base.raduis).\n\"\"\"\narea(radius) = pi * radius^2\n",
         }]
     }

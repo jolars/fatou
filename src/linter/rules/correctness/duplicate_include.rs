@@ -43,19 +43,16 @@ impl Rule for DuplicateInclude {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a static `include(\"path\")` that pulls in a file an earlier \
-         `include` in the same file already did. Julia has no include guard, so \
-         the repeat evaluates the file a second time, redefining its methods \
-         and re-running its top-level code. Paths are compared after resolution, \
-         so `\"a.jl\"` and `\"./a.jl\"` count as the same file. Including one \
-         file into two different `module` blocks is not flagged — that runs its \
-         definitions into two separate namespaces — and neither is a file \
-         reached twice along different include chains."
+        "Report a file included more than once from the same file and module. Each `include` \
+         evaluates the target again, repeating its top-level code and redefining its methods. \
+         Paths such as `\"a.jl\"` and `\"./a.jl\"` count as the same file.\n\n\
+         Includes in separate modules and files reached through different include chains are \
+         allowed."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[Example {
-            caption: "The same file included twice, so its definitions run again:",
+            caption: "Including the same file twice:",
             source: "include(\"util.jl\")\ninclude(\"util.jl\")\n",
         }]
     }

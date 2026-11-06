@@ -122,25 +122,23 @@ rule's `description()`/`examples()` in `src/linter/rules/` and regenerate. -->
 
 # Lint rules
 
-`fatou lint` runs a set of built-in rules over each file and reports a
-diagnostic for every finding. This page is the catalogue: one section per rule,
-keyed by its stable **rule ID**. That ID is what appears in a diagnostic, what
-`[lint]` `select`/`extend-select`/`ignore` target, what
-`[lint.severity]` re-grades, and what a `# fatou-ignore <id>` comment
-suppresses.
+`fatou lint` reports problems using the rule IDs listed below. Use these IDs
+to select rules, set their severity, or suppress a finding with
+`# fatou-ignore <id>`.
 
-Most rules are on by default. Workspace package files also enable
-project-resolution rules, and declared script programs enable `undefined-name`.
-See [Configuration](configuration.md#lint) for rule selection.
-Other rules that require explicit selection say so in their description.
-An explicit `select` replaces every context's defaults; `extend-select` adds
-rules, and `ignore` disables them.
+Most rules are enabled by default. Workspace package files enable additional
+rules that need project context; declared script programs also enable
+`undefined-name`. Exceptions are noted in each rule's description.
+Use `select` to replace the defaults, `extend-select` to add rules, and `ignore`
+to disable them. See [Configuration](configuration.md#lint) for details.
 
-Where a rewrite is unambiguous a rule carries an **autofix**: a *safe* fix
-(shown below as \"After applying the fix\") is applied by `fatou lint --fix`; an
-*unsafe* fix, one that may change behavior, is applied only with
-`--unsafe-fixes` or as an editor code action, so it has no \"after\" block here.
+`fatou lint --fix` applies safe fixes. Add `--unsafe-fixes` to apply fixes that
+may change behavior. Editors also offer fixes as code actions. The examples
+show the result of safe fixes.
 
-Each example below is linted live to produce its diagnostics and fixed output,
-so this page never drifts from the rules' actual behavior.
+Rules that recommend Base functions generally check that the original name
+resolves to Base. Fixes may be withheld if a replacement name is shadowed or
+the edit would discard comments.
+
+The diagnostics and fixed code below are generated from the examples.
 ";

@@ -29,13 +29,10 @@ impl Rule for NothingComparison {
     }
 
     fn description(&self) -> &'static str {
-        "Flag `x == nothing` / `x != nothing`, which compares against `nothing` \
-         by value. `nothing` is the singleton instance of `Nothing`, so an \
-         identity test (`===` / `!==`, or `isnothing`) is meant: it is faster and \
-         cannot be overloaded. The rule reports a safe fix rewriting `==` to \
-         `===` and `!=` to `!==`. Inside a real `Test.@test` assertion, it \
-         instead prefers `isnothing(x)` or `!isnothing(x)` when that name is \
-         confirmed to mean Base's predicate."
+        "Prefer `===`, `!==`, or `isnothing` when comparing with `nothing`. Identity tests \
+         express the intent directly and cannot be overloaded.\n\n\
+         The safe fix replaces `==` with `===` and `!=` with `!==`. Inside `Test.@test`, it \
+         prefers `isnothing(x)` or `!isnothing(x)` when that name resolves to Base."
     }
 
     fn examples(&self) -> &'static [Example] {

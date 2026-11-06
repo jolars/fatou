@@ -2,31 +2,29 @@
 
 # Lint rules
 
-`fatou lint` runs a set of built-in rules over each file and reports a
-diagnostic for every finding. This page is the catalogue: one section per rule,
-keyed by its stable **rule ID**. That ID is what appears in a diagnostic, what
-`[lint]` `select`/`extend-select`/`ignore` target, what
-`[lint.severity]` re-grades, and what a `# fatou-ignore <id>` comment
-suppresses.
+`fatou lint` reports problems using the rule IDs listed below. Use these IDs
+to select rules, set their severity, or suppress a finding with
+`# fatou-ignore <id>`.
 
-Most rules are on by default. Workspace package files also enable
-project-resolution rules, and declared script programs enable `undefined-name`.
-See [Configuration](configuration.md#lint) for rule selection.
-Other rules that require explicit selection say so in their description.
-An explicit `select` replaces every context's defaults; `extend-select` adds
-rules, and `ignore` disables them.
+Most rules are enabled by default. Workspace package files enable additional
+rules that need project context; declared script programs also enable
+`undefined-name`. Exceptions are noted in each rule's description.
+Use `select` to replace the defaults, `extend-select` to add rules, and `ignore`
+to disable them. See [Configuration](configuration.md#lint) for details.
 
-Where a rewrite is unambiguous a rule carries an **autofix**: a *safe* fix
-(shown below as "After applying the fix") is applied by `fatou lint --fix`; an
-*unsafe* fix, one that may change behavior, is applied only with
-`--unsafe-fixes` or as an editor code action, so it has no "after" block here.
+`fatou lint --fix` applies safe fixes. Add `--unsafe-fixes` to apply fixes that
+may change behavior. Editors also offer fixes as code actions. The examples
+show the result of safe fixes.
 
-Each example below is linted live to produce its diagnostics and fixed output,
-so this page never drifts from the rules' actual behavior.
+Rules that recommend Base functions generally check that the original name
+resolves to Base. Fixes may be withheld if a replacement name is shadowed or
+the edit would discard comments.
+
+The diagnostics and fixed code below are generated from the examples.
 
 ## `unused-binding`
 
-Flag a local variable that is assigned but never read in the same scope. Parameters, loop and `catch` variables, struct fields, type parameters, and top-level definitions are exempt, since those are meaningful even when unread. Names beginning with `_` are skipped, following Julia's throwaway convention.
+Report a local variable that is assigned but never read. Names beginning with `_` are exempt, as are parameters, loop and `catch` variables, struct fields, type parameters, and top-level definitions.
 
 `tmp` is assigned inside `f` but never used:
 
@@ -47,7 +45,9 @@ warning: unused-binding
 
 ## `unused-import`
 
-Flag an explicitly imported name that is never used: `import X`, `import X as Y`, and the colon-item forms `using X: a` / `import X: a`. The whole-module `using X` form is exempt, since it attaches exports that resolve elsewhere. A qualified use (`X.f`) or a re-`export` counts as a use. Uses in the same module's included files also count. Incomplete include contexts withhold findings rather than treating missing uses as proof that an import is unused.
+Report an explicitly imported name that is never used. Qualified references, re-exports, and uses in the same module's included files count as uses.
+
+The rule skips whole-module `using X` statements and withholds findings when an incomplete include chain could hide a use.
 
 `sortperm` is imported but never referenced:
 
@@ -67,7 +67,7 @@ warning: unused-import
 
 ## `duplicate-argument`
 
-Flag the same parameter name declared more than once in a single signature. Julia rejects such a definition outright, so it is always a mistake. Positional and keyword parameters share one namespace.
+Report a repeated parameter name in a function signature. Positional and keyword parameters share the same namespace, and Julia rejects duplicates.
 
 `x` appears twice in the parameter list:
 
@@ -87,7 +87,7 @@ error: duplicate-argument
 
 ## `duplicate-keyword-argument`
 
-Flag the same keyword argument supplied more than once at a call site. Julia rejects such a call at lowering (`keyword argument "a" repeated in call to "h"`), so it parses but cannot run. Keywords before and after the `;` share one namespace, and the `;`-block shorthand `h(; a)` counts as passing `a`. A keyword splat (`h(; kw...)`) names nothing the rule can read, so it neither triggers the finding nor silences it for the keywords written out. Calls inside quoted code or a macro call are exempt, since neither is lowered as written.
+Report a keyword argument passed more than once in a call. Julia rejects duplicate keywords, including those on opposite sides of `;`. The shorthand `f(; x)` counts as passing `x`. Keyword splats are not checked.
 
 `label` is supplied twice in one call:
 
@@ -105,7 +105,9 @@ error: duplicate-keyword-argument
 
 ## `unused-argument`
 
-Flag a function parameter that is never read in its body. Every signature form is covered — long, short (`f(x) = ...`), anonymous, and `do`. All-underscore names (`_`, `__`) follow Julia's throwaway convention and are skipped, and stub methods whose body is a single placeholder expression — a literal (`f(x) = 0`), `nothing`, or an `error(...)`/`throw(...)` call — are exempt. Because methods that dispatch on an argument's type without reading its value are common, this rule is disabled by default; enable it with `--select unused-argument`.
+Report a function parameter that is never read. Names consisting only of underscores and stub methods with a literal, `nothing`, `error(...)`, or `throw(...)` body are exempt.
+
+Disabled by default because methods often use a parameter's type for dispatch without reading its value. Enable it with `--select unused-argument`.
 
 `factor` is accepted but never used:
 
@@ -125,9 +127,13 @@ warning: unused-argument
 
 ## `undefined-name`
 
-Flag an identifier that no resolution tier provides: not a local or a file binding, not a same-module global from included files, not a whole-module `using`'s export, and not a Base/Core name. For standalone programs, declare `[project] entry-points = ["main.jl"]` to enable this rule by default, follow static includes, and resolve ordinary global assignments. An explicit `[lint] select` replaces the defaults, and `ignore = ["undefined-name"]` disables the rule. Each entry point and host module is checked independently; findings name the failing contexts. Dynamic includes, dynamic `eval`, unresolved whole-module `using`s, and broken include closures suppress findings for that entry. Value reads inside macro calls and quoted code remain exempt. Without entry points, standalone files can opt in with `[lint] extend-select = ["undefined-name"]`; files containing includes are skipped. The rule also runs by default for workspace package files.
+Report a name that cannot be found in local bindings, the workspace package, imports, or Base and Core.
 
-`raduis` is a typo; no tier resolves it:
+Enabled by default for workspace package files and programs declared with `[project] entry-points = ["main.jl"]`. Entry points let Fatou follow static includes and resolve global assignments. Each entry point and enclosing module is checked separately; diagnostics identify the contexts where a name is missing.
+
+Dynamic definitions, unresolved imports, or incomplete include chains suppress findings for the affected entry point. Standalone files without entry points can enable the rule with `[lint] extend-select = ["undefined-name"]`, but files containing includes are then skipped.
+
+A misspelled variable name:
 
 ```julia
 function area(radius)
@@ -145,9 +151,9 @@ warning: undefined-name
 
 ## `break-outside-loop`
 
-Flag a `break` or `continue` with no enclosing `for` or `while` loop. The code parses but always fails at lowering with "break or continue outside loop" — including inside a closure, do-block, or comprehension body defined within a loop, since `break` cannot cross a function boundary.
+Report `break` or `continue` outside a `for` or `while` loop. Julia rejects these statements, including inside a closure, do block, or comprehension nested in a loop: they cannot jump across a function boundary.
 
-`break` with no loop in sight:
+`break` outside a loop:
 
 ```julia
 function process(x)
@@ -166,7 +172,7 @@ error: break-outside-loop
   |         ^^^^^ `break` outside of a `for` or `while` loop
 ```
 
-A do-block body is an anonymous function, so the outer loop is out of reach:
+A do block cannot continue its enclosing loop:
 
 ```julia
 for i in 1:3
@@ -186,7 +192,7 @@ error: break-outside-loop
 
 ## `const-local`
 
-Flag a `const` declaration inside a local scope — a function or macro body, a `let`, a `for`/`while` body, a `try`, a closure, or a comprehension. `const` is only meaningful at global scope (the file top level and each `module` body); anywhere else the code parses but always fails at lowering with "unsupported `const` declaration on local variable". A `const` field of a mutable struct is a different construct and is left alone, as is a `const` inside quoted code or a macro argument, which may never be lowered as written.
+Report `const` in a local scope, such as a function, `let`, or loop body. Julia allows constant bindings only at global scope: the file's top level or a module body. A `const` field in a mutable struct is allowed.
 
 `const` inside a function body:
 
@@ -205,7 +211,7 @@ error: const-local
   |     ^^^^^^^^^^^^^^^^ `const` declaration on a local variable
 ```
 
-A `let` body is local too — the declaration belongs at top level:
+`const` inside a `let` block:
 
 ```julia
 let
@@ -224,7 +230,7 @@ error: const-local
 
 ## `global-const-in-function`
 
-Flag a `global const` declaration inside a function — a `function` or `macro` body, a short-form definition, a closure, a do block, or a comprehension. Julia allows `global const` at global scope and in a soft local scope such as a `let`, a loop body, or a `try`, but inside a function the code parses and then always fails at lowering with "`global const` declaration not allowed inside function". A soft scope nested inside a function does not help. Both spellings of the modifier are flagged, and a declaration inside quoted code or a macro argument is left alone, since it may never be lowered as written. An unmodified `const` in a local scope is `const-local`'s finding.
+Report `global const` inside a function, macro, closure, do block, or comprehension. Julia rejects these declarations even inside a nested `let` or loop. Move the declaration outside the function.
 
 `global const` inside a function body:
 
@@ -242,7 +248,7 @@ error: global-const-in-function
   |     ^^^^^^^^^^^^^^^^^^^^^^^ `global const` declaration inside a function
 ```
 
-A nested soft scope does not rescue it — the enclosing function still owns the declaration:
+`global const` inside a loop within a function:
 
 ```julia
 function setup()
@@ -262,7 +268,7 @@ error: global-const-in-function
 
 ## `local-const`
 
-Flag a `const` declaration carrying a `local` modifier, in either order. Julia has no `local const` construct: the code parses but always fails at lowering with "expected assignment after `const`", everywhere — the file top level, a `module` or `struct` body, a loop or `let`, and inside a function alike. Write `local z = 1` for a local binding or `const z = 1` for a constant. A declaration inside quoted code or a macro argument is left alone, since it may never be lowered as written.
+Report `local const` or `const local`, which Julia rejects in every scope. Use `local x = 1` for a local binding or `const x = 1` for a global constant.
 
 `local` and `const` cannot be combined:
 
@@ -278,7 +284,7 @@ error: local-const
   | ^^^^^^^^^^^^^^^^^^^^^^ `local const` declaration is not supported
 ```
 
-The other order is the same construct, and a function body is no different from the top level:
+`const local` inside a function:
 
 ```julia
 function scale(x)
@@ -297,9 +303,9 @@ error: local-const
 
 ## `noteq-definition`
 
-Flag a method definition for `!=` (or `≠`). Julia defines `!=` as `const != = !(==)`, so it is not meant to be overloaded: define `==` instead, and `!=` follows automatically.
+Report a method definition for `!=` or `≠`. Define `==` instead: Julia derives `!=` by negating `==`.
 
-Defining `!=` where `==` should carry the method:
+Overloading `!=` directly:
 
 ```julia
 !=(a::Grade, b::Grade) = a.score != b.score
@@ -315,7 +321,9 @@ warning: noteq-definition
 
 ## `unused-type-parameter`
 
-Flag a `where` clause type parameter that is never used in the signature or body, covering bare (`where T`), braced (`where {T, S}`), bounded (`where {T<:Number}`), and chained (`where T where S`) clauses. An unread parameter is usually a refactoring leftover or a forgotten `::T` annotation. Struct type parameters are exempt (phantom parameters like `struct Unit{T} end` are idiomatic), as are all-underscore names.
+Report a `where` type parameter that is never used in the signature or body. This often indicates a missing type annotation or a leftover parameter.
+
+Struct type parameters and names consisting only of underscores are exempt.
 
 `T` is bound but never referenced:
 
@@ -335,7 +343,9 @@ warning: unused-type-parameter
 
 ## `missing-include-file`
 
-Flag a static `include("path")` whose target is missing or unreadable (relative paths resolve against the including file's directory). Missing files throw a `SystemError` at runtime. Only statically resolvable includes are checked: dynamic (`include(f)`), interpolated (`include("$dir/a.jl")`), qualified (`M.include(...)`), and two-argument forms cannot be resolved without running the code and are never flagged.
+Report an `include("path")` whose target is missing or unreadable. Relative paths resolve from the including file's directory.
+
+The rule checks only static paths. It skips computed or interpolated paths, qualified calls such as `M.include(...)`, and two-argument forms.
 
 Including a file that does not exist:
 
@@ -353,7 +363,7 @@ error: missing-include-file
 
 ## `include-cycle`
 
-Flag a static `include("path")` whose target transitively `include`s this file again — including a file that includes itself. Running such a file recurses without end. Every linted file on the cycle is flagged at its own `include` call; a file merely included twice along different paths (a diamond) is not a cycle.
+Report an `include` that leads back to the current file, directly or through other files. Running it causes unbounded recursion. Each linted file in the cycle gets a diagnostic at its own `include` call.
 
 A file (here `example.jl`) that includes itself:
 
@@ -371,9 +381,11 @@ warning: include-cycle
 
 ## `duplicate-include`
 
-Flag a static `include("path")` that pulls in a file an earlier `include` in the same file already did. Julia has no include guard, so the repeat evaluates the file a second time, redefining its methods and re-running its top-level code. Paths are compared after resolution, so `"a.jl"` and `"./a.jl"` count as the same file. Including one file into two different `module` blocks is not flagged — that runs its definitions into two separate namespaces — and neither is a file reached twice along different include chains.
+Report a file included more than once from the same file and module. Each `include` evaluates the target again, repeating its top-level code and redefining its methods. Paths such as `"a.jl"` and `"./a.jl"` count as the same file.
 
-The same file included twice, so its definitions run again:
+Includes in separate modules and files reached through different include chains are allowed.
+
+Including the same file twice:
 
 ```julia
 include("util.jl")
@@ -390,9 +402,11 @@ warning: duplicate-include
 
 ## `duplicate-method`
 
-Flag a method definition whose dispatch signature an earlier definition in the same file already used. Julia holds one method per signature, so the later definition silently replaces the earlier one and the earlier body becomes dead. Signatures are compared on what dispatch actually sees: the positional argument types (an unannotated argument is `Any`), the `where` specs, and any type arguments the definition applies to its own name, as a parameterized constructor does. Argument names, default values, keyword arguments, and the declared return type are not part of a method's identity, so definitions differing only in those still collide. Definitions with different `where` bounds are separate methods and are not flagged, and neither are definitions inside a macro call or a conditional branch, where the written signature is not evidence of what gets defined.
+Report a method definition that replaces an earlier method in the same file. Julia dispatches on positional argument types and `where` constraints. Changing only parameter names, defaults, keyword arguments, or the return type does not create a separate method.
 
-The second definition replaces the first, so `1` is unreachable:
+Definitions inside macro calls or conditional branches are not checked.
+
+A method replacing an earlier definition:
 
 ```julia
 f(x::Int) = 1
@@ -404,12 +418,14 @@ warning: duplicate-method
  --> example.jl:2:1
   |
 2 | f(y::Int) = 2
-  | ^ `f` is already defined with this signature earlier in this file; the later definition replaces the earlier one
+  | ^ this definition of `f` replaces an earlier method with the same signature
 ```
 
 ## `julia-version-compat`
 
-Flag syntax newer than the project's declared Julia support range. Fatou parses the full superset of Julia syntax, so a construct from a newer release parses cleanly even when the project targets an older version; this rule reports when a supported version predates the construct (e.g. `public` needs 1.11, `import ... as` needs 1.6). The target range is taken from `--julia-version`, `[julia] version`, or the project's `Project.toml` `[compat]` / `Manifest.toml`; with no target known the rule stays silent.
+Report syntax unavailable in a Julia version the project supports. For example, `public` requires Julia 1.11, and `import ... as` requires 1.6.
+
+The target comes from `--julia-version`, `[julia] version`, or the project's `Project.toml` or `Manifest.toml`. The rule does nothing when no target is known.
 
 Targeting Julia 1.0, but `public` needs 1.11 and `as` needs 1.6:
 
@@ -435,7 +451,11 @@ error: julia-version-compat
 
 ## `call-arity`
 
-Flag a call that no visible method of the function accepts: a positional count outside every method's range, or a keyword argument no positionally-matching method declares. Such a call raises `MethodError` at runtime. The method table unions every tier name resolution sees — the file's own definitions, the workspace package, and the harvested library, qualified extensions included — so an unknown method always silences the check rather than triggering it. Calls that splat arguments, carry `do` blocks, sit in macro calls or quoted code, or target constructors and callable values are exempt, and files that use dynamic `eval` or `include` outside a known workspace are skipped entirely. The rule runs by default for workspace package files. Other files require explicit selection because they may be fragments whose siblings add methods.
+Report a call when no known method accepts its number of positional arguments or its keyword names. Such calls raise `MethodError`.
+
+Fatou checks methods in the file, workspace package, and indexed libraries. It skips calls when the available methods or arguments are uncertain, including splatted calls, do blocks, constructors, and callable values.
+
+Enabled by default for workspace package files. Other files require explicit selection because methods may be defined in sibling files.
 
 `half` has no two-argument method:
 
@@ -455,7 +475,11 @@ warning: call-arity
 
 ## `function-has-no-methods`
 
-Flag a call to a function whose every visible definition is a bodyless `function f end` declaration. Such a function has an empty method table, so the call raises `MethodError` whatever it passes. Only a name the closed world defines is checked — one belonging to this file or to the enclosing workspace package — since the owner of a `using`'d or Base/Core name may add methods elsewhere. A declaration the package `export`s or declares `public` is exempt as an interface hook for a package extension or a downstream package to implement, as is a name that also names a type. The file is skipped entirely when it uses dynamic `eval`, `include`s outside a known workspace, or `using`s a module the library cannot resolve, and call sites in macro calls or quoted code are exempt. The rule runs by default for workspace package files. Other files require explicit selection because their siblings may define the methods.
+Report a call to a function declared with `function f end` but given no methods. The call raises `MethodError` regardless of its arguments.
+
+Fatou checks functions defined in the file or workspace package. Exported and `public` declarations are exempt because other packages may implement them. The rule skips files whose definitions cannot be resolved reliably.
+
+Enabled by default for workspace package files. Other files require explicit selection because sibling files may add methods.
 
 `normalize` is declared but never given a method:
 
@@ -470,14 +494,16 @@ warning: function-has-no-methods
  --> example.jl:3:1
   |
 3 | normalize("data")
-  | ^^^^^^^^^ `normalize` has no methods: every definition is a bodyless `function normalize end`
+  | ^^^^^^^^^ `normalize` is declared with `function normalize end` but has no methods
 ```
 
 ## `redefined-constant`
 
-Flag a write that redefines a constant name, or defines over a name that already holds a value: reassigning a `const` binding, assigning to a global function, type, or module name (those bind implicit constants), defining a function over a plain value, or declaring a value `const` after the fact. All of these error at runtime when both sites execute. A definition and a write in disjoint branches of the same `if` are exempt — only one branch runs. Adding a method to a function and defining an outer constructor on a type are legal and stay silent. No fix: the rule cannot know which of the two definitions the author meant to keep.
+Report conflicting definitions of a name: reassigning a constant, assigning to a function, type, or module name, defining a function over a value, or declaring an existing variable `const`.
 
-Reassigning a `const` binding errors at runtime:
+Definitions in separate branches of the same `if` are allowed, as are new methods and outer constructors.
+
+Reassigning a constant:
 
 ```julia
 const threshold = 1.0
@@ -509,7 +535,9 @@ warning: redefined-constant
 
 ## `type-piracy`
 
-Flag a method definition that extends a function the current module does not own, using only argument types it does not own either ("type piracy"). Because Julia dispatches on one global method table, such a method silently changes behavior for every other user of those types the moment the module loads. A definition is fine as long as it owns the function or at least one argument type (a type parameter or `where` bound counts). The rule is sound-first: it flags only when it can prove the function and every readable argument type are foreign, withholding on anything unknown, and it skips the whole file when a whole-module `using` cannot be resolved. Off by default. Without a harvested library, ownership checks use only the built-in Base/Core snapshot.
+Report a method that extends another module's function using only types defined elsewhere. This is type piracy: loading the method can change behavior for unrelated code that uses the same function and types. Define the function or at least one argument type in your module.
+
+Disabled by default. Fatou reports only cases where ownership is known. Without indexed libraries, it checks ownership against the built-in Base and Core snapshot.
 
 Extending `Base.show` for only Base types is piracy:
 
@@ -522,12 +550,14 @@ warning: type-piracy
  --> example.jl:1:6
   |
 1 | Base.show(io::IO, x::Int) = print(io, x)
-  |      ^^^^ `Base.show` commits type piracy: it extends a function this module does not own, and no argument type is owned here either
+  |      ^^^^ type piracy: this module defines neither `Base.show` nor any of its argument types
 ```
 
 ## `unreachable-code`
 
-Flag a statement no path of execution can reach: the tail after an unconditional `return`, `throw`, `error`, or `rethrow`, after an `if`/`else` that diverges in every arm, or after a `while true` with no `break`. The code runs, but the flagged statement never does, so it is either dead weight or a sign that the divergence above it is misplaced. Reachability comes from the file's control-flow graph, so a `for` that may run zero times, an `if` with no `else`, a `catch` clause, and a conditional `a && return` all keep their tails live. No fix is offered: deleting the statement is a judgment call, and keeping it may be the point when the divergence is the bug.
+Report statements that can never run, such as code after an unconditional `return`, `throw`, `error`, or `rethrow`. The rule also catches code after an `if` whose branches all exit, or a `while true` loop with no `break`.
+
+Check whether the unreachable statement should be removed or the preceding control flow should change.
 
 Nothing after an unconditional `return` can run:
 
@@ -546,7 +576,7 @@ warning: unreachable-code
   |     ^^^^^^^^^^^^^^^^ unreachable code: no path of execution reaches this statement
 ```
 
-Both arms diverge, so the tail is dead too:
+An unreachable statement after two branches that return:
 
 ```julia
 function classify(x)
@@ -569,7 +599,11 @@ warning: unreachable-code
 
 ## `unresolved-import`
 
-Flag a `using`/`import` of a module the enclosing project cannot load: a name that is neither in its `Project.toml` `[deps]` nor provided by the harvested environment (the standard library included). Julia resolves a bare `using Foo` against the active project, so an undeclared name raises `ArgumentError: Package Foo not found in current path` when the module loads. Relative paths (`using .Sub`), interpolated paths, and loads inside quoted code or macro calls are exempt, and a name the harvest resolved is always accepted — so a transitive dependency goes unreported rather than risking a false positive. The rule runs by default for workspace package files, which carry the required project context.
+Report a `using` or `import` of a package absent from both the project's `[deps]` and the indexed environment. Julia may fail to load the package.
+
+Relative imports such as `using .Sub` are allowed. Packages found in the environment, including standard libraries and transitive dependencies, are also accepted.
+
+Enabled by default for workspace package files, where project dependencies are known.
 
 The project declares `LinearAlgebra` in `[deps]`, but not `Frobnicate`:
 
@@ -588,7 +622,9 @@ warning: unresolved-import
 
 ## `kwarg-default-mismatch`
 
-Flag a keyword parameter whose literal default cannot be an instance of its declared type, as in `g(; y::Int = 1.0)`. A keyword's `::T` is not an implicit `convert`: Julia lowers it into a dispatch constraint on the inner method the default is passed to, so `g()` raises a `MethodError` every time. The check is exact, like dispatch itself — `y::Float64 = 1` and `y::Int8 = 1` are mismatches too — and fires only when both sides are certain: a bare, concrete `Core` type that resolves to Base, and a default whose own spelling pins its type down. Abstract and parametric annotations (`Real`, `Vector{Int}`), computed defaults, and the literals whose type follows their digit count (`0x01`) are all left alone.
+Report a keyword parameter whose default has the wrong type, such as `f(; x::Int = 1.0)`. Julia does not convert keyword defaults to the declared type, so calling `f()` raises `MethodError`. Defaults such as `x::Int8 = 1` also fail because `1` has type `Int`.
+
+The rule checks concrete built-in types and literals with known types. It skips abstract or parametric types and computed defaults.
 
 `y` is declared `Int`, so the `Float64` default never matches it:
 
@@ -604,10 +640,10 @@ error: kwarg-default-mismatch
   |
 1 | function scale(xs; y::Int = 1.0)
   |                    ^^^^^^^^^^^^ keyword argument `y` is declared `::Int`, but its default `1.0` has type `Float64`
-  = help: a keyword's `::T` is a dispatch constraint, not a `convert`, so the default raises a `MethodError`
+  = help: use a default of the declared type; Julia does not convert keyword defaults
 ```
 
-Julia does not promote here either — the default has to be an `Int8` already:
+An `Int` default for an `Int8` parameter:
 
 ```julia
 counter(; start::Int8 = 0) = start
@@ -619,12 +655,16 @@ error: kwarg-default-mismatch
   |
 1 | counter(; start::Int8 = 0) = start
   |           ^^^^^^^^^^^^^^^ keyword argument `start` is declared `::Int8`, but its default `0` has type `Int`
-  = help: a keyword's `::T` is a dispatch constraint, not a `convert`, so the default raises a `MethodError`
+  = help: use a default of the declared type; Julia does not convert keyword defaults
 ```
 
 ## `invalid-type-declaration`
 
-Flag a `::` type declaration whose declared type is a function. The right side of a `::` must be a type, and Julia checks it eagerly: `f(x::g)` for a generic function `g` raises a `TypeError` when the method is defined, and a value-position `x::g` raises one as soon as it runs. The rule is deliberately partial, since only a closed answer about a name is trustworthy: it fires for a function defined in this file and for a top-level function of the enclosing workspace package, and stays silent for a Base/Core name (the export snapshot records no kinds), an imported name, and any binding that could hold a type such as a variable or a `const` alias. A same-named type, `const`, or module anywhere in the file or the package withholds the finding, so an outer constructor (`Foo(x::Int) = …`, which binds `Foo` as a function too) is never flagged. The file is skipped entirely when it `eval`s, `include`s outside a known workspace, or `using`s a module the library cannot resolve, and annotations inside a macro call or quoted code are exempt. The rule runs by default for workspace package files. Other files require explicit selection and a resolution context.
+Report a function name used as a type in `::`, such as `f(x::g)` when `g` is a function. Julia raises `TypeError` when it evaluates the declaration.
+
+Fatou checks functions defined in the file or workspace package. It skips names that might refer to types and files whose definitions cannot be resolved reliably.
+
+Enabled by default for workspace package files. Other files require explicit selection and a resolution context.
 
 `scale` is a function, so declaring `y::scale` is a `TypeError`:
 
@@ -639,14 +679,16 @@ warning: invalid-type-declaration
  --> example.jl:3:10
   |
 3 | apply(y::scale) = y
-  |          ^^^^^ `scale` is a function, not a type: `::scale` is not a valid type declaration
+  |          ^^^^^ `scale` is a function and cannot be used as a type in `::scale`
 ```
 
 ## `invalid-docstring-code`
 
-Flag malformed Julia inside a static docstring's explicit Julia-bearing fence. Ordinary `julia` and Documenter directive bodies are parsed directly; `julia-repl` and `jldoctest` transcripts parse only their Julia inputs, not expected output. Plain and foreign-language fences, opaque docstrings, and docstrings whose Markdown does not parse cleanly are left alone.
+Report syntax errors in Julia code blocks within docstrings. The rule checks `julia` blocks and Documenter directives. For `julia-repl` and `jldoctest` transcripts, it checks the input and skips expected output.
 
-The declared Julia input is incomplete:
+Other languages, dynamically constructed docstrings, and docstrings with malformed Markdown are not checked.
+
+An incomplete Julia code block:
 
 ```julia
 """
@@ -667,9 +709,9 @@ warning: invalid-docstring-code
 
 ## `docstring-argument-mismatch`
 
-Flag a conventional ``- `name`: ...`` entry in a static docstring's `# Arguments` section when `name` is not a positional or keyword parameter of the attached function or macro. Missing entries are not reported: documentation coverage and less structured argument prose remain opt-in policy rather than a default correctness check.
+Report a ``- `name`: ...`` entry under `# Arguments` in a docstring when the attached function or macro has no parameter with that name. This catches misspelled or outdated entries. The rule does not require every parameter to be documented.
 
-The signature says `radius`, but the argument entry retained a typo:
+A misspelled argument name:
 
 ```julia
 """
@@ -689,9 +731,11 @@ warning: docstring-argument-mismatch
 
 ## `unresolved-docstring-reference`
 
-Flag an explicit, code-labeled Documenter `@ref` target when project resolution can prove that no such Julia symbol exists. Local Markdown anchors are accepted, and inferred references, prose-labeled links, unknown packages, dynamic definitions, unresolved `using`s, opaque docstrings, and unsupported target shapes stay silent rather than risk a false positive. The rule runs by default for workspace package files. Other files require explicit selection and a resolution context.
+Report a Documenter link such as ``[`Foo.bar`](@ref Foo.bar)`` when the target Julia symbol cannot be found. Local Markdown anchors are accepted. Inferred references, prose labels, and targets that cannot be resolved reliably are not checked.
 
-The explicit target retains the same typo as its code label:
+Enabled by default for workspace package files. Other files require explicit selection and a resolution context.
+
+A misspelled reference target:
 
 ```julia
 """
@@ -710,7 +754,7 @@ warning: unresolved-docstring-reference
 
 ## `assignment-in-condition`
 
-Flag a bare `=` assignment used as the test of an `if`/`elseif`/`while`. It is valid Julia but almost always a typo for `==`, so it is reported with a safe fix that rewrites `=` to `==`.
+Report a bare assignment used as an `if`, `elseif`, or `while` condition. This is usually a typo for `==`. The safe fix replaces `=` with `==`.
 
 `=` where `==` was meant:
 
@@ -739,7 +783,9 @@ end
 
 ## `nothing-comparison`
 
-Flag `x == nothing` / `x != nothing`, which compares against `nothing` by value. `nothing` is the singleton instance of `Nothing`, so an identity test (`===` / `!==`, or `isnothing`) is meant: it is faster and cannot be overloaded. The rule reports a safe fix rewriting `==` to `===` and `!=` to `!==`. Inside a real `Test.@test` assertion, it instead prefers `isnothing(x)` or `!isnothing(x)` when that name is confirmed to mean Base's predicate.
+Prefer `===`, `!==`, or `isnothing` when comparing with `nothing`. Identity tests express the intent directly and cannot be overloaded.
+
+The safe fix replaces `==` with `===` and `!=` with `!==`. Inside `Test.@test`, it prefers `isnothing(x)` or `!isnothing(x)` when that name resolves to Base.
 
 Comparing against `nothing` by value:
 
@@ -768,7 +814,9 @@ end
 
 ## `missing-comparison`
 
-Flag `x == missing` / `x != missing`. `missing` propagates through `==`, so the comparison is always `missing` no matter what `x` is, and using it as a condition raises a `TypeError`. Use `ismissing` (or the identity test `===` / `!==`) instead. The rule reports an unsafe fix rewriting `==` to `===` and `!=` to `!==`: the rewrite turns a `missing` result into a `Bool`, which is the intent but is still a change in behavior.
+Report `==` or `!=` comparisons with `missing`. These return `missing`, and using the result as a condition raises `TypeError`. Use `ismissing`, `===`, or `!==` instead.
+
+The fix replaces the value comparison with an identity test. It requires `--unsafe-fixes` because it changes the result to a `Bool`.
 
 Comparing against `missing` by value:
 
@@ -789,9 +837,9 @@ warning: missing-comparison
 
 ## `constant-condition`
 
-Flag a `true`/`false` literal used as an `if`/`elseif`/`while` test or as an operand of the short-circuit `&&`/`||`. The branch or short-circuit is decided before the code runs, so the literal is usually leftover debugging or a mistyped name. `while true` is exempt as Julia's idiomatic infinite loop. No fix: removing the constant means restructuring the branch.
+Report `true` or `false` used as a condition or as an operand of `&&` or `||`. These constants often come from debugging code or a mistyped name. The rule allows `while true`, the usual way to write an infinite loop.
 
-A literal `if` test always takes the branch:
+An `if` condition that is always true:
 
 ```julia
 if true
@@ -807,7 +855,7 @@ warning: constant-condition
   |    ^^^^ this condition is always `true`
 ```
 
-A literal operand decides `&&` at parse time:
+A constant that prevents `check(x)` from running:
 
 ```julia
 ok = false && check(x)
@@ -823,7 +871,7 @@ warning: constant-condition
 
 ## `module-shadows-parent`
 
-Flag a nested `module` with the same name as its direct parent module. A module binds its own name inside itself, so the child rebinds that self-reference: `A` in the parent body then refers to the child, and qualified names like `A.x` resolve against the wrong module. The usual cause is a file `include`d into the module it already defines. No fix: renaming a module means updating every reference to it.
+Report a nested module with the same name as its parent. The child hides the parent's reference to itself, so qualified names such as `A.x` may resolve against the wrong module. This often happens when a file is included inside the module it already defines.
 
 A submodule shadowing the module that contains it:
 
@@ -846,7 +894,9 @@ warning: module-shadows-parent
 
 ## `loop-variable-shadow`
 
-Flag a `for` loop whose index variable is already an enclosing `for` loop's index. The nested `for` binds a fresh variable, so the outer index is unreachable inside it — usually a copy-pasted inner loop whose index was never renamed. Assignments to loop variables are allowed, since normalization and other updates within an iteration are valid. Comprehension and generator clauses are left alone, as is reuse across a function body, a closure, or a `do` block. No fix: renaming an index requires choosing the intended binding.
+Report an inner `for` loop that reuses an enclosing loop's index name. The inner loop creates a new binding and hides the outer index, often because a copied loop was not renamed.
+
+Assignments to loop variables are allowed. Comprehensions, generators, and reuse across function boundaries are not checked.
 
 A nested loop reusing the enclosing loop's index:
 
@@ -868,7 +918,9 @@ warning: loop-variable-shadow
 
 ## `index-from-length`
 
-Flag two suspect `for`-loop iteration specs. First, `for i in 1:length(x)` (or `1:size(x, d)`) where the loop variable then indexes `x`: prefer `eachindex(x)` (or `axes(x, d)`), which stays correct for collections whose indices are not one-based. The match is name-based — any `length`/`size` call counts — and, lacking type information to exempt collections that really are one-based like `Vector`, the rule is opinionated, so it only fires when the loop variable actually indexes the collection. The first shape carries an unsafe fix rewriting the `1:length`/`1:size` prefix to `eachindex`/`axes`: the rewrite is only value-equivalent when the collection's indices are one-based and dense, which cannot be proven without type information, so it needs `--unsafe-fixes`. Second, `for i in 3.5`: iterating a bare numeric literal runs the loop body once and is almost always a mistaken range; no fix, since the intended range is unknowable.
+Prefer `eachindex(x)` to `1:length(x)` when a loop variable indexes `x`, or `axes(x, d)` to `1:size(x, d)`. These handle collections whose indices do not start at one. The fix requires `--unsafe-fixes` because changing the indices can change behavior.
+
+The rule also reports iteration over a numeric literal, such as `for i in 3.5`. Julia runs that loop once, which usually indicates a missing range.
 
 `1:length(x)` used to index `x`:
 
@@ -905,15 +957,11 @@ warning: index-from-length
 
 ## `discouraged-function`
 
-Flag a call to a function on a configurable deny-list. The built-in set covers Base functions with process-wide or memory-unsafe effects — `exit`, `cd`, `redirect_stdout`, `redirect_stderr`, and the `unsafe_*`/pointer conversions — each reported with the alternative to reach for.
+Report calls to functions with process-wide or unsafe effects. Defaults include `exit`, `cd`, stream redirection, and unsafe memory operations. Each diagnostic suggests an alternative. Callback forms of `cd` and stream redirection are allowed because they restore the previous state.
 
-Configure it under `[lint.rules.discouraged-function]`: `functions` replaces the built-in set, `extend-functions` adds to it (an entry there also rewords a built-in), and `functions = {}` silences the rule without ignoring it. Both are tables mapping a function name to the suggestion shown in the diagnostic.
+Configure `[lint.rules.discouraged-function]` with tables mapping function names to suggestions. `functions` replaces the defaults, `extend-functions` adds or overrides entries, and `functions = {}` clears the list. Qualified calls such as `Base.exit` are not checked.
 
-A call carrying a `do` block is never reported, since for `cd` and the `redirect_*` functions that form is the recommended alternative. Two-argument calls to `cd`, `redirect_stdout`, and `redirect_stderr` are also allowed: they pass the callback explicitly and restore the previous state. Calls to these three functions with positional splats are skipped because the overload cannot be determined.
-
-A qualified callee (`Base.exit`) is a different name and does not match. A built-in name is only reported once it is confirmed to be Base's, so a local of the same name — or a file whose imports cannot be resolved — reports nothing; a name the project configured is reported unless a definition in the same file shadows it. No fix is offered, since the rewrite is a judgment call.
-
-`exit` ends the process and `cd` leaves the working directory changed:
+`cd` changes the working directory, and `exit` ends the process:
 
 ```julia
 function cleanup()
@@ -937,11 +985,9 @@ warning: discouraged-function
 
 ## `typeof-comparison`
 
-Flag `typeof(x) == T` / `typeof(x) != T` (in either operand order), which tests for the *exact* type and so answers `false` for every subtype of `T` — `typeof(x) == Integer` is `false` for every integer, since `typeof` returns the concrete `Int64`. Use `x isa T`, the subtype test.
+Prefer `x isa T` to `typeof(x) == T` when testing whether a value belongs to a type. Exact comparisons exclude subtypes: `typeof(1) == Integer` is `false`, but `1 isa Integer` is `true`.
 
-The already-correct `===` / `!==`, the broadcast `.==` / `.!=`, and a comparison chain are left alone, as is `typeof(a) == typeof(b)`, which compares two runtime types and has no `isa` spelling. The callee must be confirmed to be Base's `typeof`, so a local shadow, a qualified `Base.typeof`, or a file whose imports cannot be resolved reports nothing.
-
-The rule reports an unsafe fix rewriting the comparison to `x isa T` (`!(x isa T)` for `!=`): widening the exact-type test to the subtype tree is the intent, but it is still a change in behavior, and a caller may genuinely want exact-type identity. The fix is withheld — the finding still stands — when a comment sits inside the rewritten span, or when `typeof`'s argument binds more loosely than `isa` and so cannot be spliced in without parentheses.
+The rule skips identity comparisons, broadcast comparisons, chains, and comparisons between two `typeof` calls. The fix requires `--unsafe-fixes` because accepting subtypes changes behavior.
 
 `typeof(x) == Integer` is `false` for every integer:
 
@@ -962,7 +1008,9 @@ warning: typeof-comparison
 
 ## `shadowed-base-name`
 
-Flag a call to a name the file binds to a value while Base or Core exports it as a function. Julia has one namespace and no call-position fallback, so the binding masks the Base name everywhere: after `length = 3`, a later `length(xs)` raises a `MethodError` for calling an `Int`, and assigning the other way round fails too once the module has used the Base name. Both a binding and a call are required — the binding alone is ordinary Julia. Only bindings that plainly hold a value count. Method, macro, type, and module definitions of the name are exempt, as is `import Base: length`; so is a parameter, since passing a function in under a Base name (`request(stack::Base.Callable, …)`) is the higher-order idiom rather than an accident, though a `catch` variable — which holds the thrown exception — still counts. A binding the source visibly assigns something callable (a lambda, another builtin under a new name, or any qualified path such as `exit = t.__exit__`) is exempt too, as is anything defined or called inside quoted code or a macro call, where a DSL may spell an attribute `length = 32` without touching Base. No fix: renaming the binding means rewriting every reference to it.
+Report a call to a Base or Core function whose name has been hidden by a value binding. For example, after `length = 3`, a call to `length(xs)` tries to call the integer.
+
+The rule requires both a binding and a call. Parameters, imports, function and type definitions, and assignments of visibly callable values are exempt.
 
 The assignment masks Base's `length`, so the call fails:
 
@@ -979,7 +1027,7 @@ warning: shadowed-base-name
   |     ^^^^^^ `length` here is this file's own binding, not Base's `length`
 ```
 
-A `catch` variable can mask a builtin just as well:
+A `catch` variable hiding `error`:
 
 ```julia
 try
@@ -999,7 +1047,11 @@ warning: shadowed-base-name
 
 ## `non-public-access`
 
-Flag a qualified read of a name the target module neither `export`s nor declares `public`. Those two statements are how a Julia module says what its API is — `public` (1.11) declares intent without attaching the name to a `using` — so everything else is internal and free to change in a patch release. Only a qualifier that really names a module is checked: a local, a parameter, a name an item list bound (`import Foo: Bar`), and any plain field access are values, not modules. Two kinds of module are left alone: one that declares no public API at all, whose whole surface is reached qualified by design, and one that re-exports with `Reexport.jl`, whose `@reexport using Bar` is a macro call the index cannot follow. So is the package under development, whose own internals its files may use. A Base/Core export reaches through any module, since every module but a `baremodule` implicitly does `using Base` — `Threads.ReentrantLock` is Base's type — and so do the `eval` and `include` every module binds for itself. Definition sites are not reads: `Base.show(io, x) = …` extends a function and `Foo.bar = 1` writes one, and code inside a quote or a macro call is exempt as everywhere else. The rule runs by default for workspace package files. Other files require explicit selection and a harvested library. The rule reports what a module *declared*, so a package whose documented interface is qualified and unexported is reported too. No fix — the caller cannot make someone else's name public.
+Report access to a module member that is neither exported nor declared `public`. Internal names may change without notice. The rule follows these declarations even when a package documents an unexported name as part of its API.
+
+The workspace package's own internals are allowed. Modules with no declared public API and modules using `Reexport.jl` are exempt.
+
+Enabled by default for workspace package files. Other files require explicit selection and indexed libraries.
 
 `summarysize` is part of Base's public API; `unwrap_unionall` is not:
 
@@ -1032,9 +1084,11 @@ warning: non-public-access
 
 ## `test-bare-expression`
 
-Flag an `@test` argument that has no syntactic comparison, Boolean connective, or predicate call—for example, `@test ready`. Calls and nested macro calls are treated conservatively as potentially Boolean. The rule only matches the real `Test.@test` macro after a visible, file-local Test load. It is disabled by default because Julia's dynamic types make bare Boolean values valid, and it offers no fix.
+Report a bare `Test.@test` argument with no comparison, Boolean operator, or predicate call, such as `@test result`. Calls and nested macros are allowed because they may return a `Bool`. The rule requires a visible `Test` import.
 
-A bare value hides what relationship the test asserts:
+Disabled by default because bare Boolean values are valid assertions. No automatic fix is offered.
+
+A test with a bare value:
 
 ```julia
 using Test
@@ -1051,13 +1105,11 @@ warning: test-bare-expression
 
 ## `eager-broadcast`
 
-Flag a Base reducer applied to a broadcast that exists only to be reduced: `sum(abs.(xs))` builds a whole mapped array and then sums it away, where `sum(abs, xs)` applies `abs` as it reduces and allocates nothing. The reducers with such an `(f, itr)` method are `all`, `any`, `count`, `maximum`, `minimum`, `prod`, and `sum`.
+Prefer `sum(f, xs)` to `sum(f.(xs))` to avoid building an intermediate array. The rule also checks `all`, `any`, `count`, `maximum`, `minimum`, and `prod`. It matches a single broadcast argument with no keywords or splats.
 
-Only the exact `reducer(f.(x))` shape is flagged. A keyword argument on either call, a second positional argument, and a fused multi-container broadcast (`hypot.(xs, ys)`) all describe a different call and are left alone, as is a broadcast *operator* (`any(xs .> 0)`), which names no function to pass. The reducer must be confirmed to be Base's, so a local shadow, a qualified `Base.sum`, or a file whose imports cannot be resolved reports nothing.
+The fix requires `--unsafe-fixes`: scalar inputs can behave differently, and `any` and `all` may stop early, changing how often `f` runs.
 
-The fix moves the function into the reducer's first argument, but needs `--unsafe-fixes`: broadcasting treats a scalar as a zero-dimensional container of itself where the two-argument method iterates it, and `any`/`all` stop at the first decisive element, so a function that prints, mutates, or throws runs a different number of times. The fix is withheld — the finding still stands — when a comment sits in the rewritten span.
-
-The mapped array is built only to be summed away:
+Summing without an intermediate array:
 
 ```julia
 total = sum(abs.(residuals))
@@ -1068,7 +1120,7 @@ warning: eager-broadcast
  --> example.jl:1:9
   |
 1 | total = sum(abs.(residuals))
-  |         ^^^^^^^^^^^^^^^^^^^^ call `sum(abs, residuals)` instead of `sum(abs.(residuals))`, which materializes the broadcast result
+  |         ^^^^^^^^^^^^^^^^^^^^ use `sum(abs, residuals)` to avoid allocating the broadcast result
   = help: Pass the function as `sum`'s first argument (unsafe fix, requires `--unsafe-fixes`)
 ```
 
@@ -1085,17 +1137,15 @@ warning: eager-broadcast
  --> example.jl:1:4
   |
 1 | if any(isnan.(xs))
-  |    ^^^^^^^^^^^^^^^ call `any(isnan, xs)` instead of `any(isnan.(xs))`, which materializes the broadcast result
+  |    ^^^^^^^^^^^^^^^ use `any(isnan, xs)` to avoid allocating the broadcast result
   = help: Pass the function as `any`'s first argument (unsafe fix, requires `--unsafe-fixes`)
 ```
 
 ## `sorted-extremum`
 
-Flag indexing one end of a freshly sorted collection: `sort(xs)[1]` copies and orders every element to answer what `minimum(xs)` answers in one pass, and `sort(xs)[end]` (like `sort(xs)[begin]` for the other end) does the same for `maximum(xs)`.
+Prefer `minimum(xs)` to `sort(xs)[1]` or `sort(xs)[begin]`, and `maximum(xs)` to `sort(xs)[end]`. Finding an extreme takes one pass and avoids sorting the collection. Calls with sorting options such as `rev`, `by`, or `lt` are not checked.
 
-Only a plain `sort(x)` at either end is flagged. A `rev`, `by`, or `lt` keyword decides which element lands where, so the index no longer picks the extremum a reducer would return; any other index (`sort(xs)[2]`) genuinely needs the order; and `sort!` is a different function. `sort` must be confirmed to be Base's, so a local shadow or a qualified `Base.sort` reports nothing.
-
-The fix replaces the indexing with the extremum call, but needs `--unsafe-fixes`: sorting orders `NaN` last, so `sort(xs)[1]` returns the smallest real number where `minimum(xs)` propagates the `NaN`. It is withheld — the finding still stands — when the file's `minimum`/`maximum` is not Base's, or when a comment sits in the rewritten span outside the collection.
+The fix requires `--unsafe-fixes`: sorting places `NaN` last, while `minimum` and `maximum` propagate it.
 
 Sorting to read the smallest element:
 
@@ -1112,7 +1162,7 @@ warning: sorted-extremum
   = help: Replace the sorted indexing with `minimum` (unsafe fix, requires `--unsafe-fixes`)
 ```
 
-And the largest:
+Sorting to read the largest element:
 
 ```julia
 highest = sort(scores)[end]
@@ -1129,13 +1179,11 @@ warning: sorted-extremum
 
 ## `length-findall`
 
-Flag `length(findall(p, x))`, which allocates a vector of every matching index just to ask how many there are. `count(p, x)` answers with a counter and no allocation, and covers the one-argument form too: `length(findall(mask))` is `count(mask)`.
+Prefer `count(p, xs)` to `length(findall(p, xs))` to avoid allocating a vector of matching indices. The one-argument form, `length(findall(mask))`, can use `count(mask)`.
 
-Both calls must be plain — no keyword arguments, no splats — and both `length` and `findall` must be confirmed to be Base's, so a local shadow, a qualified `Base.findall`, or a file whose imports cannot be resolved reports nothing.
+The fix requires `--unsafe-fixes`: `findall` tests dictionary values, while `count` tests key-value pairs.
 
-The fix rewrites the pair to a `count` call carrying `findall`'s own argument list, but needs `--unsafe-fixes`: `findall` walks a collection's keys where `count` iterates its elements, which is the same walk for an array and a different one for a `Dict`, whose values `findall` tests and whose `key => value` pairs `count` does. It is withheld — the finding still stands — when the file's `count` is not Base's, or when a comment sits in the rewritten span outside the argument list.
-
-The index vector is built only to be measured:
+Counting matching elements:
 
 ```julia
 n = length(findall(isodd, xs))
@@ -1167,15 +1215,11 @@ warning: length-findall
 
 ## `fixed-regex`
 
-Flag `occursin(r"abc", s)`, whose regex literal carries no metacharacter and so matches one fixed substring. `occursin("abc", s)` asks the same question of the same values and answers it with a substring search instead of the regex engine.
+Prefer a plain string to a regex that matches a fixed substring. For example, use `occursin("abc", s)` instead of `occursin(r"abc", s)`.
 
-Every Base function that takes a pattern is read the same way, each at the argument that holds it: `occursin(r"abc", s)`, the flipped `contains(s, r"abc")`, `startswith`/`endswith`, `split`/`eachsplit`, each `=>` pair of a `replace`, and the curried forms that fix the pattern (`contains(r"abc")`). The curried `occursin(s)` fixes the *haystack* instead, so its argument is no pattern and is left alone, and `rsplit` takes no regex at all.
+The rule checks pattern arguments to `occursin`, `contains`, `startswith`, `endswith`, `split`, `eachsplit`, and `replace`, including curried forms. Patterns with flags, escapes, or regex metacharacters are excluded. The safe fix removes the `r` prefix.
 
-The pattern must be a plain `r"..."` — no flag suffix, since a flag changes what the pattern means, and no interpolation — and it must be non-empty and free of every PCRE metacharacter and backslash escape. The callee must be confirmed to be Base's, so a local shadow, a qualified `Base.occursin`, or a file whose imports cannot be resolved reports nothing.
-
-The safe fix deletes the `r` prefix and nothing else. A pattern with no backslash and no `$` reads identically as an ordinary string literal, and the literal keeps its own delimiters, so the string it spells is unchanged.
-
-The pattern is a plain substring, matched through PCRE:
+Searching for a fixed substring:
 
 ```julia
 if occursin(r"error", line)
@@ -1188,7 +1232,7 @@ warning: fixed-regex
  --> example.jl:1:13
   |
 1 | if occursin(r"error", line)
-  |             ^^^^^^^^ use the plain string `"error"` instead of the regex `r"error"`, whose pattern has no metacharacter
+  |             ^^^^^^^^ use the string `"error"` for this literal pattern
   = help: Drop the `r` prefix and match the substring (safe fix)
 ```
 
@@ -1200,7 +1244,7 @@ if occursin("error", line)
 end
 ```
 
-The same search written the other way round, curried:
+Searching with a curried `contains`:
 
 ```julia
 failures = filter(contains(r"error"), lines)
@@ -1211,7 +1255,7 @@ warning: fixed-regex
  --> example.jl:1:28
   |
 1 | failures = filter(contains(r"error"), lines)
-  |                            ^^^^^^^^ use the plain string `"error"` instead of the regex `r"error"`, whose pattern has no metacharacter
+  |                            ^^^^^^^^ use the string `"error"` for this literal pattern
   = help: Drop the `r` prefix and match the substring (safe fix)
 ```
 
@@ -1221,7 +1265,7 @@ After applying the fix:
 failures = filter(contains("error"), lines)
 ```
 
-Every other pattern position reads the same way:
+Splitting on a fixed string:
 
 ```julia
 fields = split(line, r"::")
@@ -1232,7 +1276,7 @@ warning: fixed-regex
  --> example.jl:1:22
   |
 1 | fields = split(line, r"::")
-  |                      ^^^^^ use the plain string `"::"` instead of the regex `r"::"`, whose pattern has no metacharacter
+  |                      ^^^^^ use the string `"::"` for this literal pattern
   = help: Drop the `r` prefix and match the substring (safe fix)
 ```
 
@@ -1244,15 +1288,11 @@ fields = split(line, "::")
 
 ## `comparison-negation`
 
-Flag `!` applied to a parenthesized equality test, which Julia spells with a single operator: `!(a == b)` is `a != b`, `!(a === b)` is `a !== b`, and both read back the other way. The Unicode spellings `≠`, `≡`, and `≢` collapse the same way.
+Simplify negated equality tests: `!(a == b)` becomes `a != b`, and `!(a === b)` becomes `a !== b`. The reverse and Unicode forms are also checked.
 
-The rewrite is exact rather than merely equivalent-in-practice: Base defines `!=(x, y) = !(x == y)` and `!==(x, y) = !(x === y)`, so the two spellings agree on every input by construction.
+Ordering comparisons are excluded because negating `<` is not equivalent to `>=` for values such as `NaN`. The safe fix preserves comments between operands and is withheld if it would discard a comment or change operator precedence.
 
-Only the equality family is reported. The orderings are left alone because `<` and `>=` are independent methods rather than negations of each other, and they disagree on exactly the inputs a partial order is partial about: `!(NaN < 1)` is `true` while `NaN >= 1` is `false`. The broadcast forms `a .== b` and `.!x` are containers of values rather than tests, and a comparison chain (`a == b == c`) has no two-operand rewrite, so none of them is flagged.
-
-The rule reports a safe fix that reuses the comparison's own source text with the operator swapped, so spacing and any comment between the operands survive. The fix is withheld — the finding still stands — when a comment sits in the deleted `!(` or `)`, and when the negation sits somewhere a bare comparison would rebind, as in `x + !(a == b)`.
-
-Negating an equality test spells the inequality:
+Negating an equality comparison:
 
 ```julia
 if !(status == :ok)
@@ -1277,7 +1317,7 @@ if status != :ok
 end
 ```
 
-The identity comparison negates the same way:
+Negating an identity comparison:
 
 ```julia
 found = !(lookup(key) === nothing)
@@ -1300,13 +1340,11 @@ found = lookup(key) !== nothing
 
 ## `length-zero`
 
-Flag a comparison of `length(x)` against `0` or `1` that asks whether `x` is empty. A length is a non-negative integer, so `length(x) == 0`, `length(x) <= 0`, and `length(x) < 1` all spell `isempty(x)`, while `length(x) != 0`, `length(x) > 0`, and `length(x) >= 1` spell `!isempty(x)`; each mirrored spelling with the literal first (`0 < length(x)`) collapses the same way. `isempty` is the test collections actually implement, and it need not count what it throws away.
+Prefer `isempty(x)` or `!isempty(x)` when a length comparison tests whether a collection is empty. This includes `length(x) == 0`, `length(x) < 1`, and their reversed forms.
 
-The already-deliberate `===`, the broadcast `.==` / `.<`, and a comparison chain are left alone, as are the bounds that ask a different question (`length(x) == 1`) or none at all (`length(x) >= 0`, which is always true). The callee must be confirmed to be Base's `length`, so a local shadow, a qualified `Base.length`, or a file whose imports cannot be resolved reports nothing.
+The safe fix preserves the argument and is withheld if `isempty` is shadowed or a comment would be lost.
 
-The rule reports a safe fix replacing the comparison with `isempty(x)` or `!isempty(x)`, reusing the argument's own source text. The fix is withheld — the finding still stands — when the file's `isempty` is not Base's, or when a comment sits in the rewritten span outside the argument.
-
-Comparing a length against zero is an emptiness test:
+Testing whether a collection is empty:
 
 ```julia
 if length(xs) == 0
@@ -1331,7 +1369,7 @@ if isempty(xs)
 end
 ```
 
-The non-emptiness spellings, including the mirrored ones:
+Testing whether a collection is nonempty:
 
 ```julia
 while 0 < length(queue)
@@ -1358,17 +1396,11 @@ end
 
 ## `redundant-boolean`
 
-Flag a test compared against a boolean literal, or a conditional whose two arms are the literals themselves. `x == true` and `x != false` are `x`; `x == false` and `x != true` are `!x`; `c ? true : false` is `c` and `c ? false : true` is `!c`. Because `==` and `!=` are symmetric, the mirrored spellings (`true == x`) collapse the same way.
+Simplify comparisons to Boolean literals and conditionals that return them. For example, `x == true` becomes `x`, and `c ? false : true` becomes `!c`.
 
-This is distinct from `constant-condition`, which owns the literal-*as*-test case (`if true`), where the branch is decided before the code runs.
+The conditional fix is safe. The comparison fix requires `--unsafe-fixes` because the operand may have a type other than `Bool`: for example, `1 == true` returns `true`, while `1` remains an integer.
 
-The two halves do not ship the same fix. The conditional rewrite is reported as a safe fix: `?:` requires a `Bool` test, so on every input that does not throw, `c ? true : false` hands back that very `Bool`. The comparison rewrite is reported as an unsafe fix, because `==` is not identity — it promotes across the numeric tower (`1 == true` is `true`), answers `missing` for `missing`, and is overloadable — so the two spellings agree only when the operand is already a `Bool`.
-
-The deliberate `===` / `!==`, the broadcast `.==` / `.!=`, and a comparison chain are left alone, as are a comparison of two boolean literals (no operand survives it) and a conditional whose arms agree (constant rather than redundant).
-
-The fix reuses the surviving operand's own source text, parenthesizing it when a bare `!` would rebind (`a + b == false` becomes `!(a + b)`). It is withheld — the finding still stands — when a comment sits in the replaced span outside that operand.
-
-A conditional over the two literals is its own test:
+Returning the condition directly:
 
 ```julia
 ready = queue_started(q) ? true : false
@@ -1389,7 +1421,7 @@ After applying the fix:
 ready = queue_started(q)
 ```
 
-Comparing a test to a boolean literal restates it:
+Comparing a value to `false`:
 
 ```julia
 if x.valid == false
@@ -1408,11 +1440,9 @@ warning: redundant-boolean
 
 ## `string-boundary`
 
-Flag `occursin(r"^abc", s)` and `occursin(r"abc$", s)`, boundary tests written as anchored regex searches. `startswith(s, "abc")` and `endswith(s, "abc")` name the boundary they test and need no match engine.
+Prefer `startswith` or `endswith` to a regex that tests a literal prefix or suffix. For example, `occursin(r"^abc", s)` becomes `startswith(s, "abc")`. The rule also checks `contains`, including its curried form. Patterns with flags or additional regex syntax are excluded.
 
-The pattern must be a plain `r"..."` — no flag suffix, since `i` and `m` change what an anchor means — anchored at exactly one end with a non-empty, metacharacter-free remainder; `r"^abc$"` is an exact match rather than a boundary test. The callee must be confirmed to be Base's, and the needle is read wherever its spelling puts it: `occursin(r"^abc", s)`, the flipped `contains(s, r"^abc")`, and the curried `contains(r"^abc")`, which rewrites to the curried `startswith("abc")`.
-
-The `startswith` fix is safe: `^` matches at the start of the subject and nowhere else. The `endswith` fix needs `--unsafe-fixes`, because PCRE's `$` also matches before a final newline — `occursin(r"abc$", "abc\n")` is `true` where `endswith("abc\n", "abc")` is `false`. Either fix is withheld — the finding still stands — when the file's `startswith`/`endswith` is not Base's, or when a comment sits in the rewritten span outside the haystack and the pattern.
+The prefix fix is safe. The suffix fix requires `--unsafe-fixes` because regex `$` also matches before a final newline, while `endswith` requires the suffix at the very end.
 
 A leading anchor is a prefix test:
 
@@ -1454,7 +1484,7 @@ warning: string-boundary
   = help: Test the suffix with `endswith`, which does not match before a trailing newline (unsafe fix, requires `--unsafe-fixes`)
 ```
 
-A curried `contains` rewrites to a curried predicate:
+Using a prefix test with `filter`:
 
 ```julia
 sources = filter(contains(r"^src"), files)
@@ -1477,15 +1507,11 @@ sources = filter(startswith("src"), files)
 
 ## `unnecessary-nesting`
 
-Flag an `if` whose entire body is another `if`, where neither carries an `elseif` or an `else`. The two tests are one `&&` test spread over two levels of indentation: `if a; if b; body; end; end` is `if a && b; body; end`.
+Combine an `if` whose only statement is another `if` into one condition with `&&`. Neither `if` may have an `elseif` or `else` branch.
 
-The two spellings agree on every input. `if` demands a `Bool` and `&&` hands its right operand back untouched, so the merged test stops on a false `a` exactly where the nested form skips the inner `if`, and `if` opens no scope in Julia, so merging the blocks rebinds nothing.
+The safe fix preserves the inner body and adds parentheses where needed. It is withheld if a comment would be lost. Run the formatter afterward to adjust indentation.
 
-An alternative on either `if` breaks that agreement and is not reported: with an outer `else`, the case where `a` holds and `b` does not runs nothing before the merge and the `else` branch after it. A body holding anything besides the inner `if` is left alone for the same reason — the outer test guards more than the inner one.
-
-The fix splices the two tests and the inner block verbatim, parenthesizing a test that binds looser than `&&` (`if a || c` nested in `if b` becomes `(a || c) && b`). It is withheld — the finding still stands — when a comment sits in the discarded headers. The inner body keeps its indentation, which the formatter settles.
-
-An `if` guarding nothing but another `if` is one test:
+Combining nested conditions:
 
 ```julia
 if isopen(io)
@@ -1514,9 +1540,9 @@ if isopen(io) && !eof(io)
 
 ## `test-isa-call`
 
-Flag `@test isa(value, Type)` and prefer `@test value isa Type`. The rule only matches the real `Test.@test` macro after a visible, file-local Test load. It reports a safe fix that reuses both arguments' source text and adds parentheses when an operand would otherwise rebind. The fix is withheld when it would discard a comment outside the retained arguments.
+Prefer `@test value isa Type` to `@test isa(value, Type)`. The rule requires a visible `Test` import and offers a safe fix that preserves the operands and their precedence.
 
-Use Julia's comparison spelling in a Test assertion:
+Using `isa` as an operator in a test:
 
 ```julia
 using Test
@@ -1541,7 +1567,7 @@ using Test
 
 ## `misnamed-suppression`
 
-Flag a `# fatou-ignore` directive that names a rule the linter does not ship. Suppression matches a rule by its exact ID, so a misspelled, renamed, or foreign ID silences nothing while reading as though it does. When exactly one shipped rule is a near match, the finding carries a safe fix that rewrites the ID and leaves the reason untouched.
+Report a suppression comment that names an unknown rule. Rule IDs must match exactly, so a misspelled ID suppresses nothing. When there is a single close match, the safe fix corrects the ID and keeps the reason.
 
 A directive naming a rule that does not exist:
 
@@ -1574,9 +1600,9 @@ end
 
 ## `blanket-suppression`
 
-Flag a `# fatou-ignore` directive that names no rule. A bare `# fatou-ignore-file` silences every rule in the file, including rules added later; a bare `# fatou-ignore` silences nothing at all, because the node-level form requires a rule ID. Name the rule the directive is meant to suppress. There is no fix: nothing in the source says which rule that is.
+Report a suppression comment with no rule ID. A bare `# fatou-ignore-file` disables every rule, including rules added later. A bare `# fatou-ignore` suppresses nothing. Name the specific rules to suppress.
 
-A file-wide directive naming no rule turns the linter off for the whole file:
+A file suppression without a rule ID:
 
 ```julia
 # fatou-ignore-file: generated code
@@ -1597,9 +1623,11 @@ warning: blanket-suppression
 
 ## `unexplained-suppression`
 
-Flag a `# fatou-ignore` directive that states no reason. The `: <reason>` part is optional, so this rule is **off by default**; select it in a project that wants every suppression to record why the finding was accepted. There is no fix: the reason is the part only the author can supply.
+Require a reason in suppression comments: `# fatou-ignore <rule>: <reason>`.
 
-A suppression with nothing to say for itself:
+Disabled by default because reasons are optional. Enable it to require an explanation for each suppression.
+
+A suppression without a reason:
 
 ```julia
 # fatou-ignore unused-binding
@@ -1620,7 +1648,7 @@ warning: unexplained-suppression
 
 ## `outdated-suppression`
 
-Flag a `# fatou-ignore` directive that suppressed nothing: either the rule it names ran and reported nothing it covers, or the directive has no code after it to apply to. A rule that this run did not enable, and any rule in a file whose names cannot be resolved (one that uses dynamic `eval` or `using`s a module the run did not harvest), is dormant rather than stale and is never reported. The safe fix deletes the directive.
+Report a suppression comment that no longer suppresses a finding or has no code after it. Disabled rules and files whose names cannot be resolved reliably are not checked. The safe fix deletes the comment.
 
 A directive at the end of a file, with nothing left to suppress:
 

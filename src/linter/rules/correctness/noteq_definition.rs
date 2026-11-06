@@ -56,14 +56,13 @@ impl Rule for NotEqDefinition {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a method definition for `!=` (or `\u{2260}`). Julia defines `!=` \
-         as `const != = !(==)`, so it is not meant to be overloaded: define \
-         `==` instead, and `!=` follows automatically."
+        "Report a method definition for `!=` or `≠`. Define `==` instead: Julia derives `!=` by \
+         negating `==`."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[Example {
-            caption: "Defining `!=` where `==` should carry the method:",
+            caption: "Overloading `!=` directly:",
             source: "!=(a::Grade, b::Grade) = a.score != b.score\n",
         }]
     }

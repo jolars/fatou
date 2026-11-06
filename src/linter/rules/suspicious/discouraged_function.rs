@@ -43,34 +43,19 @@ impl Rule for DiscouragedFunction {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a call to a function on a configurable deny-list. The built-in \
-         set covers Base functions with process-wide or memory-unsafe effects — \
-         `exit`, `cd`, `redirect_stdout`, `redirect_stderr`, and the \
-         `unsafe_*`/pointer conversions — each reported with the alternative to \
-         reach for.\n\n\
-         Configure it under `[lint.rules.discouraged-function]`: `functions` \
-         replaces the built-in set, `extend-functions` adds to it (an entry \
-         there also rewords a built-in), and `functions = {}` silences the rule \
-         without ignoring it. Both are tables mapping a function name to the \
-         suggestion shown in the diagnostic.\n\n\
-         A call carrying a `do` block is never reported, since for `cd` and the \
-         `redirect_*` functions that form is the recommended alternative. \
-         Two-argument calls to `cd`, `redirect_stdout`, and `redirect_stderr` \
-         are also allowed: they pass the callback explicitly and restore the \
-         previous state. Calls to these three functions with positional splats \
-         are skipped because the overload cannot be determined.\n\n\
-         A qualified callee (`Base.exit`) is a different name and does not match. \
-         A built-in name is only reported once it is confirmed to be Base's, so \
-         a local of the same name — or a file whose imports cannot be resolved — \
-         reports nothing; a name the project configured is reported unless a \
-         definition in the same file shadows it. No fix is offered, since the \
-         rewrite is a judgment call."
+        "Report calls to functions with process-wide or unsafe effects. Defaults include `exit`, \
+         `cd`, stream redirection, and unsafe memory operations. Each diagnostic suggests an \
+         alternative. Callback forms of `cd` and stream redirection are allowed because they \
+         restore the previous state.\n\n\
+         Configure `[lint.rules.discouraged-function]` with tables mapping function names to \
+         suggestions. `functions` replaces the defaults, `extend-functions` adds or overrides \
+         entries, and `functions = {}` clears the list. Qualified calls such as `Base.exit` are \
+         not checked."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[Example {
-            caption: "`exit` ends the process and `cd` leaves the working \
-                      directory changed:",
+            caption: "`cd` changes the working directory, and `exit` ends the process:",
             source: "function cleanup()\n    cd(\"/tmp\")\n    exit(1)\nend\n",
         }]
     }

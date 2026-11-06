@@ -72,36 +72,21 @@ impl Rule for ComparisonNegation {
     }
 
     fn description(&self) -> &'static str {
-        "Flag `!` applied to a parenthesized equality test, which Julia spells \
-         with a single operator: `!(a == b)` is `a != b`, `!(a === b)` is \
-         `a !== b`, and both read back the other way. The Unicode spellings \
-         `≠`, `≡`, and `≢` collapse the same way.\n\n\
-         The rewrite is exact rather than merely equivalent-in-practice: Base \
-         defines `!=(x, y) = !(x == y)` and `!==(x, y) = !(x === y)`, so the \
-         two spellings agree on every input by construction.\n\n\
-         Only the equality family is reported. The orderings are left alone \
-         because `<` and `>=` are independent methods rather than negations of \
-         each other, and they disagree on exactly the inputs a partial order \
-         is partial about: `!(NaN < 1)` is `true` while `NaN >= 1` is `false`. \
-         The broadcast forms `a .== b` and `.!x` are containers of values \
-         rather than tests, and a comparison chain (`a == b == c`) has no \
-         two-operand rewrite, so none of them is flagged.\n\n\
-         The rule reports a safe fix that reuses the comparison's own source \
-         text with the operator swapped, so spacing and any comment between \
-         the operands survive. The fix is withheld — the finding still stands \
-         — when a comment sits in the deleted `!(` or `)`, and when the \
-         negation sits somewhere a bare comparison would rebind, as in \
-         `x + !(a == b)`."
+        "Simplify negated equality tests: `!(a == b)` becomes `a != b`, and `!(a === b)` becomes \
+         `a !== b`. The reverse and Unicode forms are also checked.\n\n\
+         Ordering comparisons are excluded because negating `<` is not equivalent to `>=` for \
+         values such as `NaN`. The safe fix preserves comments between operands and is withheld \
+         if it would discard a comment or change operator precedence."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[
             Example {
-                caption: "Negating an equality test spells the inequality:",
+                caption: "Negating an equality comparison:",
                 source: "if !(status == :ok)\n    retry()\nend\n",
             },
             Example {
-                caption: "The identity comparison negates the same way:",
+                caption: "Negating an identity comparison:",
                 source: "found = !(lookup(key) === nothing)\n",
             },
         ]

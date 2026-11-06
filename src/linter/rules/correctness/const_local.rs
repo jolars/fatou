@@ -89,14 +89,9 @@ impl Rule for ConstLocal {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a `const` declaration inside a local scope — a function or macro \
-         body, a `let`, a `for`/`while` body, a `try`, a closure, or a \
-         comprehension. `const` is only meaningful at global scope (the file \
-         top level and each `module` body); anywhere else the code parses but \
-         always fails at lowering with \"unsupported `const` declaration on \
-         local variable\". A `const` field of a mutable struct is a different \
-         construct and is left alone, as is a `const` inside quoted code or a \
-         macro argument, which may never be lowered as written."
+        "Report `const` in a local scope, such as a function, `let`, or loop body. Julia allows \
+         constant bindings only at global scope: the file's top level or a module body. A `const` \
+         field in a mutable struct is allowed."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -106,7 +101,7 @@ impl Rule for ConstLocal {
                 source: "function scale(x)\n    const factor = 2\n    factor * x\nend\n",
             },
             Example {
-                caption: "A `let` body is local too — the declaration belongs at top level:",
+                caption: "`const` inside a `let` block:",
                 source: "let\n    const limit = 10\n    limit\nend\n",
             },
         ]

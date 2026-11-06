@@ -22,17 +22,13 @@ impl Rule for TestIsaCall {
     }
 
     fn description(&self) -> &'static str {
-        "Flag `@test isa(value, Type)` and prefer `@test value isa Type`. The \
-         rule only matches the real `Test.@test` macro after a visible, \
-         file-local Test load. It reports a safe fix that reuses both \
-         arguments' source text and adds parentheses when an operand would \
-         otherwise rebind. The fix is withheld when it would discard a \
-         comment outside the retained arguments."
+        "Prefer `@test value isa Type` to `@test isa(value, Type)`. The rule requires a visible \
+         `Test` import and offers a safe fix that preserves the operands and their precedence."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[Example {
-            caption: "Use Julia's comparison spelling in a Test assertion:",
+            caption: "Using `isa` as an operator in a test:",
             source: "using Test\n@test isa(result, AbstractVector)\n",
         }]
     }

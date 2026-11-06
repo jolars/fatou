@@ -44,15 +44,9 @@ impl Rule for DuplicateKeywordArgument {
     }
 
     fn description(&self) -> &'static str {
-        "Flag the same keyword argument supplied more than once at a call \
-         site. Julia rejects such a call at lowering (`keyword argument \"a\" \
-         repeated in call to \"h\"`), so it parses but cannot run. Keywords \
-         before and after the `;` share one namespace, and the `;`-block \
-         shorthand `h(; a)` counts as passing `a`. A keyword splat \
-         (`h(; kw...)`) names nothing the rule can read, so it neither \
-         triggers the finding nor silences it for the keywords written out. \
-         Calls inside quoted code or a macro call are exempt, since neither is \
-         lowered as written."
+        "Report a keyword argument passed more than once in a call. Julia rejects duplicate \
+         keywords, including those on opposite sides of `;`. The shorthand `f(; x)` counts as \
+         passing `x`. Keyword splats are not checked."
     }
 
     fn examples(&self) -> &'static [Example] {

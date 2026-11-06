@@ -82,29 +82,13 @@ impl Rule for NonPublicAccess {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a qualified read of a name the target module neither `export`s \
-         nor declares `public`. Those two statements are how a Julia module \
-         says what its API is — `public` (1.11) declares intent without \
-         attaching the name to a `using` — so everything else is internal and \
-         free to change in a patch release. Only a qualifier that really names \
-         a module is checked: a local, a parameter, a name an item list bound \
-         (`import Foo: Bar`), and any plain field access are values, not \
-         modules. Two kinds of module are left alone: one that declares no \
-         public API at all, whose whole surface is reached qualified by design, \
-         and one that re-exports with `Reexport.jl`, whose `@reexport using \
-         Bar` is a macro call the index cannot follow. So is the package under \
-         development, whose own internals its files may use. A Base/Core \
-         export reaches through any module, since every module but a \
-         `baremodule` implicitly does `using Base` — `Threads.ReentrantLock` \
-         is Base's type — and so do the `eval` and `include` every module \
-         binds for itself. Definition sites are not reads: `Base.show(io, x) = \
-         …` extends a function and `Foo.bar = 1` writes one, and code inside a \
-         quote or a macro call is exempt as everywhere else. The rule runs by \
-         default for workspace package files. Other files require explicit \
-         selection and a harvested library. \
-         The rule reports what a module *declared*, so a package whose \
-         documented interface is qualified and unexported is reported too. No \
-         fix — the caller cannot make someone else's name public."
+        "Report access to a module member that is neither exported nor declared `public`. \
+         Internal names may change without notice. The rule follows these declarations even when \
+         a package documents an unexported name as part of its API.\n\n\
+         The workspace package's own internals are allowed. Modules with no declared public API \
+         and modules using `Reexport.jl` are exempt.\n\n\
+         Enabled by default for workspace package files. Other files require explicit selection \
+         and indexed libraries."
     }
 
     fn examples(&self) -> &'static [Example] {

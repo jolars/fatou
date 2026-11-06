@@ -4,7 +4,7 @@ expression: render_rule_doc(rule.as_ref())
 ---
 ## `duplicate-argument`
 
-Flag the same parameter name declared more than once in a single signature. Julia rejects such a definition outright, so it is always a mistake. Positional and keyword parameters share one namespace.
+Report a repeated parameter name in a function signature. Positional and keyword parameters share the same namespace, and Julia rejects duplicates.
 
 `x` appears twice in the parameter list:
 

@@ -99,16 +99,11 @@ impl Rule for UnreachableCode {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a statement no path of execution can reach: the tail after an \
-         unconditional `return`, `throw`, `error`, or `rethrow`, after an \
-         `if`/`else` that diverges in every arm, or after a `while true` with \
-         no `break`. The code runs, but the flagged statement never does, so \
-         it is either dead weight or a sign that the divergence above it is \
-         misplaced. Reachability comes from the file's control-flow graph, so \
-         a `for` that may run zero times, an `if` with no `else`, a `catch` \
-         clause, and a conditional `a && return` all keep their tails live. \
-         No fix is offered: deleting the statement is a judgment call, and \
-         keeping it may be the point when the divergence is the bug."
+        "Report statements that can never run, such as code after an unconditional `return`, \
+         `throw`, `error`, or `rethrow`. The rule also catches code after an `if` whose branches \
+         all exit, or a `while true` loop with no `break`.\n\n\
+         Check whether the unreachable statement should be removed or the preceding control flow \
+         should change."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -118,7 +113,7 @@ impl Rule for UnreachableCode {
                 source: "function f(x)\n    return x + 1\n    println(\"never\")\nend\n",
             },
             Example {
-                caption: "Both arms diverge, so the tail is dead too:",
+                caption: "An unreachable statement after two branches that return:",
                 source: "function classify(x)\n    if x > 0\n        return :pos\n    else\n        throw(DomainError(x))\n    end\n    return :unknown\nend\n",
             },
         ]

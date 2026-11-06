@@ -21,17 +21,16 @@ impl Rule for TestBareExpression {
     }
 
     fn description(&self) -> &'static str {
-        "Flag an `@test` argument that has no syntactic comparison, Boolean \
-         connective, or predicate call—for example, `@test ready`. Calls and \
-         nested macro calls are treated conservatively as potentially Boolean. \
-         The rule only matches the real `Test.@test` macro after a visible, \
-         file-local Test load. It is disabled by default because Julia's \
-         dynamic types make bare Boolean values valid, and it offers no fix."
+        "Report a bare `Test.@test` argument with no comparison, Boolean operator, or predicate \
+         call, such as `@test result`. Calls and nested macros are allowed because they may \
+         return a `Bool`. The rule requires a visible `Test` import.\n\n\
+         Disabled by default because bare Boolean values are valid assertions. No automatic fix \
+         is offered."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[Example {
-            caption: "A bare value hides what relationship the test asserts:",
+            caption: "A test with a bare value:",
             source: "using Test\n@test result\n",
         }]
     }

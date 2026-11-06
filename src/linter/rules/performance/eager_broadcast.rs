@@ -50,31 +50,17 @@ impl Rule for EagerBroadcast {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a Base reducer applied to a broadcast that exists only to be \
-         reduced: `sum(abs.(xs))` builds a whole mapped array and then sums it \
-         away, where `sum(abs, xs)` applies `abs` as it reduces and allocates \
-         nothing. The reducers with such an `(f, itr)` method are `all`, \
-         `any`, `count`, `maximum`, `minimum`, `prod`, and `sum`.\n\n\
-         Only the exact `reducer(f.(x))` shape is flagged. A keyword argument \
-         on either call, a second positional argument, and a fused \
-         multi-container broadcast (`hypot.(xs, ys)`) all describe a different \
-         call and are left alone, as is a broadcast *operator* (`any(xs .> \
-         0)`), which names no function to pass. The reducer must be confirmed \
-         to be Base's, so a local shadow, a qualified `Base.sum`, or a file \
-         whose imports cannot be resolved reports nothing.\n\n\
-         The fix moves the function into the reducer's first argument, but \
-         needs `--unsafe-fixes`: broadcasting treats a scalar as a \
-         zero-dimensional container of itself where the two-argument method \
-         iterates it, and `any`/`all` stop at the first decisive element, so a \
-         function that prints, mutates, or throws runs a different number of \
-         times. The fix is withheld — the finding still stands — when a \
-         comment sits in the rewritten span."
+        "Prefer `sum(f, xs)` to `sum(f.(xs))` to avoid building an intermediate array. The rule \
+         also checks `all`, `any`, `count`, `maximum`, `minimum`, and `prod`. It matches a single \
+         broadcast argument with no keywords or splats.\n\n\
+         The fix requires `--unsafe-fixes`: scalar inputs can behave differently, and `any` and \
+         `all` may stop early, changing how often `f` runs."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[
             Example {
-                caption: "The mapped array is built only to be summed away:",
+                caption: "Summing without an intermediate array:",
                 source: "total = sum(abs.(residuals))\n",
             },
             Example {
@@ -117,14 +103,10 @@ impl Rule for EagerBroadcast {
             rewrite::inline_text(func.syntax()),
             rewrite::inline_text(operand.syntax()),
         ) {
-            (Some(f), Some(x)) => format!(
-                "call `{name}({f}, {x})` instead of `{name}({f}.({x}))`, which \
-                 materializes the broadcast result"
-            ),
-            _ => format!(
-                "pass the function to `{name}` instead of broadcasting it, which \
-                 materializes the broadcast result"
-            ),
+            (Some(f), Some(x)) => {
+                format!("use `{name}({f}, {x})` to avoid allocating the broadcast result")
+            }
+            _ => format!("pass the function to `{name}` to avoid allocating the broadcast result"),
         };
         let mut diag = Diagnostic::new(self.id(), call.syntax().text_range(), message);
 

@@ -99,18 +99,12 @@ impl Rule for TypePiracy {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a method definition that extends a function the current module \
-         does not own, using only argument types it does not own either \
-         (\"type piracy\"). Because Julia dispatches on one global method \
-         table, such a method silently changes behavior for every other user \
-         of those types the moment the module loads. A definition is fine as \
-         long as it owns the function or at least one argument type (a type \
-         parameter or `where` bound counts). The rule is sound-first: it flags \
-         only when it can prove the function and every readable argument type \
-         are foreign, withholding on anything unknown, and it skips the whole \
-         file when a whole-module `using` cannot be resolved. Off by default. \
-         Without a harvested library, ownership checks use only the built-in \
-         Base/Core snapshot."
+        "Report a method that extends another module's function using only types defined \
+         elsewhere. This is type piracy: loading the method can change behavior for unrelated \
+         code that uses the same function and types. Define the function or at least one argument \
+         type in your module.\n\n\
+         Disabled by default. Fatou reports only cases where ownership is known. Without indexed \
+         libraries, it checks ownership against the built-in Base and Core snapshot."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -253,8 +247,7 @@ impl TypePiracy {
             self.id(),
             name_range,
             format!(
-                "`{display}` commits type piracy: it extends a function this \
-                 module does not own, and no argument type is owned here either"
+                "type piracy: this module defines neither `{display}` nor any of its argument types"
             ),
         ));
     }

@@ -4,9 +4,9 @@ expression: render_rule_doc(rule.as_ref())
 ---
 ## `noteq-definition`
 
-Flag a method definition for `!=` (or `≠`). Julia defines `!=` as `const != = !(==)`, so it is not meant to be overloaded: define `==` instead, and `!=` follows automatically.
+Report a method definition for `!=` or `≠`. Define `==` instead: Julia derives `!=` by negating `==`.
 
-Defining `!=` where `==` should carry the method:
+Overloading `!=` directly:
 
 ```julia
 !=(a::Grade, b::Grade) = a.score != b.score

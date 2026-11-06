@@ -45,41 +45,25 @@ impl Rule for FixedRegex {
     }
 
     fn description(&self) -> &'static str {
-        "Flag `occursin(r\"abc\", s)`, whose regex literal carries no \
-         metacharacter and so matches one fixed substring. `occursin(\"abc\", \
-         s)` asks the same question of the same values and answers it with a \
-         substring search instead of the regex engine.\n\n\
-         Every Base function that takes a pattern is read the same way, each at \
-         the argument that holds it: `occursin(r\"abc\", s)`, the flipped \
-         `contains(s, r\"abc\")`, `startswith`/`endswith`, `split`/`eachsplit`, \
-         each `=>` pair of a `replace`, and the curried forms that fix the \
-         pattern (`contains(r\"abc\")`). The curried `occursin(s)` fixes the \
-         *haystack* instead, so its argument is no pattern and is left alone, \
-         and `rsplit` takes no regex at all.\n\n\
-         The pattern must be a plain `r\"...\"` — no flag suffix, since a flag \
-         changes what the pattern means, and no interpolation — and it must be \
-         non-empty and free of every PCRE metacharacter and backslash escape. \
-         The callee must be confirmed to be Base's, so a local shadow, a \
-         qualified `Base.occursin`, or a file whose imports cannot be resolved \
-         reports nothing.\n\n\
-         The safe fix deletes the `r` prefix and nothing else. A pattern with \
-         no backslash and no `$` reads identically as an ordinary string \
-         literal, and the literal keeps its own delimiters, so the string it \
-         spells is unchanged."
+        "Prefer a plain string to a regex that matches a fixed substring. For example, use \
+         `occursin(\"abc\", s)` instead of `occursin(r\"abc\", s)`.\n\n\
+         The rule checks pattern arguments to `occursin`, `contains`, `startswith`, `endswith`, \
+         `split`, `eachsplit`, and `replace`, including curried forms. Patterns with flags, \
+         escapes, or regex metacharacters are excluded. The safe fix removes the `r` prefix."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[
             Example {
-                caption: "The pattern is a plain substring, matched through PCRE:",
+                caption: "Searching for a fixed substring:",
                 source: "if occursin(r\"error\", line)\n    push!(failures, line)\nend\n",
             },
             Example {
-                caption: "The same search written the other way round, curried:",
+                caption: "Searching with a curried `contains`:",
                 source: "failures = filter(contains(r\"error\"), lines)\n",
             },
             Example {
-                caption: "Every other pattern position reads the same way:",
+                caption: "Splitting on a fixed string:",
                 source: "fields = split(line, r\"::\")\n",
             },
         ]
@@ -112,13 +96,10 @@ impl Rule for FixedRegex {
             // first character, so quoting it costs no reconstruction.
             let message = match rewrite::inline_text(literal.syntax()) {
                 Some(old) => format!(
-                    "use the plain string `{}` instead of the regex `{old}`, \
-                     whose pattern has no metacharacter",
+                    "use the string `{}` for this literal pattern",
                     &old[prefix.text().len()..]
                 ),
-                None => "use a plain string instead of this regex, whose pattern has no \
-                         metacharacter"
-                    .to_string(),
+                None => "use a plain string for this literal pattern".to_string(),
             };
 
             let mut diag = Diagnostic::new(self.id(), literal.syntax().text_range(), message);

@@ -63,21 +63,19 @@ impl Rule for BreakOutsideLoop {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a `break` or `continue` with no enclosing `for` or `while` loop. \
-         The code parses but always fails at lowering with \"break or continue \
-         outside loop\" — including inside a closure, do-block, or \
-         comprehension body defined within a loop, since `break` cannot cross \
-         a function boundary."
+        "Report `break` or `continue` outside a `for` or `while` loop. Julia rejects these \
+         statements, including inside a closure, do block, or comprehension nested in a loop: \
+         they cannot jump across a function boundary."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[
             Example {
-                caption: "`break` with no loop in sight:",
+                caption: "`break` outside a loop:",
                 source: "function process(x)\n    if x < 0\n        break\n    end\n    x\nend\n",
             },
             Example {
-                caption: "A do-block body is an anonymous function, so the outer loop is out of reach:",
+                caption: "A do block cannot continue its enclosing loop:",
                 source: "for i in 1:3\n    foreach(1:2) do x\n        continue\n    end\nend\n",
             },
         ]

@@ -89,11 +89,9 @@ impl Rule for UnusedBinding {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a local variable that is assigned but never read in the same \
-         scope. Parameters, loop and `catch` variables, struct fields, type \
-         parameters, and top-level definitions are exempt, since those are \
-         meaningful even when unread. Names beginning with `_` are skipped, \
-         following Julia's throwaway convention."
+        "Report a local variable that is assigned but never read. Names beginning with `_` are \
+         exempt, as are parameters, loop and `catch` variables, struct fields, type parameters, \
+         and top-level definitions."
     }
 
     fn examples(&self) -> &'static [Example] {

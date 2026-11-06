@@ -61,19 +61,13 @@ impl Rule for CallArity {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a call that no visible method of the function accepts: a \
-         positional count outside every method's range, or a keyword argument \
-         no positionally-matching method declares. Such a call raises \
-         `MethodError` at runtime. The method table unions every tier name \
-         resolution sees — the file's own definitions, the workspace package, \
-         and the harvested library, qualified extensions included — so an \
-         unknown method always silences the check rather than triggering it. \
-         Calls that splat arguments, carry `do` blocks, sit in macro calls or \
-         quoted code, or target constructors and callable values are exempt, \
-         and files that use dynamic `eval` or `include` outside a known workspace \
-         are skipped entirely. The rule runs by default for workspace package \
-         files. Other files require explicit selection because they may be \
-         fragments whose siblings add methods."
+        "Report a call when no known method accepts its number of positional arguments or its \
+         keyword names. Such calls raise `MethodError`.\n\n\
+         Fatou checks methods in the file, workspace package, and indexed libraries. It skips \
+         calls when the available methods or arguments are uncertain, including splatted calls, \
+         do blocks, constructors, and callable values.\n\n\
+         Enabled by default for workspace package files. Other files require explicit selection \
+         because methods may be defined in sibling files."
     }
 
     fn examples(&self) -> &'static [Example] {

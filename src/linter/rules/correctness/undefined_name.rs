@@ -56,25 +56,21 @@ impl Rule for UndefinedName {
     }
 
     fn description(&self) -> &'static str {
-        "Flag an identifier that no resolution tier provides: not a local or \
-         a file binding, not a same-module global from included files, not a \
-         whole-module `using`'s export, and not a Base/Core name. For standalone \
-         programs, declare `[project] entry-points = [\"main.jl\"]` to enable this \
-         rule by default, follow static includes, and resolve ordinary global \
-         assignments. An explicit `[lint] select` replaces the defaults, and \
-         `ignore = [\"undefined-name\"]` disables the rule. Each entry point and host \
-         module is checked independently; findings name the failing contexts. \
-         Dynamic includes, dynamic `eval`, unresolved whole-module `using`s, and \
-         broken include closures suppress findings for that entry. Value reads inside \
-         macro calls and quoted code remain exempt. Without entry points, \
-         standalone files can opt in with \
-         `[lint] extend-select = [\"undefined-name\"]`; files containing includes \
-         are skipped. The rule also runs by default for workspace package files."
+        "Report a name that cannot be found in local bindings, the workspace package, imports, or \
+         Base and Core.\n\n\
+         Enabled by default for workspace package files and programs declared with `[project] \
+         entry-points = [\"main.jl\"]`. Entry points let Fatou follow static includes and resolve \
+         global assignments. Each entry point and enclosing module is checked separately; \
+         diagnostics identify the contexts where a name is missing.\n\n\
+         Dynamic definitions, unresolved imports, or incomplete include chains suppress findings \
+         for the affected entry point. Standalone files without entry points can enable the rule \
+         with `[lint] extend-select = [\"undefined-name\"]`, but files containing includes are \
+         then skipped."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[Example {
-            caption: "`raduis` is a typo; no tier resolves it:",
+            caption: "A misspelled variable name:",
             source: "function area(radius)\n    return pi * raduis^2\nend\n",
         }]
     }

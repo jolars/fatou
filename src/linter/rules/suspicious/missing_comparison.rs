@@ -42,13 +42,10 @@ impl Rule for MissingComparison {
     }
 
     fn description(&self) -> &'static str {
-        "Flag `x == missing` / `x != missing`. `missing` propagates through \
-         `==`, so the comparison is always `missing` no matter what `x` is, and \
-         using it as a condition raises a `TypeError`. Use `ismissing` (or the \
-         identity test `===` / `!==`) instead. The rule reports an unsafe fix \
-         rewriting `==` to `===` and `!=` to `!==`: the rewrite turns a \
-         `missing` result into a `Bool`, which is the intent but is still a \
-         change in behavior."
+        "Report `==` or `!=` comparisons with `missing`. These return `missing`, and using the \
+         result as a condition raises `TypeError`. Use `ismissing`, `===`, or `!==` instead.\n\n\
+         The fix replaces the value comparison with an identity test. It requires \
+         `--unsafe-fixes` because it changes the result to a `Bool`."
     }
 
     fn examples(&self) -> &'static [Example] {

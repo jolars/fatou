@@ -51,14 +51,11 @@ impl Rule for LoopVariableShadow {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a `for` loop whose index variable is already an enclosing `for` \
-         loop's index. The nested `for` binds a fresh variable, so the outer \
-         index is unreachable inside it — usually a copy-pasted inner loop whose index \
-         was never renamed. Assignments to loop variables are allowed, since \
-         normalization and other updates within an iteration are valid. \
-         Comprehension and generator clauses are left alone, as is reuse \
-         across a function body, a closure, or a `do` block. No fix: renaming \
-         an index requires choosing the intended binding."
+        "Report an inner `for` loop that reuses an enclosing loop's index name. The inner loop \
+         creates a new binding and hides the outer index, often because a copied loop was not \
+         renamed.\n\n\
+         Assignments to loop variables are allowed. Comprehensions, generators, and reuse across \
+         function boundaries are not checked."
     }
 
     fn examples(&self) -> &'static [Example] {

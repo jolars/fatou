@@ -42,14 +42,8 @@ impl Rule for LocalConst {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a `const` declaration carrying a `local` modifier, in either \
-         order. Julia has no `local const` construct: the code parses but \
-         always fails at lowering with \"expected assignment after `const`\", \
-         everywhere — the file top level, a `module` or `struct` body, a loop \
-         or `let`, and inside a function alike. Write `local z = 1` for a \
-         local binding or `const z = 1` for a constant. A declaration inside \
-         quoted code or a macro argument is left alone, since it may never be \
-         lowered as written."
+        "Report `local const` or `const local`, which Julia rejects in every scope. Use `local x \
+         = 1` for a local binding or `const x = 1` for a global constant."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -59,8 +53,7 @@ impl Rule for LocalConst {
                 source: "local const LIMIT = 10\n",
             },
             Example {
-                caption: "The other order is the same construct, and a function body is no \
-                          different from the top level:",
+                caption: "`const local` inside a function:",
                 source: "function scale(x)\n    const local factor = 2\n    factor * x\nend\n",
             },
         ]

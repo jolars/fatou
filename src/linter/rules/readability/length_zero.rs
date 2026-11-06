@@ -66,35 +66,20 @@ impl Rule for LengthZero {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a comparison of `length(x)` against `0` or `1` that asks whether \
-         `x` is empty. A length is a non-negative integer, so `length(x) == 0`, \
-         `length(x) <= 0`, and `length(x) < 1` all spell `isempty(x)`, while \
-         `length(x) != 0`, `length(x) > 0`, and `length(x) >= 1` spell \
-         `!isempty(x)`; each mirrored spelling with the literal first \
-         (`0 < length(x)`) collapses the same way. `isempty` is the test \
-         collections actually implement, and it need not count what it throws \
-         away.\n\n\
-         The already-deliberate `===`, the broadcast `.==` / `.<`, and a \
-         comparison chain are left alone, as are the bounds that ask a \
-         different question (`length(x) == 1`) or none at all \
-         (`length(x) >= 0`, which is always true). The callee must be confirmed \
-         to be Base's `length`, so a local shadow, a qualified `Base.length`, \
-         or a file whose imports cannot be resolved reports nothing.\n\n\
-         The rule reports a safe fix replacing the comparison with \
-         `isempty(x)` or `!isempty(x)`, reusing the argument's own source text. \
-         The fix is withheld — the finding still stands — when the file's \
-         `isempty` is not Base's, or when a comment sits in the rewritten span \
-         outside the argument."
+        "Prefer `isempty(x)` or `!isempty(x)` when a length comparison tests whether a collection \
+         is empty. This includes `length(x) == 0`, `length(x) < 1`, and their reversed forms.\n\n\
+         The safe fix preserves the argument and is withheld if `isempty` is shadowed or a \
+         comment would be lost."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[
             Example {
-                caption: "Comparing a length against zero is an emptiness test:",
+                caption: "Testing whether a collection is empty:",
                 source: "if length(xs) == 0\n    println(\"nothing to do\")\nend\n",
             },
             Example {
-                caption: "The non-emptiness spellings, including the mirrored ones:",
+                caption: "Testing whether a collection is nonempty:",
                 source: "while 0 < length(queue)\n    pop!(queue)\nend\n",
             },
         ]

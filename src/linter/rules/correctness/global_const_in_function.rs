@@ -77,16 +77,9 @@ impl Rule for GlobalConstInFunction {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a `global const` declaration inside a function — a `function` or \
-         `macro` body, a short-form definition, a closure, a do block, or a \
-         comprehension. Julia allows `global const` at global scope and in a \
-         soft local scope such as a `let`, a loop body, or a `try`, but inside \
-         a function the code parses and then always fails at lowering with \
-         \"`global const` declaration not allowed inside function\". A soft \
-         scope nested inside a function does not help. Both spellings of the \
-         modifier are flagged, and a declaration inside quoted code or a macro \
-         argument is left alone, since it may never be lowered as written. An \
-         unmodified `const` in a local scope is `const-local`'s finding."
+        "Report `global const` inside a function, macro, closure, do block, or comprehension. \
+         Julia rejects these declarations even inside a nested `let` or loop. Move the \
+         declaration outside the function."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -96,8 +89,7 @@ impl Rule for GlobalConstInFunction {
                 source: "function setup()\n    global const LIMIT = 10\nend\n",
             },
             Example {
-                caption: "A nested soft scope does not rescue it — the enclosing function still \
-                          owns the declaration:",
+                caption: "`global const` inside a loop within a function:",
                 source: "function setup()\n    for i in 1:3\n        global const LIMIT = i\n    \
                          end\nend\n",
             },

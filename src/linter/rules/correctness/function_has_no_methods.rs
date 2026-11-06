@@ -58,20 +58,13 @@ impl Rule for FunctionHasNoMethods {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a call to a function whose every visible definition is a bodyless \
-         `function f end` declaration. Such a function has an empty method \
-         table, so the call raises `MethodError` whatever it passes. Only a \
-         name the closed world defines is checked — one belonging to this \
-         file or to the enclosing workspace package — since the owner of a \
-         `using`'d or Base/Core name may add methods elsewhere. A declaration \
-         the package `export`s or declares `public` is exempt as an interface \
-         hook for a package extension or a downstream package to implement, \
-         as is a name that also names a type. The file is skipped entirely \
-         when it uses dynamic `eval`, `include`s outside a known workspace, or \
-         `using`s a module the library cannot resolve, and call sites in macro calls or \
-         quoted code are exempt. The rule runs by default for workspace \
-         package files. Other files require explicit selection because their \
-         siblings may define the methods."
+        "Report a call to a function declared with `function f end` but given no methods. The \
+         call raises `MethodError` regardless of its arguments.\n\n\
+         Fatou checks functions defined in the file or workspace package. Exported and `public` \
+         declarations are exempt because other packages may implement them. The rule skips files \
+         whose definitions cannot be resolved reliably.\n\n\
+         Enabled by default for workspace package files. Other files require explicit selection \
+         because sibling files may add methods."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -149,10 +142,7 @@ impl Rule for FunctionHasNoMethods {
             sink.push(Diagnostic::new(
                 self.id(),
                 ident.syntax().text_range(),
-                format!(
-                    "`{name}` has no methods: every definition is a bodyless \
-                     `function {name} end`"
-                ),
+                format!("`{name}` is declared with `function {name} end` but has no methods"),
             ));
         }
     }

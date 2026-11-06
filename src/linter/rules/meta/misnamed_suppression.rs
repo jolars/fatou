@@ -33,12 +33,9 @@ impl Rule for MisnamedSuppression {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a `# fatou-ignore` directive that names a rule the linter does not \
-         ship. Suppression matches a rule by its exact ID, so a misspelled, \
-         renamed, or foreign ID silences nothing while reading as though it \
-         does. When exactly one shipped rule is a near match, the finding \
-         carries a safe fix that rewrites the ID and leaves the reason \
-         untouched."
+        "Report a suppression comment that names an unknown rule. Rule IDs must match exactly, so \
+         a misspelled ID suppresses nothing. When there is a single close match, the safe fix \
+         corrects the ID and keeps the reason."
     }
 
     fn examples(&self) -> &'static [Example] {

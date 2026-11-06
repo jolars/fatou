@@ -47,26 +47,12 @@ impl Rule for StringBoundary {
     }
 
     fn description(&self) -> &'static str {
-        "Flag `occursin(r\"^abc\", s)` and `occursin(r\"abc$\", s)`, boundary \
-         tests written as anchored regex searches. `startswith(s, \"abc\")` and \
-         `endswith(s, \"abc\")` name the boundary they test and need no match \
-         engine.\n\n\
-         The pattern must be a plain `r\"...\"` — no flag suffix, since `i` and \
-         `m` change what an anchor means — anchored at exactly one end with a \
-         non-empty, metacharacter-free remainder; `r\"^abc$\"` is an exact \
-         match rather than a boundary test. The callee must be confirmed to be \
-         Base's, and the needle is read wherever its spelling puts it: \
-         `occursin(r\"^abc\", s)`, the flipped `contains(s, r\"^abc\")`, and \
-         the curried `contains(r\"^abc\")`, which rewrites to the curried \
-         `startswith(\"abc\")`.\n\n\
-         The `startswith` fix is safe: `^` matches at the start of the subject \
-         and nowhere else. The `endswith` fix needs `--unsafe-fixes`, because \
-         PCRE's `$` also matches before a final newline — \
-         `occursin(r\"abc$\", \"abc\\n\")` is `true` where \
-         `endswith(\"abc\\n\", \"abc\")` is `false`. Either fix is withheld — \
-         the finding still stands — when the file's `startswith`/`endswith` is \
-         not Base's, or when a comment sits in the rewritten span outside the \
-         haystack and the pattern."
+        "Prefer `startswith` or `endswith` to a regex that tests a literal prefix or suffix. For \
+         example, `occursin(r\"^abc\", s)` becomes `startswith(s, \"abc\")`. The rule also checks \
+         `contains`, including its curried form. Patterns with flags or additional regex syntax \
+         are excluded.\n\n\
+         The prefix fix is safe. The suffix fix requires `--unsafe-fixes` because regex `$` also \
+         matches before a final newline, while `endswith` requires the suffix at the very end."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -80,7 +66,7 @@ impl Rule for StringBoundary {
                 source: "sources = filter(f -> occursin(r\"_test$\", f), files)\n",
             },
             Example {
-                caption: "A curried `contains` rewrites to a curried predicate:",
+                caption: "Using a prefix test with `filter`:",
                 source: "sources = filter(contains(r\"^src\"), files)\n",
             },
         ]

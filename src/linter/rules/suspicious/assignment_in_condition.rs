@@ -20,9 +20,8 @@ impl Rule for AssignmentInCondition {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a bare `=` assignment used as the test of an `if`/`elseif`/`while`. \
-         It is valid Julia but almost always a typo for `==`, so it is reported \
-         with a safe fix that rewrites `=` to `==`."
+        "Report a bare assignment used as an `if`, `elseif`, or `while` condition. This is \
+         usually a typo for `==`. The safe fix replaces `=` with `==`."
     }
 
     fn examples(&self) -> &'static [Example] {

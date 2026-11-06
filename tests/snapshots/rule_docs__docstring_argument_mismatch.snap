@@ -4,9 +4,9 @@ expression: render_rule_doc(rule.as_ref())
 ---
 ## `docstring-argument-mismatch`
 
-Flag a conventional ``- `name`: ...`` entry in a static docstring's `# Arguments` section when `name` is not a positional or keyword parameter of the attached function or macro. Missing entries are not reported: documentation coverage and less structured argument prose remain opt-in policy rather than a default correctness check.
+Report a ``- `name`: ...`` entry under `# Arguments` in a docstring when the attached function or macro has no parameter with that name. This catches misspelled or outdated entries. The rule does not require every parameter to be documented.
 
-The signature says `radius`, but the argument entry retained a typo:
+A misspelled argument name:
 
 ```julia
 """

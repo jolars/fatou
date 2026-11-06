@@ -59,23 +59,12 @@ impl Rule for InvalidTypeDeclaration {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a `::` type declaration whose declared type is a function. The \
-         right side of a `::` must be a type, and Julia checks it eagerly: \
-         `f(x::g)` for a generic function `g` raises a `TypeError` when the \
-         method is defined, and a value-position `x::g` raises one as soon as \
-         it runs. The rule is deliberately partial, since only a closed answer \
-         about a name is trustworthy: it fires for a function defined in this \
-         file and for a top-level function of the enclosing workspace package, \
-         and stays silent for a Base/Core name (the export snapshot records no \
-         kinds), an imported name, and any binding that could hold a type such \
-         as a variable or a `const` alias. A same-named type, `const`, or \
-         module anywhere in the file or the package withholds the finding, so \
-         an outer constructor (`Foo(x::Int) = …`, which binds `Foo` as a \
-         function too) is never flagged. The file is skipped entirely when it \
-         `eval`s, `include`s outside a known workspace, or `using`s a module \
-         the library cannot resolve, and annotations inside a macro call or \
-         quoted code are exempt. The rule runs by default for workspace package \
-         files. Other files require explicit selection and a resolution context."
+        "Report a function name used as a type in `::`, such as `f(x::g)` when `g` is a function. \
+         Julia raises `TypeError` when it evaluates the declaration.\n\n\
+         Fatou checks functions defined in the file or workspace package. It skips names that \
+         might refer to types and files whose definitions cannot be resolved reliably.\n\n\
+         Enabled by default for workspace package files. Other files require explicit selection \
+         and a resolution context."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -145,9 +134,7 @@ impl Rule for InvalidTypeDeclaration {
         sink.push(Diagnostic::new(
             self.id(),
             range,
-            format!(
-                "`{text}` is a function, not a type: `::{text}` is not a valid type declaration"
-            ),
+            format!("`{text}` is a function and cannot be used as a type in `::{text}`"),
         ));
     }
 }

@@ -4,7 +4,11 @@ expression: render_rule_doc(rule.as_ref())
 ---
 ## `unresolved-import`
 
-Flag a `using`/`import` of a module the enclosing project cannot load: a name that is neither in its `Project.toml` `[deps]` nor provided by the harvested environment (the standard library included). Julia resolves a bare `using Foo` against the active project, so an undeclared name raises `ArgumentError: Package Foo not found in current path` when the module loads. Relative paths (`using .Sub`), interpolated paths, and loads inside quoted code or macro calls are exempt, and a name the harvest resolved is always accepted — so a transitive dependency goes unreported rather than risking a false positive. The rule runs by default for workspace package files, which carry the required project context.
+Report a `using` or `import` of a package absent from both the project's `[deps]` and the indexed environment. Julia may fail to load the package.
+
+Relative imports such as `using .Sub` are allowed. Packages found in the environment, including standard libraries and transitive dependencies, are also accepted.
+
+Enabled by default for workspace package files, where project dependencies are known.
 
 The project declares `LinearAlgebra` in `[deps]`, but not `Frobnicate`:
 

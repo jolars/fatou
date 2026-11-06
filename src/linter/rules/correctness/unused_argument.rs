@@ -42,15 +42,10 @@ impl Rule for UnusedArgument {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a function parameter that is never read in its body. Every \
-         signature form is covered — long, short (`f(x) = ...`), anonymous, and \
-         `do`. All-underscore names (`_`, `__`) follow Julia's throwaway \
-         convention and are skipped, and stub methods whose body is a single \
-         placeholder expression — a literal (`f(x) = 0`), `nothing`, or an \
-         `error(...)`/`throw(...)` call — are exempt. Because methods that \
-         dispatch on an argument's type without reading its value are common, \
-         this rule is disabled by default; enable it with \
-         `--select unused-argument`."
+        "Report a function parameter that is never read. Names consisting only of underscores and \
+         stub methods with a literal, `nothing`, `error(...)`, or `throw(...)` body are exempt.\n\n\
+         Disabled by default because methods often use a parameter's type for dispatch without \
+         reading its value. Enable it with `--select unused-argument`."
     }
 
     fn examples(&self) -> &'static [Example] {

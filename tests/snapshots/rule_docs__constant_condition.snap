@@ -4,9 +4,9 @@ expression: render_rule_doc(rule.as_ref())
 ---
 ## `constant-condition`
 
-Flag a `true`/`false` literal used as an `if`/`elseif`/`while` test or as an operand of the short-circuit `&&`/`||`. The branch or short-circuit is decided before the code runs, so the literal is usually leftover debugging or a mistyped name. `while true` is exempt as Julia's idiomatic infinite loop. No fix: removing the constant means restructuring the branch.
+Report `true` or `false` used as a condition or as an operand of `&&` or `||`. These constants often come from debugging code or a mistyped name. The rule allows `while true`, the usual way to write an infinite loop.
 
-A literal `if` test always takes the branch:
+An `if` condition that is always true:
 
 ```julia
 if true
@@ -22,7 +22,7 @@ warning: constant-condition
   |    ^^^^ this condition is always `true`
 ```
 
-A literal operand decides `&&` at parse time:
+A constant that prevents `check(x)` from running:
 
 ```julia
 ok = false && check(x)

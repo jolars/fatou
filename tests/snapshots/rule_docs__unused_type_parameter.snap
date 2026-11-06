@@ -4,7 +4,9 @@ expression: render_rule_doc(rule.as_ref())
 ---
 ## `unused-type-parameter`
 
-Flag a `where` clause type parameter that is never used in the signature or body, covering bare (`where T`), braced (`where {T, S}`), bounded (`where {T<:Number}`), and chained (`where T where S`) clauses. An unread parameter is usually a refactoring leftover or a forgotten `::T` annotation. Struct type parameters are exempt (phantom parameters like `struct Unit{T} end` are idiomatic), as are all-underscore names.
+Report a `where` type parameter that is never used in the signature or body. This often indicates a missing type annotation or a leftover parameter.
+
+Struct type parameters and names consisting only of underscores are exempt.
 
 `T` is bound but never referenced:
 

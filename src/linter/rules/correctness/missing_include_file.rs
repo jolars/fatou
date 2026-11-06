@@ -36,13 +36,10 @@ impl Rule for MissingIncludeFile {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a static `include(\"path\")` whose target is missing or unreadable \
-         (relative paths resolve against the including file's directory). \
-         Missing files throw a `SystemError` at runtime. Only statically \
-         resolvable includes are checked: dynamic (`include(f)`), interpolated \
-         (`include(\"$dir/a.jl\")`), qualified (`M.include(...)`), and \
-         two-argument forms cannot be resolved without running the code and \
-         are never flagged."
+        "Report an `include(\"path\")` whose target is missing or unreadable. Relative paths \
+         resolve from the including file's directory.\n\n\
+         The rule checks only static paths. It skips computed or interpolated paths, qualified \
+         calls such as `M.include(...)`, and two-argument forms."
     }
 
     fn examples(&self) -> &'static [Example] {

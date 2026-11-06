@@ -54,22 +54,19 @@ impl Rule for ConstantCondition {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a `true`/`false` literal used as an `if`/`elseif`/`while` test or \
-         as an operand of the short-circuit `&&`/`||`. The branch or \
-         short-circuit is decided before the code runs, so the literal is \
-         usually leftover debugging or a mistyped name. `while true` is exempt \
-         as Julia's idiomatic infinite loop. No fix: removing the constant \
-         means restructuring the branch."
+        "Report `true` or `false` used as a condition or as an operand of `&&` or `||`. These \
+         constants often come from debugging code or a mistyped name. The rule allows `while \
+         true`, the usual way to write an infinite loop."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[
             Example {
-                caption: "A literal `if` test always takes the branch:",
+                caption: "An `if` condition that is always true:",
                 source: "if true\n    println(\"always\")\nend\n",
             },
             Example {
-                caption: "A literal operand decides `&&` at parse time:",
+                caption: "A constant that prevents `check(x)` from running:",
                 source: "ok = false && check(x)\n",
             },
         ]

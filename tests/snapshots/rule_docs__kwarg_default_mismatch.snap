@@ -4,7 +4,9 @@ expression: render_rule_doc(rule.as_ref())
 ---
 ## `kwarg-default-mismatch`
 
-Flag a keyword parameter whose literal default cannot be an instance of its declared type, as in `g(; y::Int = 1.0)`. A keyword's `::T` is not an implicit `convert`: Julia lowers it into a dispatch constraint on the inner method the default is passed to, so `g()` raises a `MethodError` every time. The check is exact, like dispatch itself — `y::Float64 = 1` and `y::Int8 = 1` are mismatches too — and fires only when both sides are certain: a bare, concrete `Core` type that resolves to Base, and a default whose own spelling pins its type down. Abstract and parametric annotations (`Real`, `Vector{Int}`), computed defaults, and the literals whose type follows their digit count (`0x01`) are all left alone.
+Report a keyword parameter whose default has the wrong type, such as `f(; x::Int = 1.0)`. Julia does not convert keyword defaults to the declared type, so calling `f()` raises `MethodError`. Defaults such as `x::Int8 = 1` also fail because `1` has type `Int`.
+
+The rule checks concrete built-in types and literals with known types. It skips abstract or parametric types and computed defaults.
 
 `y` is declared `Int`, so the `Float64` default never matches it:
 
@@ -20,10 +22,10 @@ error: kwarg-default-mismatch
   |
 1 | function scale(xs; y::Int = 1.0)
   |                    ^^^^^^^^^^^^ keyword argument `y` is declared `::Int`, but its default `1.0` has type `Float64`
-  = help: a keyword's `::T` is a dispatch constraint, not a `convert`, so the default raises a `MethodError`
+  = help: use a default of the declared type; Julia does not convert keyword defaults
 ```
 
-Julia does not promote here either — the default has to be an `Int8` already:
+An `Int` default for an `Int8` parameter:
 
 ```julia
 counter(; start::Int8 = 0) = start
@@ -35,5 +37,5 @@ error: kwarg-default-mismatch
   |
 1 | counter(; start::Int8 = 0) = start
   |           ^^^^^^^^^^^^^^^ keyword argument `start` is declared `::Int8`, but its default `0` has type `Int`
-  = help: a keyword's `::T` is a dispatch constraint, not a `convert`, so the default raises a `MethodError`
+  = help: use a default of the declared type; Julia does not convert keyword defaults
 ```

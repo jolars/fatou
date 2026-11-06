@@ -84,39 +84,21 @@ impl Rule for RedundantBoolean {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a test compared against a boolean literal, or a conditional whose \
-         two arms are the literals themselves. `x == true` and `x != false` are \
-         `x`; `x == false` and `x != true` are `!x`; `c ? true : false` is `c` \
-         and `c ? false : true` is `!c`. Because `==` and `!=` are symmetric, \
-         the mirrored spellings (`true == x`) collapse the same way.\n\n\
-         This is distinct from `constant-condition`, which owns the \
-         literal-*as*-test case (`if true`), where the branch is decided before \
-         the code runs.\n\n\
-         The two halves do not ship the same fix. The conditional rewrite is \
-         reported as a safe fix: `?:` requires a `Bool` test, so on every input \
-         that does not throw, `c ? true : false` hands back that very `Bool`. \
-         The comparison rewrite is reported as an unsafe fix, because `==` is \
-         not identity — it promotes across the numeric tower (`1 == true` is \
-         `true`), answers `missing` for `missing`, and is overloadable — so the \
-         two spellings agree only when the operand is already a `Bool`.\n\n\
-         The deliberate `===` / `!==`, the broadcast `.==` / `.!=`, and a \
-         comparison chain are left alone, as are a comparison of two boolean \
-         literals (no operand survives it) and a conditional whose arms agree \
-         (constant rather than redundant).\n\n\
-         The fix reuses the surviving operand's own source text, parenthesizing \
-         it when a bare `!` would rebind (`a + b == false` becomes \
-         `!(a + b)`). It is withheld — the finding still stands — when a \
-         comment sits in the replaced span outside that operand."
+        "Simplify comparisons to Boolean literals and conditionals that return them. For example, \
+         `x == true` becomes `x`, and `c ? false : true` becomes `!c`.\n\n\
+         The conditional fix is safe. The comparison fix requires `--unsafe-fixes` because the \
+         operand may have a type other than `Bool`: for example, `1 == true` returns `true`, \
+         while `1` remains an integer."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[
             Example {
-                caption: "A conditional over the two literals is its own test:",
+                caption: "Returning the condition directly:",
                 source: "ready = queue_started(q) ? true : false\n",
             },
             Example {
-                caption: "Comparing a test to a boolean literal restates it:",
+                caption: "Comparing a value to `false`:",
                 source: "if x.valid == false\n    reject(x)\nend\n",
             },
         ]

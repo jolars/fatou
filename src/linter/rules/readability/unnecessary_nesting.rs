@@ -65,29 +65,15 @@ impl Rule for UnnecessaryNesting {
     }
 
     fn description(&self) -> &'static str {
-        "Flag an `if` whose entire body is another `if`, where neither carries \
-         an `elseif` or an `else`. The two tests are one `&&` test spread over \
-         two levels of indentation: `if a; if b; body; end; end` is \
-         `if a && b; body; end`.\n\n\
-         The two spellings agree on every input. `if` demands a `Bool` and \
-         `&&` hands its right operand back untouched, so the merged test stops \
-         on a false `a` exactly where the nested form skips the inner `if`, and \
-         `if` opens no scope in Julia, so merging the blocks rebinds nothing.\n\n\
-         An alternative on either `if` breaks that agreement and is not \
-         reported: with an outer `else`, the case where `a` holds and `b` does \
-         not runs nothing before the merge and the `else` branch after it. A \
-         body holding anything besides the inner `if` is left alone for the \
-         same reason — the outer test guards more than the inner one.\n\n\
-         The fix splices the two tests and the inner block verbatim, \
-         parenthesizing a test that binds looser than `&&` (`if a || c` nested \
-         in `if b` becomes `(a || c) && b`). It is withheld — the finding still \
-         stands — when a comment sits in the discarded headers. The inner body \
-         keeps its indentation, which the formatter settles."
+        "Combine an `if` whose only statement is another `if` into one condition with `&&`. \
+         Neither `if` may have an `elseif` or `else` branch.\n\n\
+         The safe fix preserves the inner body and adds parentheses where needed. It is withheld \
+         if a comment would be lost. Run the formatter afterward to adjust indentation."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[Example {
-            caption: "An `if` guarding nothing but another `if` is one test:",
+            caption: "Combining nested conditions:",
             source: "if isopen(io)\n    if !eof(io)\n        read(io)\n    end\nend\n",
         }]
     }

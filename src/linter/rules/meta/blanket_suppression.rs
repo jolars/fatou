@@ -26,18 +26,14 @@ impl Rule for BlanketSuppression {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a `# fatou-ignore` directive that names no rule. A bare \
-         `# fatou-ignore-file` silences every rule in the file, including rules \
-         added later; a bare `# fatou-ignore` silences nothing at all, because \
-         the node-level form requires a rule ID. Name the rule the directive is \
-         meant to suppress. There is no fix: nothing in the source says which \
-         rule that is."
+        "Report a suppression comment with no rule ID. A bare `# fatou-ignore-file` disables \
+         every rule, including rules added later. A bare `# fatou-ignore` suppresses nothing. \
+         Name the specific rules to suppress."
     }
 
     fn examples(&self) -> &'static [Example] {
         &[Example {
-            caption: "A file-wide directive naming no rule turns the linter off \
-                      for the whole file:",
+            caption: "A file suppression without a rule ID:",
             source: "# fatou-ignore-file: generated code\n\nstruct Point\n    x::Float64\nend\n",
         }]
     }

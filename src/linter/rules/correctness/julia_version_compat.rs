@@ -61,14 +61,10 @@ impl Rule for JuliaVersionCompat {
     }
 
     fn description(&self) -> &'static str {
-        "Flag syntax newer than the project's declared Julia support range. \
-         Fatou parses the full superset of Julia syntax, so a construct from a \
-         newer release parses cleanly even when the project targets an older \
-         version; this rule reports when a supported version predates the \
-         construct (e.g. `public` needs 1.11, `import ... as` needs 1.6). The \
-         target range is taken from `--julia-version`, `[julia] version`, or the \
-         project's `Project.toml` `[compat]` / `Manifest.toml`; with no target \
-         known the rule stays silent."
+        "Report syntax unavailable in a Julia version the project supports. For example, `public` \
+         requires Julia 1.11, and `import ... as` requires 1.6.\n\n\
+         The target comes from `--julia-version`, `[julia] version`, or the project's \
+         `Project.toml` or `Manifest.toml`. The rule does nothing when no target is known."
     }
 
     fn examples(&self) -> &'static [Example] {

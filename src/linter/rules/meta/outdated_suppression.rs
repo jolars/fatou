@@ -52,12 +52,9 @@ impl Rule for OutdatedSuppression {
     }
 
     fn description(&self) -> &'static str {
-        "Flag a `# fatou-ignore` directive that suppressed nothing: either the \
-         rule it names ran and reported nothing it covers, or the directive has \
-         no code after it to apply to. A rule that this run did not enable, and \
-         any rule in a file whose names cannot be resolved (one that uses dynamic \
-         `eval` or `using`s a module the run did not harvest), is dormant rather than \
-         stale and is never reported. The safe fix deletes the directive."
+        "Report a suppression comment that no longer suppresses a finding or has no code after \
+         it. Disabled rules and files whose names cannot be resolved reliably are not checked. \
+         The safe fix deletes the comment."
     }
 
     fn examples(&self) -> &'static [Example] {

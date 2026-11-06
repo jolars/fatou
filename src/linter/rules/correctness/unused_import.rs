@@ -22,13 +22,10 @@ impl Rule for UnusedImport {
     }
 
     fn description(&self) -> &'static str {
-        "Flag an explicitly imported name that is never used: `import X`, \
-         `import X as Y`, and the colon-item forms `using X: a` / `import X: a`. \
-         The whole-module `using X` form is exempt, since it attaches exports \
-         that resolve elsewhere. A qualified use (`X.f`) or a re-`export` counts \
-         as a use. Uses in the same module's included files also count. Incomplete \
-         include contexts withhold findings rather than treating missing uses \
-         as proof that an import is unused."
+        "Report an explicitly imported name that is never used. Qualified references, re-exports, \
+         and uses in the same module's included files count as uses.\n\n\
+         The rule skips whole-module `using X` statements and withholds findings when an \
+         incomplete include chain could hide a use."
     }
 
     fn examples(&self) -> &'static [Example] {

@@ -45,22 +45,11 @@ impl Rule for SortedExtremum {
     }
 
     fn description(&self) -> &'static str {
-        "Flag indexing one end of a freshly sorted collection: `sort(xs)[1]` \
-         copies and orders every element to answer what `minimum(xs)` answers \
-         in one pass, and `sort(xs)[end]` (like `sort(xs)[begin]` for the other \
-         end) does the same for `maximum(xs)`.\n\n\
-         Only a plain `sort(x)` at either end is flagged. A `rev`, `by`, or \
-         `lt` keyword decides which element lands where, so the index no longer \
-         picks the extremum a reducer would return; any other index \
-         (`sort(xs)[2]`) genuinely needs the order; and `sort!` is a different \
-         function. `sort` must be confirmed to be Base's, so a local shadow or \
-         a qualified `Base.sort` reports nothing.\n\n\
-         The fix replaces the indexing with the extremum call, but needs \
-         `--unsafe-fixes`: sorting orders `NaN` last, so `sort(xs)[1]` returns \
-         the smallest real number where `minimum(xs)` propagates the `NaN`. It \
-         is withheld — the finding still stands — when the file's \
-         `minimum`/`maximum` is not Base's, or when a comment sits in the \
-         rewritten span outside the collection."
+        "Prefer `minimum(xs)` to `sort(xs)[1]` or `sort(xs)[begin]`, and `maximum(xs)` to \
+         `sort(xs)[end]`. Finding an extreme takes one pass and avoids sorting the collection. \
+         Calls with sorting options such as `rev`, `by`, or `lt` are not checked.\n\n\
+         The fix requires `--unsafe-fixes`: sorting places `NaN` last, while `minimum` and \
+         `maximum` propagate it."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -70,7 +59,7 @@ impl Rule for SortedExtremum {
                 source: "lowest = sort(scores)[1]\n",
             },
             Example {
-                caption: "And the largest:",
+                caption: "Sorting to read the largest element:",
                 source: "highest = sort(scores)[end]\n",
             },
         ]
