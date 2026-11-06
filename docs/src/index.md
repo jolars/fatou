@@ -3,7 +3,7 @@ layout: home
 title: Fatou
 hero:
   name: Fatou
-  text: Julia tooling, ready when you are.
+  text: Julia tooling, minus the runtime.
   tagline: A formatter, linter, and language server for Julia, written in Rust.
     Keep your code consistent and get feedback as you write, without starting Julia.
   image:
