@@ -5,8 +5,22 @@
 Fatou is a formatter, linter, and language server for
 [Julia](https://julialang.org), written in Rust. It keeps formatting consistent,
 finds common mistakes, and provides diagnostics and navigation in your editor.
-It also checks Julia project and manifest files and helps you navigate package
-dependencies. Analysis runs without evaluating your code or starting Julia.
+
+## Built on your code
+
+Fatou parses Julia into a lossless syntax tree and updates its analysis as you
+type. The same parser powers the formatter, linter, and language server.
+Formatting is deterministic, and formatting an already-formatted file changes
+nothing.
+
+Analysis runs without evaluating your code or starting Julia. Fatou reads your
+project's package environment statically to resolve names across files and
+installed dependencies. In your editor, it also checks `Project.toml` and
+`Manifest.toml` and helps you navigate dependencies.
+
+Share formatting settings and lint rules in
+[`fatou.toml`](guide/configuration.md), and use the same commands locally and in
+[CI](guide/integrations.md).
 
 ## Choose your setup {#quick-start}
 

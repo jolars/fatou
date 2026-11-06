@@ -92,7 +92,7 @@ assert.doesNotMatch(
 assert.match(performance, /\| Tool \|/);
 assert.match(performance, /LanguageServer\.jl/);
 const home = readFileSync(resolve(outputRoot, "index.md"), "utf8");
-assert.match(home, /Julia tooling, ready when you are/);
+assert.match(home, /Julia tooling, minus the runtime\./);
 assert.match(home, /Find problems early/);
 assert.doesNotMatch(home, /layout: home/);
 console.log(
