@@ -20,7 +20,6 @@ open("f") do io
 end
 
 reduce(xs) do acc, x
-
     acc + x
 end
 

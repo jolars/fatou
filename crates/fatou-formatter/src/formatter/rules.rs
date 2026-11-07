@@ -3818,8 +3818,7 @@ fn has_newline_token(node: &SyntaxNode) -> bool {
 
 /// The maximum number of consecutive blank lines the target style keeps; anything
 /// more is collapsed to this. A block body keeps at most a single blank line
-/// between statements (and at most one leading/trailing), so any run of blanks
-/// condenses to one.
+/// between statements; only module bodies also keep leading and trailing blanks.
 const MAX_BLANK_LINES: usize = 1;
 
 /// Lay out a comment-bearing bracketed list — a call/index `ARG_LIST` or a
@@ -5354,8 +5353,7 @@ fn collect_body_elements(
 
 /// Lower the document root into the canonical file layout: each top-level
 /// statement on its own line, interior blank runs capped at [`MAX_BLANK_LINES`],
-/// and — unlike a block body, which keeps one framing blank on each edge — **no**
-/// leading or trailing blank lines, terminating with exactly one final newline.
+/// no leading or trailing blank lines, and exactly one final newline.
 /// Reuses [`collect_body_lines`]; any shape it rejects (a top-level construct the
 /// body model does not handle) bails the whole file to the verbatim transparent
 /// lowering, so unhandled syntax stays lossless.
@@ -5425,10 +5423,10 @@ fn lower_root(root: &SyntaxNode) -> Ir {
 /// separators in a block, so `begin x; y end` and `begin x⏎y end` both reflow to
 /// `⏎    x⏎    y` — the source separator spelling never leaks (Tenet 1). Each
 /// statement is lowered recursively, so its own normalization still applies and a
-/// nested block indents further. Blank lines are preserved
-/// (capped at [`MAX_BLANK_LINES`] via an [`Ir::BlankLine`]): between statements,
-/// after the keyword (leading), and before `end` (trailing) — the framing break
-/// the layout always adds absorbs one newline on each side.
+/// nested block indents further. Interior blank lines are preserved, capped at
+/// [`MAX_BLANK_LINES`] via an [`Ir::BlankLine`]. Leading and trailing blank lines
+/// are removed, except in `module`/`baremodule` bodies, which keep up to
+/// [`MAX_BLANK_LINES`] on each side in addition to the framing breaks.
 ///
 /// Comments (line `#` and block `#= … =#`) are preserved. An **own-line** comment
 /// becomes its own line, re-indented to the body; a multi-line block comment keeps
@@ -5449,16 +5447,22 @@ fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
 fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
     let lines = collect_body_lines(block)?;
 
-    // Locate the content span. Empty lines outside it are the leading (after the
-    // keyword) and trailing (before `end`) framing lines plus any kept blanks:
-    // one empty line on each side is absorbed into the framing break, the rest
-    // become preserved blanks (capped at `MAX_BLANK_LINES`). All-empty ⇒ `None`.
+    // Only module bodies retain boundary blanks, regardless of nesting or indent.
+    // One empty line on each side is absorbed into the framing break.
     let first = lines.iter().position(|l| !l.is_blank())?;
     let last = lines.iter().rposition(|l| !l.is_blank()).unwrap();
-    let leading_blanks = first.saturating_sub(1).min(MAX_BLANK_LINES);
+    let boundary_blank_limit = if block
+        .parent()
+        .is_some_and(|parent| parent.kind() == SyntaxKind::MODULE_DEF)
+    {
+        MAX_BLANK_LINES
+    } else {
+        0
+    };
+    let leading_blanks = first.saturating_sub(1).min(boundary_blank_limit);
     let trailing_blanks = (lines.len() - 1 - last)
         .saturating_sub(1)
-        .min(MAX_BLANK_LINES);
+        .min(boundary_blank_limit);
     let content = &lines[first..=last];
 
     let mut inner: Vec<Ir> =

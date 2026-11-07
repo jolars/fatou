@@ -12,7 +12,6 @@ g = function (x)
     return x * 2
 end
 function k(x)::Int where {T}
-
     return x
 end
 macro m(x)
