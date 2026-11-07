@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.8.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.7.5...fatou-formatter-v0.8.0) (2026-11-07)
+
+### Features
+
+- **formatter:** trim block boundary blank lines ([`f7a98d1`](https://github.com/jolars/fatou/commit/f7a98d1fa9b12e131f70a972bd8ae670a8ba6052)), closes [#140](https://github.com/jolars/fatou/issues/140)
+
+### Bug Fixes
+
+- **formatter:** keep short-circuit guards attached ([`04f9dd0`](https://github.com/jolars/fatou/commit/04f9dd03a3848c154e2059265ea1ec4b1e5e2c6e)), fixes [#139](https://github.com/jolars/fatou/issues/139)
+
 ## [0.7.5](https://github.com/jolars/fatou/compare/fatou-formatter-v0.7.4...fatou-formatter-v0.7.5) (2026-10-29)
 
 ### Dependencies

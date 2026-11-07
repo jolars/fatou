@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.26.0](https://github.com/jolars/fatou/compare/fatou-code-v0.25.0...fatou-code-v0.26.0) (2026-11-07)
+
+### Bug Fixes
+
+- **code:** override vulnerable minimatch versions ([`147f5ec`](https://github.com/jolars/fatou/commit/147f5ec5a57b25c873c74ad10255405c6b1f116d))
+
+### Dependencies
+
+- updated fatou to v0.26.0
+
 ## [0.25.0](https://github.com/jolars/fatou/compare/fatou-code-v0.24.0...fatou-code-v0.25.0) (2026-10-29)
 
 ### Bug Fixes

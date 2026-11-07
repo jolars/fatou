@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.26.0](https://github.com/jolars/fatou/compare/v0.25.0...v0.26.0) (2026-11-07)
+
+### Features
+
+- configure safe formatting ([`a5e164a`](https://github.com/jolars/fatou/commit/a5e164a16e5e76e3e749b1ea9db01ea10158368a)), closes [#141](https://github.com/jolars/fatou/issues/141)
+
+### Dependencies
+
+- updated crates/fatou-formatter to v0.8.0
+
 ## [0.25.0](https://github.com/jolars/fatou/compare/v0.24.0...v0.25.0) (2026-10-29)
 
 ### Features
