@@ -120,6 +120,8 @@ fn config_schema_uses_the_public_draft_7_identity() {
 #[test]
 fn config_schema_accepts_supported_configuration() {
     assert_accepts("");
+    assert_accepts("[format]\nsafe = true\n");
+    assert_accepts("[format]\nsafe = false\n");
     assert_accepts("extend = \"../shared/fatou.toml\"\n");
     assert_accepts(
         r#"
@@ -170,6 +172,8 @@ fn config_schema_rejects_invalid_configuration() {
         "[project]\nentry-points = \"main.jl\"\n",
         "unknown = true\n",
         "[format]\nline-width = \"wide\"\n",
+        "[format]\nsafe = \"true\"\n",
+        "[format]\nsafe = 1\n",
         "[format]\nline-ending = \"mac\"\n",
         "[lint]\nunknown = true\n",
         "[lint]\nextend-select = \"undefined-name\"\n",

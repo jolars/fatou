@@ -46,7 +46,14 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             let (config, source) = load_config(&cli.config, cli.no_config)?;
             let style = style_with_overrides(&config, line_width, indent_width);
             let filter = resolve_exclude_filter(&config, &source, &exclude, force_exclude)?;
-            run_format(paths, check, safe, style, &filter, cli.quiet)
+            run_format(
+                paths,
+                check,
+                safe || config.format.safe,
+                style,
+                &filter,
+                cli.quiet,
+            )
         }
         Commands::Lint {
             paths,

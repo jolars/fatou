@@ -7446,6 +7446,124 @@ fn apply_edits(source: &str, edits: &[TextEdit]) -> String {
 const UNUSED_BINDING_SOURCE: &str = "function f(x)\n    tmp = x + 1\n    return x\nend\n";
 const UNFORMATTED_FUNCTION: &str = "function f(x)\nreturn x\nend\n";
 
+fn request_formatting(
+    client: &Connection,
+    uri: &Uri,
+    id: i32,
+    range: Option<Range>,
+) -> lsp_server::Response {
+    let mut params = serde_json::json!({
+        "textDocument": {"uri": uri},
+        "options": {"tabSize": 4, "insertSpaces": true},
+    });
+    if let Some(range) = range {
+        params["range"] = serde_json::to_value(range).unwrap();
+    }
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: id.into(),
+            method: if range.is_some() {
+                "textDocument/rangeFormatting"
+            } else {
+                "textDocument/formatting"
+            }
+            .into(),
+            params,
+        }))
+        .unwrap();
+    recv_response(client, id.into())
+}
+
+#[test]
+fn safe_formatting_config_rejects_invalid_documents_and_ranges() {
+    let dir = TempDir::new("fatou-lsp-safe-format");
+    let config_path = dir.path.join("fatou.toml");
+    write_file(&config_path, "[format]\nsafe = true\n");
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_options(&client, serde_json::json!({"format": {"safe": false}}));
+
+    for (i, source) in ["x=1\nfunction f(", "x=1\ny=1e400\n"]
+        .into_iter()
+        .enumerate()
+    {
+        let uri = file_uri(&dir.path.join(format!("broken{i}.jl")));
+        open_document(&client, &uri, source);
+        for range in [
+            None,
+            Some(Range::new(Position::new(0, 0), Position::new(0, 3))),
+        ] {
+            let response = request_formatting(&client, &uri, 10 + i as i32, range);
+            let error = response.response_result.unwrap_err();
+            assert_eq!(error.code, lsp_types::error_codes::REQUEST_FAILED as i32);
+            assert!(
+                error
+                    .message
+                    .contains("safe formatting verification failed"),
+                "{error:?}"
+            );
+            assert!(
+                error.message.contains("input does not parse cleanly"),
+                "{error:?}"
+            );
+        }
+    }
+
+    write_file(&config_path, "[format]\nsafe = false\n");
+    did_change_watched_files(
+        &client,
+        vec![FileEvent {
+            uri: file_uri(&config_path),
+            typ: FileChangeType::CHANGED,
+        }],
+    );
+    let uri = file_uri(&dir.path.join("broken0.jl"));
+    for range in [
+        None,
+        Some(Range::new(Position::new(0, 0), Position::new(0, 3))),
+    ] {
+        let response = request_formatting(&client, &uri, 20, range);
+        let edits: Vec<TextEdit> =
+            serde_json::from_value(response.response_result.unwrap()).unwrap();
+        assert!(!edits.is_empty());
+    }
+
+    drop(client);
+    server_thread.join().unwrap();
+}
+
+#[test]
+fn safe_formatting_client_settings_preserve_comments_and_range_boundaries() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_options(&client, serde_json::json!({"format": {"safe": true}}));
+    let uri = Uri::from_str("untitled:safe-format.jl").unwrap();
+    let source = "# keep\r\nα=.5 # value\r\ny=2\r\n";
+    open_document(&client, &uri, source);
+    assert_eq!(
+        format_document_text(&client, &uri, 2, source).unwrap(),
+        "# keep\r\nα = 0.5 # value\r\ny = 2\r\n"
+    );
+    let range = Range::new(Position::new(1, 0), Position::new(1, 4));
+    let response = request_formatting(&client, &uri, 3, Some(range));
+    let edits: Vec<TextEdit> = serde_json::from_value(response.response_result.unwrap()).unwrap();
+    assert_eq!(
+        apply_edits(source, &edits),
+        "# keep\r\nα = 0.5 # value\r\ny=2\r\n"
+    );
+
+    let broken = Uri::from_str("untitled:safe-broken.jl").unwrap();
+    open_document(&client, &broken, "function f(");
+    assert!(
+        request_formatting(&client, &broken, 4, None)
+            .response_result
+            .is_err()
+    );
+    drop(client);
+    server_thread.join().unwrap();
+}
+
 /// Formatting a document whose body is already clean sends back edits scoped
 /// to the lines that change, not a replacement of the whole file. That is what
 /// leaves the client's cursor, folds, and markers where the user left them.

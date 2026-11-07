@@ -21,6 +21,73 @@ use tempfile::TempDir;
 /// resolved `line-width` decides whether `format --check` reports a diff.
 const WIDE_CALL: &str = "result = some_function(alpha, beta, gamma, delta, epsilon, zeta)\n";
 
+#[test]
+fn safe_format_config_preflights_files_and_checks() {
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.path().join("fatou.toml"), "[format]\nsafe = true\n").unwrap();
+    std::fs::write(sandbox.path().join("input.jl"), "x=1\n").unwrap();
+    std::fs::write(sandbox.path().join("broken.jl"), "function f(").unwrap();
+
+    for args in [
+        vec!["format", "input.jl", "broken.jl"],
+        vec!["format", "--check", "input.jl", "broken.jl"],
+    ] {
+        let output = sandbox.run(sandbox.path(), &[], &args);
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(output.stdout.is_empty(), "{output:?}");
+        assert!(
+            stderr(&output).contains("safe formatting verification failed"),
+            "{output:?}"
+        );
+        assert!(stderr(&output).contains("broken.jl"), "{output:?}");
+        assert_eq!(
+            std::fs::read_to_string(sandbox.path().join("input.jl")).unwrap(),
+            "x=1\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(sandbox.path().join("broken.jl")).unwrap(),
+            "function f("
+        );
+    }
+
+    let output = sandbox.run(sandbox.path(), &[], &["format", "input.jl"]);
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        std::fs::read_to_string(sandbox.path().join("input.jl")).unwrap(),
+        "x = 1\n"
+    );
+}
+
+#[test]
+fn safe_format_config_is_inherited_and_can_be_disabled() {
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.path().join("base.toml"), "[format]\nsafe = true\n").unwrap();
+    std::fs::write(sandbox.path().join("fatou.toml"), "extend = 'base.toml'\n").unwrap();
+    std::fs::write(sandbox.path().join("input.jl"), "function f(").unwrap();
+    let output = sandbox.format_check(&[], &[]);
+    assert!(
+        stderr(&output).contains("input does not parse cleanly"),
+        "{output:?}"
+    );
+
+    std::fs::write(
+        sandbox.path().join("fatou.toml"),
+        "extend = 'base.toml'\n[format]\nsafe = false\n",
+    )
+    .unwrap();
+    let output = sandbox.format_check(&[], &[]);
+    assert!(would_reformat(&output), "{output:?}");
+    let output = sandbox.run(
+        sandbox.path(),
+        &[],
+        &["format", "--safe", "--check", "input.jl"],
+    );
+    assert!(
+        stderr(&output).contains("input does not parse cleanly"),
+        "{output:?}"
+    );
+}
+
 struct Sandbox {
     dir: TempDir,
 }

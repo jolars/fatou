@@ -160,6 +160,35 @@ fn safe_formats_verified_stdin() {
 }
 
 #[test]
+fn safe_config_applies_to_stdin_and_no_config_bypasses_it() {
+    let dir = sandbox();
+    std::fs::write(dir.path().join("fatou.toml"), "[format]\nsafe = true\n").unwrap();
+    let output = run_stdin(dir.path(), &["format", "-"], Some("function f("));
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("input does not parse cleanly")
+    );
+
+    let output = run_stdin(dir.path(), &["format", "-"], Some("# keep\nx=.5\n"));
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "# keep\nx = 0.5\n"
+    );
+
+    let output = run_stdin(
+        dir.path(),
+        &["--no-config", "format", "-"],
+        Some("function f("),
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "function f(\n");
+}
+
+#[test]
 fn safe_formats_standalone_colons_with_trailing_spaces() {
     let dir = sandbox();
     let input = "A[ rows, : ]\nview( A, i, : )\n";

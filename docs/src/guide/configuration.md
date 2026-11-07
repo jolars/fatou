@@ -220,6 +220,20 @@ line-width = 100
 line-ending = "lf"
 ```
 
+To enable safe formatting for the CLI and editor formatting, including
+format-on-save and range formatting, add:
+
+```toml
+[format]
+safe = true
+```
+
+Safe formatting verifies that the result preserves the parsed program and its
+comments. Malformed input and syntax the verifier cannot compare produce an
+error and leave the source untouched. Range formatting verifies the full
+document, so malformed code outside the selection also blocks edits. The default
+is `false`; `fatou format --safe` enables verification for a single run.
+
 See the [format reference](../reference/configuration.md#format) for defaults,
 line-ending choices, command-line overrides, and deprecated key spellings.
 

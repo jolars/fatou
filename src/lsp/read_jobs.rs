@@ -9,13 +9,13 @@ use lsp_types::{
     CallHierarchyItem, CodeActionOrCommand, CompletionItem, CompletionResponse,
     DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentSymbolResponse, FileRename,
     FullDocumentDiagnosticReport, GotoDefinitionResponse, Location, Position, Range,
-    RelatedFullDocumentDiagnosticReport, RelatedUnchangedDocumentDiagnosticReport,
+    RelatedFullDocumentDiagnosticReport, RelatedUnchangedDocumentDiagnosticReport, TextEdit,
     TypeHierarchyItem, UnchangedDocumentDiagnosticReport, Uri, WorkspaceSymbolResponse,
 };
 
 use std::sync::Arc;
 
-use crate::formatter::FormatStyle;
+use crate::formatter::{FormatStyle, VerifiedFormatError};
 use crate::incremental::Analysis;
 use crate::text::{PositionEncoding, TextBuffer};
 
@@ -27,7 +27,7 @@ use super::completion::{completion_via_db, resolve_completion};
 use super::definition::definition_via_db;
 use super::document_link::document_links_via_db;
 use super::folding::folding_ranges_via_db;
-use super::format::{format_edits_via_db, format_range_edits_via_db};
+use super::format::{format_edits_via_db, format_range_edits_via_db, verify_format_edits};
 use super::hover::hover_via_db;
 use super::lint::ServerRules;
 use super::project_navigation::{
@@ -105,6 +105,7 @@ pub(crate) enum ReadJob {
         path: PathBuf,
         text: Arc<TextBuffer>,
         style: FormatStyle,
+        safe: bool,
         sender: ReadReply,
     },
     FormatRange {
@@ -113,6 +114,7 @@ pub(crate) enum ReadJob {
         text: Arc<TextBuffer>,
         range: Range,
         style: FormatStyle,
+        safe: bool,
         sender: ReadReply,
     },
     DocumentSymbols {
@@ -415,6 +417,28 @@ pub(crate) fn diagnostic_report(
     ))
 }
 
+fn format_response(
+    id: RequestId,
+    text: &TextBuffer,
+    edits: Option<Vec<TextEdit>>,
+    safe: bool,
+    encoding: PositionEncoding,
+) -> Response {
+    if safe {
+        let verified = edits
+            .as_ref()
+            .ok_or_else(|| "safe formatting failed: formatter rejected the input".to_string())
+            .and_then(|edits| {
+                verify_format_edits(text, edits, encoding)
+                    .map_err(|error| VerifiedFormatError::from(error).to_string())
+            });
+        if let Err(message) = verified {
+            return Response::new_err(id, ErrorCode::RequestFailed as i32, message);
+        }
+    }
+    Response::new_ok(id, edits)
+}
+
 /// Service a read-only job against a db `snapshot`, replying to the client.
 /// Runs on a read-pool worker; the `snapshot` is dropped on return so it never
 /// blocks the analysis thread's next write longer than the job itself.
@@ -450,10 +474,13 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             path,
             text,
             style,
+            safe,
             sender,
         } => {
             let result = format_edits_via_db(&snapshot, &path, &text, style, encoding);
-            let _ = sender.send(Message::Response(Response::new_ok(id, result)));
+            let _ = sender.send(Message::Response(format_response(
+                id, &text, result, safe, encoding,
+            )));
         }
         ReadJob::FormatRange {
             id,
@@ -461,10 +488,13 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             text,
             range,
             style,
+            safe,
             sender,
         } => {
             let result = format_range_edits_via_db(&snapshot, &path, &text, range, style, encoding);
-            let _ = sender.send(Message::Response(Response::new_ok(id, result)));
+            let _ = sender.send(Message::Response(format_response(
+                id, &text, result, safe, encoding,
+            )));
         }
         ReadJob::DocumentSymbols {
             id,

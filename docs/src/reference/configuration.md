@@ -126,14 +126,25 @@ contexts because the script model records names, not method tables.
 
 ## `[format]`
 
-  | Key            | Type    | Default  | Description                                         |
-  | -------------- | ------- | -------- | --------------------------------------------------- |
-  | `line-width`   | integer | `92`     | The width the formatter tries to keep lines within. |
-  | `indent-width` | integer | `4`      | Number of spaces per indentation level.             |
-  | `line-ending`  | string  | `"auto"` | The newline style emitted at the end of each line.  |
+  | Key            | Type    | Default  | Description                                                |
+  | -------------- | ------- | -------- | ---------------------------------------------------------- |
+  | `line-width`   | integer | `92`     | The width the formatter tries to keep lines within.        |
+  | `indent-width` | integer | `4`      | Number of spaces per indentation level.                    |
+  | `line-ending`  | string  | `"auto"` | The newline style emitted at the end of each line.         |
+  | `safe`         | boolean | `false`  | Verify that formatting preserves the program and comments. |
 
 `line-width` and `indent-width` can be overridden per run with the
 `--line-width` and `--indent-width` flags on `fatou format`.
+
+`safe = true` applies the same verification as `fatou format --safe` to CLI
+formatting (files, stdin, and `--check`) and LSP document and range formatting.
+Malformed or unverifiable input, changed program structure, and changed comments
+cause an error without emitting formatting edits or writing files. Range
+formatting verifies the entire document after the proposed replacement,
+including code outside the selection. The language server returns a
+`RequestFailed` response with the verification error. CLI batches finish
+verification for every file before writing any file or printing any diff.
+`--safe` enables verification even when the config sets `safe = false`.
 
 `line-ending` accepts:
 

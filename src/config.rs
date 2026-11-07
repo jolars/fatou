@@ -139,6 +139,8 @@ impl ProjectConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatConfig {
+    /// Verify that formatting preserves the parsed program and its comments.
+    pub safe: bool,
     pub line_width: u32,
     pub indent_width: u32,
     /// The newline style the formatter emits. See [`LineEndingConfig`].
@@ -322,6 +324,7 @@ pub struct JuliaConfig {
 impl Default for FormatConfig {
     fn default() -> Self {
         Self {
+            safe: false,
             line_width: DEFAULT_LINE_WIDTH,
             indent_width: DEFAULT_INDENT_WIDTH,
             line_ending: LineEnding::default(),
@@ -417,6 +420,8 @@ pub(crate) struct RawConfig {
 #[cfg_attr(test, schemars(rename = "FormatConfig"))]
 #[serde(deny_unknown_fields)]
 struct RawFormat {
+    /// Verify that formatting preserves the parsed program and comments. Defaults to false.
+    safe: Option<bool>,
     /// Target line width. Defaults to 92.
     #[serde(rename = "line-width")]
     line_width: Option<u32>,
@@ -445,6 +450,7 @@ impl RawFormat {
             warnings.push(deprecated_key("indent_width", "indent-width"));
         }
         FormatConfig {
+            safe: self.safe.unwrap_or(defaults.safe),
             line_width: self
                 .line_width
                 .or(self.line_width_snake)

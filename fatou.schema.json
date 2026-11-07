@@ -83,6 +83,13 @@
             "integer",
             "null"
           ]
+        },
+        "safe": {
+          "description": "Verify that formatting preserves the parsed program and comments. Defaults to false.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "type": "object"

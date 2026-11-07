@@ -12,13 +12,35 @@ use crate::incremental::Analysis;
 use crate::parser::{ParseDiagnostic, parse};
 use crate::text::line_diff::bounded_line_diff;
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use fatou_formatter::verify::{VerificationError, verify_format};
+
+/// Verify the complete document a client would produce from these edits.
+/// Checking the spliced document also covers syntax and comments outside a
+/// range selection and the boundaries where the replacement meets its context.
+pub(crate) fn verify_format_edits(
+    text: &TextBuffer,
+    edits: &[TextEdit],
+    encoding: PositionEncoding,
+) -> Result<(), VerificationError> {
+    let index = text.line_index();
+    let mut formatted = String::with_capacity(text.len());
+    let mut end = 0;
+    for edit in edits {
+        let start = index.position_to_byte(edit.range.start, encoding);
+        formatted.push_str(&text[end..start]);
+        formatted.push_str(&edit.new_text);
+        end = index.position_to_byte(edit.range.end, encoding);
+    }
+    formatted.push_str(&text[end..]);
+    verify_format(text, &formatted)
+}
 
 /// Format `text` off the snapshot's cached parse when the db's tracked buffer
 /// for `path` still matches it; otherwise re-parse. A write racing the read
 /// trips `salsa::Cancelled`, which also falls back to a fresh parse.
 ///
-/// No parse-error refusal: the formatter lowers ERROR nodes transparently
-/// (byte-identical), matching the CLI's behavior on broken input.
+/// This computes best-effort edits. Safe requests verify them with
+/// [`verify_format_edits`] before returning a response.
 pub(crate) fn format_edits_via_db(
     snapshot: &Analysis,
     path: &Path,
@@ -307,6 +329,34 @@ mod tests {
     use super::*;
     use crate::incremental::IncrementalDatabase;
     use std::path::Path;
+
+    #[test]
+    fn verified_edits_check_the_spliced_program_and_comments() {
+        let source = TextBuffer::new("# keep\nα=.5\ny=2\n");
+        for encoding in [PositionEncoding::Utf8, PositionEncoding::Utf16] {
+            let range = Range::new(Position::new(1, 0), Position::new(2, 0));
+            for (replacement, expected) in [
+                ("α = 0.5\n", Ok(())),
+                ("α = 1\n", Err(VerificationError::ChangedProgram)),
+                ("α = 0.5 # added\n", Err(VerificationError::ChangedComments)),
+            ] {
+                let edits = [TextEdit {
+                    range,
+                    new_text: replacement.into(),
+                }];
+                assert_eq!(verify_format_edits(&source, &edits, encoding), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn verified_empty_edits_still_reject_malformed_input() {
+        let source = TextBuffer::new("function f(");
+        assert!(matches!(
+            verify_format_edits(&source, &[], PositionEncoding::Utf16),
+            Err(VerificationError::InputSyntax { .. })
+        ));
+    }
 
     /// The cached-tree format path matches the re-parse path when the db's
     /// tracked buffer is the live text, and falls back (still correctly) when

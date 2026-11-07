@@ -34,6 +34,7 @@ use super::uri;
 /// per load (the lint dispatch table included) rather than per request.
 pub(crate) struct ResolvedConfig {
     pub(crate) style: FormatStyle,
+    pub(crate) safe_format: bool,
     pub(crate) rules: Arc<ServerRules>,
 }
 
@@ -60,6 +61,7 @@ impl ResolvedConfig {
         );
         Arc::new(Self {
             style: FormatStyle::from(&config.format),
+            safe_format: config.format.safe,
             rules: Arc::new(rules),
         })
     }

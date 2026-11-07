@@ -444,13 +444,14 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
-        let style = self.config_for(&uri).style;
+        let config = self.config_for(&uri);
         let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::Format {
             id,
             path: path_for(&uri),
             text,
-            style,
+            style: config.style,
+            safe: config.safe_format,
             sender: reply,
         });
     }
@@ -467,14 +468,15 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
-        let style = self.config_for(&uri).style;
+        let config = self.config_for(&uri);
         let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::FormatRange {
             id,
             path: path_for(&uri),
             text,
             range: params.range,
-            style,
+            style: config.style,
+            safe: config.safe_format,
             sender: reply,
         });
     }
