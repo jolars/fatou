@@ -1,39 +1,20 @@
 # Editor setup
 
-Fatou includes a language server (`fatou lsp`, stdio JSON-RPC) that any LSP
-client can drive. It provides formatting (whole document and range), lint and
-parse diagnostics with quick fixes, completion, hover, signature help, go-to
-definition, references, rename (of symbols, and of files and folders — moving a
-file rewrites the `include` paths that name it), document and workspace symbols,
-call and type hierarchy, folding ranges, document links, selection ranges, and
-semantic tokens. It also checks your `Project.toml` and `Manifest.toml`
-themselves, navigates an open `Project.toml`'s dependency names with inlay hints
-for their resolved versions, and links an open `Manifest.toml`'s `path` entries
-to the packages they pin.
+Choose your editor below to connect it to Fatou. Once connected, you can format
+Julia code, see diagnostics, and navigate your project.
 
-Renaming a package entry from `src/MyPkg.jl` to `src/NewPkg.jl` also updates
-`name` in its `Project.toml` or `JuliaProject.toml` and matching top-level
-`module MyPkg` declarations. The project edit uses unsaved buffer text and
-preserves the UUID, comments, and other fields. The destination must remain in
-the package's `src/` directory and have a valid Julia identifier as its name.
-Imports and references to the package name elsewhere require separate updates.
+<span id="unicode-symbol-input"></span>
 
-Static docstrings are decoded before the server presents them, so unsaved local
-documentation and harvested package documentation render the same way. Their
-Markdown headings appear in the document outline and fold as sections; external
-links, fragments, footnotes, and explicit Documenter `@ref` targets navigate in
-place. An explicit `@ref` also completes Julia symbols and documentation
-anchors. Fences that declare Julia code—including `julia`, `julia-repl`,
-`jldoctest`, and Julia-bearing Documenter directives—receive completion, hover,
-signature help, go-to-definition, selection ranges, nested folding, and semantic
-highlighting. Dynamic or custom `@doc` metadata remains opaque.
+The [language server guide](language-server.md) explains the features you can
+use, including refactoring, dependency updates, and [Unicode symbol
+input](language-server.md#unicode-symbol-input).
 
 ## Prerequisites
 
-Install Fatou (see [Installation](../installation.md)) and make sure the `fatou`
-binary is on your `PATH`, or note its absolute path. The VS Code family is an
-exception, since the extension bundles a binary, and so is Zed, whose extension
-downloads one when it finds nothing on the `PATH`.
+The VS Code extension includes a Fatou binary, and the Zed extension can
+download one for you. For other setups, [install Fatou](../installation.md)
+first. Make sure `fatou` is on your `PATH`, or use its absolute path in your
+editor's configuration.
 
 ## VS Code
 
@@ -45,10 +26,9 @@ extension](https://marketplace.visualstudio.com/items?itemName=jolars.fatou)
 code --install-extension jolars.fatou
 ```
 
-The extension activates on Julia files, starts `fatou lsp` for you, and
-registers itself as the default formatter for `[julia]`. Each platform-specific
-build bundles a matching `fatou` binary, so nothing else is needed; on a
-platform without one, it downloads a binary from GitHub releases.
+The extension starts `fatou lsp` when you open a Julia file and registers Fatou
+as the default Julia formatter. It includes a matching binary for supported
+platforms and downloads one from GitHub releases when none is bundled.
 
 To format on save, add to `settings.json`:
 
@@ -61,7 +41,9 @@ To format on save, add to `settings.json`:
 }
 ```
 
-To use a `fatou` you installed yourself instead of the bundled one:
+### Use an installed binary
+
+To use the `fatou` on your `PATH`, add:
 
 ```json
 {
@@ -69,7 +51,7 @@ To use a `fatou` you installed yourself instead of the bundled one:
 }
 ```
 
-or point at an exact binary:
+To use a binary at a specific path, add:
 
 ```json
 {
@@ -90,7 +72,7 @@ To use a shared `fatou.toml` outside your projects, add this to your user
 ```json
 {
   "fatou.serverEnv": {
-    "FATOU_CONFIG": "P:/Softwares/fatou.toml"
+    "FATOU_CONFIG": "/path/to/fatou.toml"
   }
 }
 ```
@@ -103,17 +85,15 @@ resolution order and error behavior.
 
 ### Using only some features
 
-The formatter, linter, and language features share one server but can be turned
-off independently, so you can adopt just the parts you want:
+You can choose which parts of Fatou VS Code uses:
 
-- `fatou.formatting.enable` — use Fatou as a formatter.
-- `fatou.diagnostics.enable` — show Fatou diagnostics (the linter).
+- `fatou.formatting.enable` — formatting.
+- `fatou.diagnostics.enable` — parse errors and lint diagnostics.
 - `fatou.languageFeatures.enable` — hover, completion, navigation, symbols,
-  rename, code actions, and the rest.
+  rename, and code actions.
 
-All three default to `true`. They are client-side gates, so the server keeps
-running and the toggles take effect without a restart. For a formatter-only
-setup, turn off the other two:
+All three default to `true`, and changes take effect without restarting the
+server. For a formatter-only setup, turn off the other two:
 
 ```json
 {
@@ -122,11 +102,10 @@ setup, turn off the other two:
 }
 ```
 
-Turning off `fatou.diagnostics.enable` suppresses **every** diagnostic,
-including the parse errors that a `fatou.toml` [`[lint]`
-selection](../reference/configuration.md#lint) cannot silence. The `fatou.toml`
-route stays the right tool when you want to keep parse errors but mute specific
-lint rules across every editor and the CLI.
+Turning off diagnostics also hides parse errors. To keep parse errors and
+disable only specific lint rules, configure [`[lint]` in
+`fatou.toml`](configuration.md#choosing-lint-rules) instead. Those settings
+apply to every editor and the CLI.
 
 ## VSCodium and other Code OSS editors
 
@@ -160,15 +139,13 @@ binary-selection snippets above apply unchanged.
 
 ## Zed
 
-Fatou attaches to Zed's `Julia` language, which the [Julia
-extension](https://github.com/JuliaEditorSupport/zed-julia) provides. Install
-that one first, then install **Fatou** from the extensions view
-(`zed: extensions` in the command palette).
+Install the [Julia extension](https://github.com/JuliaEditorSupport/zed-julia)
+first, then install **Fatou** from the extensions view (`zed: extensions` in the
+command palette).
 
 Zed uses the `fatou` on your `PATH` when there is one, and otherwise downloads
-the release binary matching your platform. Keeping Fatou on the `PATH` is the
-better option on distributions that cannot run the generic release build, NixOS
-above all.
+the release binary matching your platform. On systems such as NixOS, use an
+installed binary if the downloaded release cannot run.
 
 To run Fatou as the only Julia language server and use it for formatting, add
 this to `settings.json`:
@@ -190,8 +167,7 @@ this to `settings.json`:
 
 To format on save, also add `"format_on_save": "on"` under `languages.Julia`.
 
-Settings go under the server's id, using the schema described in
-[Configuration](#configuration) below:
+To pass settings through Zed, put them under the server's name:
 
 ```json
 {
@@ -206,8 +182,8 @@ Settings go under the server's id, using the schema described in
 }
 ```
 
-A `fatou.toml` in the project shadows these entirely, so prefer the file when
-the whole team should share the behavior.
+Use [`fatou.toml`](#configuration) for settings the whole team should share. A
+discovered config file takes precedence over these editor settings.
 
 To point Zed at a particular binary, set `binary.path`:
 
@@ -221,8 +197,8 @@ To point Zed at a particular binary, set `binary.path`:
 }
 ```
 
-`arguments` replaces the command line rather than extending it, so it has to
-keep naming a subcommand that speaks LSP.
+Keep `"lsp"` in `arguments`; this setting replaces the extension's default
+arguments.
 
 ## Neovim
 
@@ -311,9 +287,8 @@ auto-format = true
 ```
 
 Listing `language-servers` replaces Helix's default for Julia, which is
-LanguageServer.jl. To keep it for the features Fatou does not cover yet while
-Fatou handles formatting, list both and take formatting away from the other
-server:
+LanguageServer.jl. To use both servers while Fatou handles formatting, list them
+together and disable formatting from the other server:
 
 ```toml
 [[language]]
@@ -326,67 +301,27 @@ auto-format = true
 
 ## Other LSP clients
 
-Any client that speaks LSP over stdio works: launch `fatou lsp` with no
-arguments for `*.jl` files, rooted at `Project.toml`, `JuliaProject.toml`, or
-`.git`. Nothing else is required, because Fatou discovers its own configuration
-from the file's directory upward.
+For a client without a Fatou integration, configure it to:
 
-Fatou also checks your `Project.toml` and `Manifest.toml` themselves, and
-publishes those findings on the file at fault whether or not it is open. If you
-additionally attach the server to those files (the VS Code extension does), an
-open one reports its TOML errors as you type, before you save.
+1. Start `fatou lsp` over stdio for Julia (`*.jl`) files.
+2. Find the project root using `Project.toml`, `JuliaProject.toml`, or `.git`.
 
-An open `Project.toml` also answers on its dependency names: go-to-definition
-and a document link take you to the package's entry file, hovering reports the
-version, kind, and resolved path the environment gave it, and an inlay hint puts
-each resolved version beside its UUID, so you can read off what you are actually
-on without opening the `Manifest.toml`. In an open `Manifest.toml`, each `path`
-entry — a package you have `dev`'d — is a link to that package's `Project.toml`.
+Fatou discovers its configuration from the source file's directory, so no
+additional settings are required.
 
-Dependency updates follow the update/upgrade distinction used by
-[crates.nvim](https://github.com/saecki/crates.nvim), adapted to Julia's [Pkg
-compatibility grammar](https://pkgdocs.julialang.org/v1/compatibility/). On a
-dependency declaration or its existing `[compat]` entry, Fatou offers:
-
-- **Update** to adjust the bound to the newest stable release it already allows.
-- **Upgrade** to allow the newest stable release outside the current bound.
-
-Actions appear only when they change the bound. Edits retain version precision,
-operators, quotes, surrounding comments, and whitespace: given releases `1.9.3`
-and `2.3.4`, a bound of `"1.2"` offers Update to `"1.9"` and Upgrade to `"2.3"`.
-A bound of `"1"` offers only Upgrade to `"2"`. Julia's comma-separated ranges
-form a union; updates change the matching arm, and upgrades outside a union
-append a new arm so earlier support ranges survive.
-
-With LSP inlay hints enabled, each `[compat]` value shows the newest matching
-release and any available upgrade, such as `v1.9.3 → v2.3.4`. The matching
-release stays visible when the bound is current. These registry hints complement
-the resolved versions beside `[deps]` UUIDs; their tooltips explain the
-distinction.
-
-This works in `Project.toml` and `JuliaProject.toml`, including `[weakdeps]`,
-`[extras]`, and unsaved edits. Fatou reads installed directory and compressed
-registries in the background, caching compressed results until the archive
-changes. It skips yanked releases, prereleases, and dependencies overridden in
-`[sources]`. Missing or malformed registry data produces fewer suggestions.
-
-Suggestions use local registry data; unlike crates.nvim's crates.io requests,
-Fatou does not fetch published releases over the network. Update your registries
-through Pkg when you need fresher suggestions. Applying an action edits only
-`Project.toml`: it does not resolve the environment, update `Manifest.toml`,
-download packages, invoke Julia, or check compatibility with the project's Julia
-version and other dependencies. Formatting remains unavailable for TOML files.
+Also attach the server to `Project.toml` and `Manifest.toml` if you want live
+diagnostics and [dependency navigation and
+updates](language-server.md#manage-your-package-environment) in those files. The
+VS Code extension does this automatically.
 
 ## Configuration
 
-Fatou reads its settings from a `fatou.toml` next to your project (see the
-[Configuration guide](configuration.md)), which is the recommended way to
-configure it in any editor, since the whole team gets the same behavior.
+Put shared formatting and lint settings in a `fatou.toml` at your project root.
+The editor and CLI use the same file. See [Configuration](configuration.md) for
+available settings and where Fatou looks for them.
 
-A client can also push settings over LSP, as `initializationOptions` or
-`workspace/didChangeConfiguration`, using the same schema as the file, either
-bare or wrapped in a `"fatou"` key the way VS Code namespaces settings. In
-Helix, for example:
+To keep settings in your editor instead, use the same schema as `fatou.toml`.
+For example, in Helix:
 
 ```toml
 [language-server.fatou.config.format]
@@ -396,41 +331,38 @@ line-width = 100
 ignore = ["unused-binding"]
 ```
 
-A discovered `fatou.toml` shadows editor-pushed settings entirely rather than
-merging with them, so a project file always wins.
+A discovered config file takes precedence over editor settings and replaces them
+entirely. This also applies to a [global or `FATOU_CONFIG`
+file](configuration.md#resolution-order).
 
-## Unicode symbol input
-
-Completion also offers the LaTeX and emoji sequences the Julia REPL substitutes
-on tab, so `\alpha` inserts `α`, `\_1` inserts `₁`, and `\:smile:` inserts 😄.
-Type the backslash to open the list, keep typing to narrow it, and accepting an
-entry replaces the whole sequence, backslash included. As in the REPL, a bare
-`\` lists the LaTeX sequences and `\:` opens the emoji. The table comes from the
-running Julia's `REPL.REPLCompletions`, so it matches what your REPL does.
-
-Two places stay quiet, so the list does not get in the way:
-
-- inside a string macro or command literal (`r"\d"`, `raw"\n"`, `` `ls \d` ``),
-  where every backslash belongs to the literal itself;
-- on a lone escape in a plain string, so typing `"\n` does not offer `\nabla`. A
-  second character brings the sequences back, so `\nu` and `\alpha` still work
-  in strings and docstrings.
+For other LSP clients, send settings through `initializationOptions` or
+`workspace/didChangeConfiguration`, either directly or wrapped in a `"fatou"`
+key.
 
 ## Check it works
 
-Open a `.jl` file containing `x=1` and format the buffer: it becomes `x = 1`. In
-Neovim that is `:lua vim.lsp.buf.format()`, in Helix `:format`, and in the VS
-Code family **Format Document**. Diagnostics appear inline, and a lint finding
-with a fix offers it as a quick fix (`:lua vim.lsp.buf.code_action()`,
-`<space>a` in Helix, or the lightbulb in VS Code).
+Open a `.jl` file containing `x=1` and format the buffer. It should become
+`x = 1`.
 
-## Notes
+  | Editor         | Format the buffer           | Apply a diagnostic's quick fix         |
+  | -------------- | --------------------------- | -------------------------------------- |
+  | VS Code family | **Format Document**         | Click the lightbulb beside the finding |
+  | Neovim         | `:lua vim.lsp.buf.format()` | `:lua vim.lsp.buf.code_action()`       |
+  | Helix          | `:format`                   | `<space>a`                             |
 
-- Document sync is incremental, and both whole-document and range formatting are
-  supported.
-- Multiple formatters attached? In Neovim, pass `{ name = "fatou" }` to
-  `vim.lsp.buf.format()`; in Helix, strip `format` from the other server as
-  shown above; in VS Code, set `editor.defaultFormatter` for `[julia]`.
-- `undefined-name` and `call-arity` need project context, so the language server
-  enables them for workspace member files even though the command line leaves
-  them opt-in. An `ignore` entry still turns them off.
+Diagnostics appear as you edit. When a finding has a suggested fix, open the
+quick-fix menu to apply it.
+
+<span id="notes"></span>
+
+## Troubleshooting
+
+If Fatou does not start, check that your editor can find the binary. An editor
+launched from a desktop shortcut may have a different `PATH` from your terminal.
+Try setting the binary's absolute path using the instructions for your editor
+above.
+
+If another server also formats Julia files, select Fatou explicitly. In Neovim,
+use `vim.lsp.buf.format({ name = "fatou" })`. In Helix, exclude `format` from
+the other server as shown above. In VS Code, set `editor.defaultFormatter` for
+`[julia]` to `"jolars.fatou"`.

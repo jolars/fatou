@@ -95,5 +95,6 @@ These are line comments, not `#= ... =#` block comments. They suppress lint
 findings without disabling formatting, and they cannot suppress parse errors.
 For a rule the entire project should disable, use `[lint] ignore` instead.
 
-See [Editor setup](editors.md) for diagnostics and fixes while editing, and
-[Integrations](integrations.md) for automated checks.
+See [Language server](language-server.md#format-code-and-fix-problems) for
+diagnostics and fixes while editing, and [Integrations](integrations.md) for
+automated checks.

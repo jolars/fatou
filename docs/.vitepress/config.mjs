@@ -102,6 +102,7 @@ export default defineConfig({
         ["Linting", "guide/linting"],
         ["Configuration", "guide/configuration"],
         ["Editor setup", "guide/editors"],
+        ["Language server", "guide/language-server"],
         ["Integrations", "guide/integrations"],
         ["Performance", "guide/performance"],
         ["Comparison", "guide/comparison"],

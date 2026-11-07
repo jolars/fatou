@@ -46,6 +46,8 @@ package managers, source builds, and the dprint plugin.
   code, choose checks, and apply fixes.
 - [Configuration](guide/configuration.md): share project settings in
   `fatou.toml`.
+- [Language server](guide/language-server.md): use completion, navigation,
+  refactoring, and dependency updates in your editor.
 - [Integrations](guide/integrations.md): run checks in CI or a pre-commit hook.
 
 For individual commands, settings, and diagnostics, see the [CLI
