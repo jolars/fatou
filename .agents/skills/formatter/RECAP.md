@@ -50,6 +50,12 @@ Detail lives in `git log`, not here.
 Each was a user call (mostly via AskUserQuestion) and is pinned by a fixture.
 Reversing one is allowed but must be conscious and re-recorded, never drive-by.
 
+- **Only modules keep boundary blank lines** (#140). Ordinary blocks and branch
+  bodies drop leading and trailing blanks. `module` and `baremodule` bodies keep
+  up to one on each side, including nested modules. Interior runs remain capped
+  at one, and comments retain their attachment. This is the default policy, with
+  no option. `block_boundary_blank_lines`, `function_boundary_blank_lines`, and
+  `module_boundary_blank_lines`.
 - **Uniform arrow-tier break.** A chained pair whose innermost value is *grouped
   but non-huggable* (wide binary, paren, comparison) breaks at **every** `=>`,
   rather than hugging the spine and breaking the value.
@@ -150,16 +156,14 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (short-circuit guards, #139)
+## Latest session (block boundary blank lines, #140)
 
-`fix(formatter)`. Short-circuit operators keep a flat gap before `return`,
-`break`, and `continue`. Guard tails stay outside logical-chain flattening so
-earlier conditions retain uniform wrapping without splitting the final guard.
-Conditions and returned values keep their own groups and indentation. Comments
-between the operator and keyword retain the existing transparent fallback.
-`short_circuit_guards` adds one gated fixture; the reporter's exact width-50
-example separately checks idempotence, safe formatting, and reflow from a flat
-input. Gate 127→128 of 157. Formatter gate, stability, AST preservation, full
+`feat(formatter)`. The shared block-body engine retains boundary blanks only
+when its direct parent is a module definition. Module indentation and nesting
+do not affect the exception. Three fixtures cover the reporter's example,
+ordinary blocks and branches, comment-only and empty bodies, and nested modules
+and baremodules. Existing function and do-block expectations lose their leading
+blank. Gate 128→131 of 160. Formatter gate, stability, AST preservation, full
 workspace tests, clippy, and rustfmt are green. No parser or lexer blocker.
 
 **Ranked next target:** no formatter target is currently queued in `TODO.md`.
@@ -197,6 +201,8 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Short-circuit guards** (`fix`, #139): kept control-flow keywords attached to
+  wrapped conditions without changing ordinary logical-chain reflow. Gate 128.
 - **Verifier hardening** (`fix`): compared opaque literal payloads exactly,
   rejected non-finite float fingerprints, and normalized block-comment line
   endings. Gate stayed 127.

@@ -65,6 +65,10 @@
 
 ## Formatter
 
+- [x] Remove blank lines at ordinary block boundaries (#140). Preserve up to one
+  blank line between statements and at the boundaries of `module` and
+  `baremodule` bodies, including nested modules.
+
 - [x] Keep short-circuit `&&` and `||` guards attached to `return`, `break`, and
   `continue` when their conditions wrap (#139). Preserve ordinary logical-chain
   wrapping and allow returned values to wrap independently.

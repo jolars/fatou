@@ -3,6 +3,11 @@
 Fatou formats Julia source without starting Julia. After
 [installation](../installation.md), run it from your project directory.
 
+Fatou removes leading and trailing blank lines inside ordinary blocks and keeps
+up to one blank line between statements. `module` and `baremodule` bodies,
+including nested modules, also keep up to one leading and trailing blank line.
+Comments retain their attachment to statements.
+
 ## Format files
 
 Format one file in place, or pass a directory to format its `.jl` files:
