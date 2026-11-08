@@ -48,6 +48,8 @@ pub(crate) type DynError = Box<dyn Error + Sync + Send>;
 pub fn run() -> Result<(), DynError> {
     let (connection, io_threads) = Connection::stdio();
     serve(&connection)?;
+    // Disconnect the writer's channel so the I/O threads can finish.
+    drop(connection);
     io_threads.join()?;
     Ok(())
 }

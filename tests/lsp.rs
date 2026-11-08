@@ -65,6 +65,93 @@ fn native_file_uri(path: &str) -> Uri {
 }
 
 #[test]
+fn stdio_exits_after_shutdown_and_exit() {
+    use std::io::BufReader;
+    use std::process::{Child, Command, Stdio};
+    use std::sync::mpsc;
+
+    struct ServerProcess(Child);
+
+    impl Drop for ServerProcess {
+        fn drop(&mut self) {
+            // A failed timeout assertion must not leave a server running.
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    // The exit notification must suffice even when the client keeps stdin open.
+    for close_stdin in [true, false] {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut server = ServerProcess(
+            Command::new(env!("CARGO_BIN_EXE_fatou"))
+                .arg("lsp")
+                .current_dir(workspace.path())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .expect("start language server"),
+        );
+        let mut stdout = BufReader::new(server.0.stdout.take().unwrap());
+        let (sender, messages) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            while let Ok(Some(message)) = Message::read(&mut stdout) {
+                if sender.send(message).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut stdin = server.0.stdin.take().unwrap();
+        let mut send = |value| {
+            serde_json::from_value::<Message>(value)
+                .unwrap()
+                .write(&mut stdin)
+                .unwrap();
+        };
+        let response = |id: i32| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let message = messages
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .expect("language server response");
+                if let Message::Response(response) = message
+                    && response.id == id.into()
+                {
+                    return response.response_result.expect("successful response");
+                }
+            }
+        };
+
+        send(serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"processId": null, "capabilities": {}, "workspaceFolders": []}
+        }));
+        response(1);
+        send(serde_json::json!({
+            "jsonrpc": "2.0", "method": "initialized", "params": {}
+        }));
+        send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "shutdown"}));
+        assert_eq!(response(2), serde_json::Value::Null);
+        send(serde_json::json!({"jsonrpc": "2.0", "method": "exit"}));
+        let _stdin = (!close_stdin).then_some(stdin);
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = server.0.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "server did not exit after shutdown/exit (close_stdin={close_stdin})"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(status.success(), "server exited with {status}");
+        reader.join().unwrap();
+    }
+}
+
+#[test]
 fn macro_implicit_arguments_have_references_but_no_declaration_or_rename() {
     use fatou::index::PackageIndex;
     use fatou::lsp::{
