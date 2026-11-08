@@ -195,7 +195,7 @@
 - **text:** restore `replace_range`'s panic contract ([`25dc59d`](https://github.com/jolars/fatou/commit/25dc59d97489350182506fb5baae83aae3db7027))
 
 ### Performance Improvements
-- **text,lsp:** back document text with Arc<str> ([`6668392`](https://github.com/jolars/fatou/commit/6668392f133db4fb699dfd9219e7eb3e1ab46c93))
+- **text,lsp:** back document text with `Arc<str>` ([`6668392`](https://github.com/jolars/fatou/commit/6668392f133db4fb699dfd9219e7eb3e1ab46c93))
 - **check:** line-diff with Patience, not the default Myers ([`624f816`](https://github.com/jolars/fatou/commit/624f8168a251199b914bfcec5f55e26a24955578))
 - **lint:** render findings without rescanning the file each time ([`e3c8afc`](https://github.com/jolars/fatou/commit/e3c8afc5744326cd6499b7cbf446d00c64218e0e))
 

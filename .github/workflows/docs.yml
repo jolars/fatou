@@ -9,6 +9,7 @@ on:
       - "bench/*.json"
       - "scripts/fatou-installer.*"
       - "fatou.schema.json"
+      - "CHANGELOG.md"
       - "CONTRIBUTING.md"
       - "build.rs"
       - "src/cli.rs"

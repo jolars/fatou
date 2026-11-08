@@ -90,12 +90,14 @@ export default defineConfig({
       { text: "Guide", link: "/guide/getting-started.html" },
       { text: "Reference", link: "/reference/cli.html" },
       { text: "Performance", link: "/guide/performance.html" },
+      { text: "Changelog", link: "/changelog.html" },
     ],
     sidebar: [
       group("Introduction", [
         ["Overview", "introduction"],
         ["Getting started", "guide/getting-started"],
         ["Installation", "installation"],
+        ["Changelog", "changelog"],
       ]),
       group("Guide", [
         ["Formatting", "guide/formatting"],
