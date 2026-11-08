@@ -1,7 +1,7 @@
 # Configuration reference
 
-This page lists the keys accepted in `fatou.toml`. All keys are optional and
-omitting a key uses its default. Unknown keys are rejected with an error.
+This page lists the keys accepted in `fatou.toml`. All keys are optional.
+Omitted keys use their defaults; unknown keys are rejected with an error.
 
 `FATOU_CONFIG` and global config files use this same schema. For a task-oriented
 walkthrough, including [configuration
@@ -14,10 +14,9 @@ completion and validation.
 ## Extending another config
 
 `extend` resolves relative to the file that declares it. Absolute paths and `~/`
-paths also work. Chains may cross a repository's `.git` boundary. Missing files
-and inheritance cycles are configuration errors. See the
-[guide](../guide/configuration.md#extending-another-config) for a shared-config
-recipe.
+paths also work. Missing files and inheritance cycles are configuration errors.
+See the [guide](../guide/configuration.md#extending-another-config) for a
+shared-config recipe.
 
 Sections merge key by key. Values in the extending file win, including lists
 such as `exclude`, `select`, and `ignore`. `extend-exclude` and `extend-select`
@@ -41,15 +40,14 @@ adds to the `exclude` list. Patterns resolve relative to the directory
 containing the selected project or explicit config. For a `FATOU_CONFIG` or
 global config, they resolve relative to the working directory on the command
 line or the document's directory in the language server, rather than the config
-file's own directory. Excluded directories are pruned during discovery.
+file's own directory.
 
 See [Extending another config](#extending-another-config) for path resolution
 and merge behavior for `extend`.
 
 Files named explicitly on the command line are processed even when they match a
 pattern, unless `--force-exclude` is passed. Extra patterns can be added per run
-with `--exclude` on `fatou format` and `fatou lint`. `--force-exclude` is useful
-for runners such as pre-commit, which pass staged files as explicit arguments.
+with `--exclude` on `fatou format` and `fatou lint`.
 
 ```toml
 exclude = ["vendored/"]
@@ -68,61 +66,32 @@ The default `entry-points` list contains `test/runtests.jl`, `docs/make.jl`, and
 the lint target or open document, stopping at the repository boundary. Missing
 default files are ignored. Setting `entry-points` replaces the default list;
 `entry-points = []` disables it. `extend-entry-points` adds paths to either the
-defaults or an explicit replacement list. Benchmark files and arbitrary
-include-graph roots are not inferred.
+defaults or an explicit replacement list.
 
 Configured paths can be literal files or globs, relative to the containing
 configuration file. Globs such as `scripts/**/*.jl` expand to Julia files, honor
 `.gitignore`, and contribute no files when unmatched. Invalid globs and missing
-explicit literal paths are errors. This also applies to `--config`,
-`FATOU_CONFIG`, and global configuration files. Duplicate normalized paths are
-ignored. Configure entry points in a file; editor-pushed settings do not
-establish a project root.
+explicit literal paths are errors. Paths remain relative to the configuration
+file when using `--config`, `FATOU_CONFIG`, or a global config. Duplicate paths
+are ignored. Entry points must be configured in a file, rather than through
+editor settings.
 
 ```toml
 [project]
 extend-entry-points = ["scripts/**/*.jl"]
 ```
 
-The CLI and language server enable `undefined-name` by default for these
-programs. An explicit `[lint] select` replaces the defaults, and
-`ignore = ["undefined-name"]` disables the rule. Files outside the configured
-programs keep their usual defaults.
+Entry points let Fatou resolve names across static `include("path")` calls. The
+[`undefined-name`](rules.md#undefined-name) rule is enabled by default for entry
+points and their included files. An explicit `[lint] select` replaces these
+defaults; `ignore = ["undefined-name"]` disables the rule.
 
-Entry points provide resolution context without expanding the files selected for
-linting. Fatou follows static `include("path")` calls and resolves global
-bindings in their host modules. Each entry point and host module is analyzed
-separately. Findings identify the contexts in which a name is undefined.
-Includes may supply names even when their files are excluded from diagnostic
-reporting.
-
-An enabled `undefined-name` rule reports an informational `analysis-incomplete`
-notice when a file contains includes but belongs to no known package or script
-program. The notice appears once per file at its first include and recommends
-declaring entry points and using static include paths. It does not count as a
-lint finding or cause a failing CLI exit code. Rule severity overrides do not
-change notice severity; disabling, ignoring, or suppressing the rule file-wide
-silences the notice.
-
-A missing or unreadable entry point fails CLI linting. The language server logs
-the failure and continues checking other entries. Dynamic includes, dynamic
-`eval`, unresolved whole-module `using`s, include cycles, and unreadable or
-unparseable dependencies make an entry's undefined-name analysis incomplete and
-suppress its findings. Relative whole-module `using`s remain unresolved. Other
-independent entries still run.
-
-Missing or unreadable static include targets produce errors at their include
-calls, including empty paths and directory targets. The CLI reports errors in
-the files selected for linting. The language server also reports include errors
-in unopened dependencies and clears them when the include is repaired.
-Undefined-name checking resumes when the entry point's dependencies can be
-analyzed again.
-
-The language server uses unsaved buffers and refreshes dependent diagnostics
-after edits, closes, and watched file changes. Script contexts currently support
-diagnostics; completion and navigation do not use them. Cross-file method-table
-checks (`call-arity` and `function-has-no-methods`) remain disabled for these
-contexts because the script model records names, not method tables.
+Configuring entry points does not add files to the lint targets. Included files
+can contribute definitions even when excluded from diagnostic reporting. Dynamic
+includes or dependencies that cannot be analyzed can prevent undefined-name
+checking. See the [configuration
+guide](../guide/configuration.md#checking-standalone-scripts) for examples and
+limitations.
 
 ## `[julia]`
 
@@ -158,15 +127,12 @@ version = "1.6"
 `line-width` and `indent-width` can be overridden per run with the
 `--line-width` and `--indent-width` flags on `fatou format`.
 
-`safe = true` applies the same verification as `fatou format --safe` to CLI
-formatting (files, stdin, and `--check`) and LSP document and range formatting.
-Malformed or unverifiable input, changed program structure, and changed comments
-cause an error without emitting formatting edits or writing files. Range
-formatting verifies the entire document after the proposed replacement,
-including code outside the selection. The language server returns a
-`RequestFailed` response with the verification error. CLI batches finish
-verification for every file before writing any file or printing any diff.
-`--safe` enables verification even when the config sets `safe = false`.
+`safe = true` verifies that formatting preserves program structure and comments
+in both the CLI and language server. Malformed or unverifiable input, changed
+program structure, or changed comments cause an error without writing files or
+returning formatting edits. Range formatting verifies the entire document,
+including code outside the selection. `fatou format --safe` enables verification
+even when the config sets `safe = false`.
 
 `line-ending` accepts:
 
@@ -185,8 +151,7 @@ line-ending = "auto"
 
 > **Deprecation**: the snake_case keys `line_width` and `indent_width` are still
 > accepted but print a warning. Use the kebab-case `line-width` and
-> `indent-width` instead; the snake_case forms will be removed in a future
-> release.
+> `indent-width` instead.
 
 ## `[lint]`
 
@@ -231,15 +196,9 @@ undefined-name = "error"
 
 ## `[lint.rules.<id>]`
 
-A rule with a tunable knob reads it from its own table, named after the rule ID.
-Rules without options have no table. Keys are kebab-case, matching the rest of
-the file.
-
-Unlike `select`, `extend-select`, `ignore`, and `severity`, these tables are a
-*schema*: a misspelled rule ID, or a misspelled key inside one, is a
-configuration parse error and the run stops.
-
-Per-rule *severity* is not set here; use [`[lint.severity]`](#lint) for that.
+Configure rule options in a table named after the rule ID. Only rules with
+options accept a table. Unknown rule IDs or option keys in these tables are
+configuration errors. Set severity separately in [`[lint.severity]`](#lint).
 
 ### `[lint.rules.discouraged-function]`
 
@@ -256,14 +215,14 @@ effects: `exit`, `cd`, `redirect_stdout`, `redirect_stderr`, `unsafe_load`,
 `unsafe_store!`, `unsafe_wrap`, `unsafe_string`, `pointer_from_objref`, and
 `unsafe_pointer_to_objref`.
 
-Setting `functions = {}` silences the rule without having to `ignore` it, which
-is the way to keep the rule available for a future project-specific list.
+Setting `functions = {}` removes the built-in list; only entries in
+`extend-functions`, if any, are then checked.
 
 ```toml
-# Keep the built-ins and add a project rule of your own.
+# Add to the built-in list.
 [lint.rules.discouraged-function]
 extend-functions = { sleep = "use a timer instead of blocking the task" }
 
-# Or replace the built-ins outright.
+# Or replace the built-in list.
 # functions = { my_legacy_helper = "call `new_helper` instead" }
 ```
