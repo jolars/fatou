@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.26.1](https://github.com/jolars/fatou/compare/v0.26.0...v0.26.1) (2026-11-08)
+
+### Bug Fixes
+
+- exit LSP after shutdown ([`31dd184`](https://github.com/jolars/fatou/commit/31dd1842564ce15ebd6ce0671b5c43c57e77556f)), fixes [#142](https://github.com/jolars/fatou/issues/142)
+
 ## [0.26.0](https://github.com/jolars/fatou/compare/v0.25.0...v0.26.0) (2026-11-07)
 
 ### Features
