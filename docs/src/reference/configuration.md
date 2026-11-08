@@ -124,6 +124,28 @@ diagnostics; completion and navigation do not use them. Cross-file method-table
 checks (`call-arity` and `function-has-no-methods`) remain disabled for these
 contexts because the script model records names, not method tables.
 
+## `[julia]`
+
+  | Key       | Type   | Default | Description                                                       |
+  | --------- | ------ | ------- | ----------------------------------------------------------------- |
+  | `version` | string | unset   | Target Julia version or support range for compatibility checking. |
+
+`version` supplies the support range used by
+[`julia-version-compat`](rules.md#julia-version-compat). It accepts Julia Pkg
+compatibility expressions: `"1.6"` means at least Julia 1.6.0 and below 2.0.0,
+`"1.6 - 1.11"` is an inclusive range, and commas form unions. Compatibility
+checks use the lowest supported version in the range.
+
+When unset, Fatou discovers the target from `Project.toml`'s `[compat].julia`,
+then `Manifest.toml`'s `julia_version`. The `--julia-version` flag on
+`fatou lint` overrides this setting. An invalid expression produces a warning
+and leaves the setting unset.
+
+```toml
+[julia]
+version = "1.6"
+```
+
 ## `[format]`
 
   | Key            | Type    | Default  | Description                                                |
