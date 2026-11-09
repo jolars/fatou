@@ -1,0 +1,22 @@
+[package]
+name = "fatou-wasm"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "Browser bindings for the Fatou playground"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+fatou-formatter = { path = "../fatou-formatter" }
+fatou-parser = { path = "../fatou-parser" }
+wasm-bindgen = "0.2.129"
+
+# The bundled wasm-opt executable cannot run on NixOS.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

@@ -676,6 +676,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fatou-wasm"
+version = "0.1.0"
+dependencies = [
+ "fatou-formatter",
+ "fatou-parser",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"

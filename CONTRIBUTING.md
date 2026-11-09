@@ -95,8 +95,16 @@ task docs-preview
 
 `task docs-build` generates the rule reference and benchmark charts, builds the
 site, and checks links, historical URLs and headings, Markdown exports, and
-public downloads. It reads the committed benchmark artifacts without running
-measurements. The output is `docs/.vitepress/dist/`.
+public downloads. It also builds the playground's Wasm bindings with
+`wasm-pack`, which the devenv shell provides alongside the
+`wasm32-unknown-unknown` Rust target. It reads the committed benchmark artifacts
+without running measurements. The output is `docs/.vitepress/dist/`.
+
+Both `task docs-preview` and `task docs-build` rebuild the playground bindings.
+After changing Rust code while the development server is running, run
+`pnpm --dir docs playground:wasm` and reload the playground. Run
+`pnpm --dir docs test:wasm` after a site build to test the generated JavaScript
+and Wasm together.
 
 Run `task docs-worker` after building to preview the actual Worker, then run
 `task docs-check` in a second terminal to check Markdown negotiation, redirects,

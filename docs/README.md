@@ -7,7 +7,8 @@ Pages as an origin.
 
 ## Local development
 
-Use the repository's devenv shell, which includes Node.js and pnpm:
+Use the repository's devenv shell, which includes Node.js, pnpm, `wasm-pack`,
+and Rust with the `wasm32-unknown-unknown` target:
 
 ```sh
 pnpm --dir docs install --frozen-lockfile
@@ -27,6 +28,15 @@ Markdown exports, and exact installer and schema bytes. The Worker check also
 validates content negotiation, GET and HEAD requests, redirects, queries, real
 404 responses, content types, and CORS. Restart the Worker preview after a
 rebuild so it loads the new asset map.
+
+Development and production builds first run `playground:wasm` to compile the
+unpublished `fatou-wasm` crate and generate browser bindings under
+`src/public/playground/pkg/`. These generated files are ignored. After changing
+Rust code during development, run `pnpm --dir docs playground:wasm` from the
+repository root and reload the playground. After a production build, run
+`pnpm --dir docs test:wasm` to check the actual JavaScript and Wasm exports.
+`pnpm --dir docs test` runs the Worker and playground settings unit tests
+without requiring a site build.
 
 `prepare:content` runs the existing Rust rule generator and benchmark renderer.
 It reads `bench/results.json` and `bench/memory.json`; it never measures

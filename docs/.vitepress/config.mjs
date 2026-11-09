@@ -89,6 +89,7 @@ export default defineConfig({
     nav: [
       { text: "Guide", link: "/guide/getting-started.html" },
       { text: "Reference", link: "/reference/cli.html" },
+      { text: "Playground", link: "/playground.html" },
       { text: "Performance", link: "/guide/performance.html" },
       { text: "Changelog", link: "/changelog.html" },
     ],

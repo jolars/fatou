@@ -8,7 +8,7 @@ const origin = process.argv[2] ?? "http://127.0.0.1:8787";
 const legacy = JSON.parse(
   readFileSync(resolve(docsRoot, "tests/legacy-routes.json"), "utf8"),
 );
-for (const path of ["/", ...Object.keys(legacy)]) {
+for (const path of ["/", "/playground.html", ...Object.keys(legacy)]) {
   const response = await fetch(origin + path);
   assert.equal(response.status, 200, path);
   assert.match(response.headers.get("Content-Type"), /text\/html/);
@@ -64,6 +64,22 @@ for (const [path, source, type] of [
 }
 const direct = await fetch(`${origin}/index.md`);
 assert.match(direct.headers.get("Content-Type"), /text\/markdown/);
+const playgroundJs = await fetch(`${origin}/playground/pkg/fatou_wasm.js`);
+assert.equal(playgroundJs.status, 200);
+assert.match(
+  playgroundJs.headers.get("Content-Type"),
+  /(?:application|text)\/javascript/,
+);
+assert.match(await playgroundJs.text(), /fatou_wasm_bg\.wasm/);
+const playgroundWasm = await fetch(
+  `${origin}/playground/pkg/fatou_wasm_bg.wasm`,
+);
+assert.equal(playgroundWasm.status, 200);
+assert.match(playgroundWasm.headers.get("Content-Type"), /application\/wasm/);
+assert.deepEqual(
+  Buffer.from(await playgroundWasm.arrayBuffer()).subarray(0, 4),
+  Buffer.from([0, 97, 115, 109]),
+);
 console.log(
-  "Validated Worker HTML, GET/HEAD Markdown negotiation, redirects, queries, 404s, download bytes, content types, and CORS.",
+  "Validated Worker HTML, GET/HEAD Markdown negotiation, redirects, queries, 404s, download bytes, content types, CORS, and playground assets.",
 );

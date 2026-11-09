@@ -10,8 +10,9 @@ human-readable guide for new contributors.
 Fatou is a Rust CLI for Julia with a lossless incremental parser, canonical
 formatter, semantic linter, language server, and static package/environment
 index. It is a Cargo workspace (edition 2024): the root `fatou` package plus
-`crates/fatou-parser` and `crates/fatou-formatter`. The root re-exports parser
-modules as `fatou::{ast, parser, syntax}`.
+`crates/fatou-parser`, `crates/fatou-formatter`, and the unpublished
+`crates/fatou-wasm` playground bridge. The root re-exports parser modules as
+`fatou::{ast, parser, syntax}`.
 
 The dependency direction is source text → parser/CST → typed AST → single-file
 semantics → project projections and resolution → linter, index, CLI, and LSP
@@ -33,8 +34,8 @@ Global constraints:
   and never formats; the pipeline is fix, then format.
 - Analysis, linting, indexing, and environment discovery never evaluate or
   invoke Julia.
-- Both member crates remain `wasm32-unknown-unknown`-clean: no filesystem,
-  process, thread, or clock APIs.
+- Parser, formatter, and browser bindings remain `wasm32-unknown-unknown`-clean:
+  no filesystem, process, thread, or clock APIs.
 - Treat exported parser and formatter APIs as semver-governed public interfaces;
   accompany intentional API changes with tests and documentation.
 - Do not hand-edit generated files. Performance claims require measurements and

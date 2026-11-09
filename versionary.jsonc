@@ -10,7 +10,8 @@
       "exclude-paths": [
         "editors",
         "crates/fatou-parser",
-        "crates/fatou-formatter"
+        "crates/fatou-formatter",
+        "crates/fatou-wasm"
       ],
       "extra-files": [
         {

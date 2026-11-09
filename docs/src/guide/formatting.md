@@ -1,7 +1,8 @@
 # Formatting
 
 Fatou formats Julia source without starting Julia. After
-[installation](../installation.md), run it from your project directory.
+[installation](../installation.md), run it from your project directory. Try it
+in your browser in the [playground](../playground.md).
 
 Fatou removes leading and trailing blank lines inside ordinary blocks and keeps
 up to one blank line between statements. `module` and `baremodule` bodies,

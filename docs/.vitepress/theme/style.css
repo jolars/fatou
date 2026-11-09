@@ -37,3 +37,8 @@
 .vp-doc .bench-table {
   overflow-x: auto;
 }
+.playground-page .VPDoc:not(.has-sidebar) .container,
+.playground-page .VPDoc:not(.has-sidebar) .content,
+.playground-page .VPDoc .content-container {
+  max-width: 1280px;
+}

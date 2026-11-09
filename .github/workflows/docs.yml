@@ -6,6 +6,12 @@ on:
   pull_request:
     paths:
       - "docs/**"
+      - "crates/fatou-parser/**"
+      - "crates/fatou-formatter/**"
+      - "crates/fatou-wasm/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
       - "bench/*.json"
       - "scripts/fatou-installer.*"
       - "fatou.schema.json"
@@ -31,6 +37,10 @@ jobs:
           fetch-depth: 0
       - name: Install Rust
         run: rustup toolchain install
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
@@ -47,6 +57,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm test:wasm
       - name: Verify installer syntax
         run: sh -n .vitepress/dist/install
       - name: Check deployment bundle

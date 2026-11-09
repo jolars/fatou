@@ -5,6 +5,7 @@
       "**",
       "!bench/results.json",
       "!docs/src/public/theme/vendor",
+      "!docs/src/public/playground/pkg",
       "!fatou.schema.json"
     ]
   },

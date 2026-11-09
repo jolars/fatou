@@ -97,6 +97,10 @@ for (const path of pages()) {
     (block) => chartToMarkdown(block),
   );
   source = source
+    .replace(
+      /<FatouPlayground\s*\/>/g,
+      "[Open the interactive playground](/playground.html).",
+    )
     .replace(/<span id="[^"]+"><\/span>\n?/g, "")
     .replace(
       /<img src="([^"]+)" alt="([^"]+)"[^>]*\/?\s*>/g,

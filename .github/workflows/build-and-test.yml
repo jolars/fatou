@@ -53,9 +53,8 @@ jobs:
           key: wasm
       # `fatou-parser` and `fatou-formatter` are meant to be embeddable in a
       # dprint Wasm plugin, which builds only for wasm32-unknown-unknown.
-      # Nothing else in the workspace targets wasm, so this job is the only
-      # thing keeping the member crates free of filesystem/thread/time
-      # dependencies.
+      # Keep the engine gates independent of the documentation workflow,
+      # which builds the playground's `fatou-wasm` browser bindings.
       - name: Build fatou-parser for wasm
         run: >
           cargo build -p fatou-parser --release

@@ -100,6 +100,7 @@ tasks:
     desc: Check Worker behavior against a running local preview
     cmds:
       - pnpm --dir docs test
+      - pnpm --dir docs test:wasm
       - pnpm --dir docs check:worker {{.CLI_ARGS}}
       - pnpm --dir docs deploy:check
 

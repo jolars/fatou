@@ -95,6 +95,30 @@ const home = readFileSync(resolve(outputRoot, "index.md"), "utf8");
 assert.match(home, /Julia tooling, minus the runtime\./);
 assert.match(home, /Find problems early/);
 assert.doesNotMatch(home, /layout: home/);
+const playground = html.get("/playground.html");
+assert.ok(playground, "Missing playground page");
+assert.equal(playground(".fatou-playground").length, 1);
+assert.equal(playground("#pg-line-width").attr("value"), "92");
+assert.equal(playground("#pg-indent-width").attr("value"), "4");
+assert.match(
+  readFileSync(resolve(outputRoot, "playground/pkg/fatou_wasm.js"), "utf8"),
+  /fatou_wasm_bg\.wasm/,
+);
+assert.deepEqual(
+  readFileSync(
+    resolve(outputRoot, "playground/pkg/fatou_wasm_bg.wasm"),
+  ).subarray(0, 4),
+  Buffer.from([0, 97, 115, 109]),
+);
+const playgroundMarkdown = readFileSync(
+  resolve(outputRoot, "playground.md"),
+  "utf8",
+);
+assert.match(
+  playgroundMarkdown,
+  /\[Open the interactive playground\]\(\/playground\.html\)/,
+);
+assert.doesNotMatch(playgroundMarkdown, /<FatouPlayground/);
 console.log(
   `Validated ${html.size} HTML pages, ${Object.keys(legacy).length} legacy routes, all legacy headings, internal links, Markdown, metadata, and downloads.`,
 );

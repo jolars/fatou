@@ -18,6 +18,7 @@ devenv.local.yaml
 /docs/src/public/fatou.schema.json
 /docs/src/public/install
 /docs/src/public/install.ps1
+/docs/src/public/playground/pkg
 /docs/.env*
 /docs/.dev.vars*
 /docs/worker.log

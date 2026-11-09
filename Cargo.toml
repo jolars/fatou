@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/fatou-parser", "crates/fatou-formatter"]
+members = ["crates/fatou-parser", "crates/fatou-formatter", "crates/fatou-wasm"]
 exclude = ["docs/doc-utils"]
 
 [workspace.package]
