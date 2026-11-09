@@ -217,8 +217,6 @@ style remains project policy rather than language correctness.
 
 ## Language server
 
-- [ ] Maybe: a `fatou index` CLI subcommand to warm and inspect the cache.
-
 - [ ] Code actions beyond quick fixes: organize/sort `using` statements,
   qualify a bare name.
 
