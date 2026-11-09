@@ -2,34 +2,6 @@
 
 ## Parser
 
-- [x] Accept whitespace after a standalone colon before a closing delimiter:
-  `A[ rows, : ]` and `view( A, i, : )` now parse cleanly, allowing linting and
-  `format --safe`. Separators, trailing comments, and EOF use the same value
-  disambiguation. Invalid quoted symbols such as `: name` retain diagnostics.
-
-- [x] Parse implicit multiplication before radicals (`a√4`, `a∛8`, and
-  `a∜16`), including broadcast forms. Unary operands and consecutive factors
-  preserve Julia's precedence and grouping; whitespace and syntactic prefixes
-  retain their diagnostic boundaries.
-
-- [x] Fix issue #113: parenthesized macro calls accept `for … end` arguments,
-  and `const`, `global`, and `local` declarations continue across newlines and
-  comments before their operands. Parentheses inherit the enclosing generator
-  context, preserving comprehensions and call-argument generators.
-
-- [x] Refresh the parser oracle and generated tables for Julia 1.13 while
-  retaining JuliaSyntax 1.0.2. Unicode 17 identifier starts and combining
-  marks have lexer and differential-fixture coverage.
-
-- [x] Diagnose overflowing decimal `Float64`/`Float32` literals instead of
-  accepting Rust's infinite parse result. The parser now emits JuliaSyntax's
-  `ErrorNumericOverflow` projection while leaving finite boundary values and
-  underflow unchanged.
-
-- [x] Fix raw triple-string quote decoding. Raw strings now apply their own
-  backslash-before-quote treatment before display escaping; fixture
-  `raw_triple_string_quote` locks the backslash-run siblings.
-
 - [ ] Lex the *broadcast* wrapping arithmetic operators `.+% .-% .*%` (and their
   augmented forms `.+%= .-%= .*%=`) in
   `crates/fatou-parser/src/parser/lexer.rs`. Fatou supports undotted `+% -% *%`;
@@ -48,125 +20,15 @@
   and JuliaSyntax 1.0.2 reject `break lbl` and `continue lbl` (verified
   2026-09-15), so the current oracle cannot validate labeled recovery.
 
-- [x] Recover bare `break, y` / `continue, y` as tuples with a diagnostic after
-  the keyword, matching JuliaSyntax 1.0.2. Fixture `break_continue_tuple` covers
-  assignment precedence, comments, newline continuation, and comma-separated
-  containers. Tentative bracket parses discard their diagnostics before
-  reparsing an argument list, so each invalid comma is reported once.
-
-### Incremental
-
-- [x] Add a nested-block reparse tier with a context-parameterized body
-  fragment parser. Preserve module `public` declarations, struct fields,
-  docstrings, semicolons, and bracket markers. Interior runs reuse the existing
-  seam guards; body edges and enclosing parser recovery use the existing
-  fallback tiers. Seeded edits compare trees and diagnostics with fresh parses;
-  measurements live in `bench/reparse.json`.
-
-## Formatter
-
-- [x] Remove blank lines at ordinary block boundaries (#140). Preserve up to one
-  blank line between statements and at the boundaries of `module` and
-  `baremodule` bodies, including nested modules.
-
-- [x] Keep short-circuit `&&` and `||` guards attached to `return`, `break`, and
-  `continue` when their conditions wrap (#139). Preserve ordinary logical-chain
-  wrapping and allow returned values to wrap independently.
-
-- [x] Harden `format --safe` against lossy projected leaves, non-finite float
-  fingerprints, and configured line-ending conversion inside block comments.
-
 ## Documentation
 
-Docstrings are arbitrary `@doc` metadata. Tooling interprets only statically
-recoverable textual payloads; dynamic or custom forms stay opaque. Markdown and
-Documenter syntax are recognized from the content itself, while documentation
-style remains project policy rather than language correctness.
-
-- [x] Match Julia 1.13's inline em dashes: `---` is one lossless `EM_DASH`
-  token, exposed as `Inline::EmDash`; heading text uses the rendered em
-  dash.
-
-- [x] **Foundation:** add typed `DOC` navigation plus one attachment API for
-  ordinary docstrings and the two-argument `@doc` forms. Extract ordinary and
-  `raw` string payloads with Julia's escape, newline, and triple-string dedent
-  semantics, retaining an exact decoded-to-source byte map. Classify
-  interpolated, custom, and non-string payloads as opaque.
-
-- [x] **Index and semantics:** replace the index's raw, undedented extraction
-  with the shared model; preserve documentation per method and for types,
-  fields, constants, macros, and modules; and make unsaved local docstrings
-  available without waiting for a workspace re-harvest.
-
-- [x] **Documentation parser:** add a Wasm-clean documentation module to
-  `fatou-parser` for Julia's Markdown dialect, with a lossless CST and typed
-  navigation. Recognize core Documenter links and fences locally; use Julia's
-  Markdown stdlib only as a test-time differential oracle, never during
-  analysis.
-
-- [x] **Language features (default-on):** render decoded local and indexed
-  documentation consistently; add Markdown folding and navigation; and offer
-  completion and definition for explicit `@ref` plus embedded-Julia support
-  where a fence declares Julia code.
-
-- [x] **Linting:** add conservative default-on checks for malformed Julia code
-  in explicit fences, argument names that disagree with an existing
-  `# Arguments` section, and `@ref` targets that project resolution can prove
-  missing. Landed as `invalid-docstring-code` (sem),
-  `docstring-argument-mismatch` (sem), and
-  `unresolved-docstring-reference` (res)—all correctness warnings without
-  fixes. Documentation coverage and style remain policy rather than default
-  lint.
-
-- [x] Parse an indented code block below a list item as its own nested block.
-  `emit_list_level` now removes the item's prefix before applying the four-space
-  code indent, matching Julia's `Markdown.parse` without changing ordinary
-  continuation lines.
-
-- [x] Parse fenced code below Julia Markdown list items as nested blocks.
-  Remove only the item's prefix from code content, retain lossless tokens and
-  exact decoded ranges, and keep four-space indented code literal. Cover
-  Eunoia.jl's examples with the Markdown oracle and map nested REPL diagnostics
-  through the separate code tokens.
-
-- [x] Parse inline Markdown across wrapped paragraph lines, including list
-  items, admonitions, block quotes, and footnotes. Links, emphasis, and inline
-  code share the paragraph's logical text without crossing block boundaries.
-  Typed payload accessors normalize continuations, while the CST preserves
-  original newlines, container prefixes, and decoded ranges. Julia 1.13 oracle
-  fixtures cover the wrapped constructs and hard-break boundaries; UTF-8,
-  CRLF, losslessness, and exact docstring source maps have regression tests.
-  Reference resolution remains in `../diplodocus/`.
-
-- [x] Recognize fenced code blocks inside admonitions in
-  `emit_indented_container_blocks`, including `@example gallery`. Preserve
-  fence classification, body indentation, lossless four-space or tab prefixes,
-  and exact content ranges. Julia 1.13 Markdown oracle coverage includes mixed
-  prefixes, blank lines, math, and empty fences. Source-map and nested REPL
-  diagnostic regressions cover escaped docstrings and CRLF. Executing
-  `@example` blocks remains Diplodocus work.
-
-- [x] Cache Markdown anchors and definitions in a demand-only salsa query over
-  the file's decoded static docstring payloads. Code edits and equivalent
-  literal spellings reuse the index; navigation maps decoded ranges through
-  the live source maps. Embedded-Julia completion keeps its existing boundary.
-  Before/after measurements and reproduction instructions live in
-  `bench/documentation.json` and `bench/documentation.md`.
-
-- [ ] **Formatting (deferred and opt-in):** only consider docstring reflow after
+- [ ] **Formatting docstrings (opt-in):** only consider docstring reflow after
   corpus validation. Gate it behind `[format] docstrings = true` and
   require static content, a clean documentation parse, preserved documentation
   shape, protected code/table/math regions, idempotence, and clean Julia
   reparsing.
 
 ## Linter
-
-- [x] Support explicit, opt-in script entry points for `undefined-name` (#109).
-  `[project] entry-points` follows static includes through shared semantic
-  projections and resolution, keeping entry points and host modules separate.
-  CLI targets retain their diagnostic scope; the LSP honors unsaved buffers
-  and refreshes dependent diagnostics. Dynamic definitions and incomplete
-  include closures remain conservative.
 
 ### Rules
 
@@ -177,43 +39,12 @@ style remains project policy rather than language correctness.
   within-iteration normalization quiet, and handle closures and macros
   conservatively. Any fix must preserve right-hand-side side effects.
 
-- [x] Bind the implicit `__source__` and `__module__` macro parameters in the
-  semantic model, including closure captures. `undefined-name` no longer
-  reports these valid reads, while reads outside macros still require a
-  definition. Implicit parameters have no source declaration and cannot be
-  renamed.
-
-- [x] Preserve dispatch types inside `@nospecialize` parameter annotations in
-  the shared signature harvester, including qualified Base/Core spellings,
-  defaults, and varargs. Distinct dispatch types no longer trigger
-  `duplicate-method`; matching signatures still do. Unknown parameter macros
-  remain opaque, so `duplicate-method` and `call-arity` withhold findings when
-  expansion could change the signature.
-
-- [x] `unused-import` accounts for same-module uses across included files
-  through shared project projections, in package workspaces and declared
-  script entry points. Aliases, operators, macros, method extensions, exports,
-  and quoted uses count, while local shadows and unrelated modules stay
-  separate. Incomplete include contexts withhold findings. CLI fixing and
-  live LSP diagnostics share the same usage model.
-
 - [ ] Add an opt-in rule for functions that read known nonconstant, untyped
   globals (#109). Use the shared resolver to distinguish global bindings from
   locals and captured variables. Exempt constants, functions, types, and typed
   globals. Keep this separate from `undefined-name`: the name resolves, but
   passing its value as an argument would make the dependency explicit and
   avoid the performance cost of an untyped global.
-
-- [x] The `Test`-stdlib bundle reuses `redundant-boolean`, `length-zero`, and
-  `nothing-comparison`, and adds `test-isa-call` (readability, sem, warning,
-  safe fix, default-on) plus `test-bare-expression` (suspicious, sem, warning,
-  no fix, default-off). Their shared matcher requires a preceding, visible Test
-  load and supports qualified, parenthesized, and aliased `@test` spellings.
-
-- [x] Not a lint rule, and not a linter task at all: TOML syntax diagnostics for
-  `Project.toml`/`Manifest.toml`, noted while reading JuliaWorkspaces'
-  `layer_diagnostics.jl`. Landed as the `toml-syntax` check in *Project files*
-  below, stage 1, along with the reason it cannot be a rule.
 
 ## Language server
 
@@ -227,53 +58,7 @@ style remains project policy rather than language correctness.
   destructive default and leaving it dangling is what the include-graph
   diagnostics already report. Create is close to a no-op. Design first.
 
-- [x] Renaming a package's entry file within `src/` updates the tracked
-  `Project.toml` or `JuliaProject.toml` name and matching top-level module
-  declarations, preserving its UUID and combining the edits with include
-  rewrites. Folder batches address the old URIs, and `didRenameFiles`
-  re-resolves the package even without file watchers. Moves outside `src/`
-  still report `missing-entry-file`.
-
-- [x] The per-keystroke text copies are gone, and the rope from #76 stays
-  deferred — now on measurement rather than on argument. Two changes: `Token`
-  borrows its text from the input (`Token<'src> { text: &'src str }`), which
-  retired the per-token `String` and cut lexing ~65% and a full parse ~15%;
-  and the document text is one shared `Arc<str>` across the buffer, salsa's
-  `SourceFile`, and `PrevParse`, which turned the write-phase copy and the
-  base clone into refcount bumps and the staleness compare into `Arc::ptr_eq`
-  (a no-op upsert went 39 us -> 150 ns at 1 MB). An edit now rebuilds the
-  string instead of splicing in place, +10-30 us at 1 MB, well under the
-  reparse it precedes.
-
-  Measured against a full ropey conversion of the same paths (PR #85): the
-  rope reproduced none of the lexer win that the borrow alone gives — its
-  chunk machinery costs 10-19% against `&str` tokens, and its multi-chunk LSP
-  path another ~55% — and it cannot match `ptr_eq` on the unchanged-text
-  check, since rope equality walks chunks (27 us at 1 MB). What a rope
-  uniquely buys is the didChange splice: 0.7 us flat at 1 MB against our
-  ~34 us rebuild. That is real and nothing else reproduces it, but it is
-  ~30 us on a path whose reparse costs 150 us+, and the same branch lost
-  ~2.5 ms per keystroke to per-byte rope iteration in `diff_edit`. Revisit
-  only if fatou starts targeting documents where the splice dominates, and
-  only after the `diff_edit` bypass below.
-
-- [x] Skip `diff_edit` when the staged chain is a single verified edit.
-  `reparse_edits` checks the range and compares the unchanged prefix, inserted
-  text, and unchanged suffix against the current buffer, then passes the edit
-  straight to `reparse` without allocating an intermediate text. Stale or
-  invalid hints still fall back to `diff_edit`, as do changes carrying no edits.
-  In 20 alternating runs pinned to one CPU, median end-to-end keystroke time
-  fell from 88 us to 27 us at 134 KB and from 698 us to 212 us at 1 MB, about
-  70% in both cases. `diff_edit` went from 47% of profile samples to none.
-  Measurements and methodology are recorded in `bench/keystroke.json`.
-
 ## Project files (`Project.toml`/`Manifest.toml`)
-
-- [x] Dependency code actions distinguish updates within `[compat]` bounds from
-  upgrades beyond them, preserving precision, operators, and Julia unions.
-  Inlay hints show the newest matching release and available upgrade.
-  `src/registry.rs` reads both directory and compressed registries without Julia
-  or network access; compressed results are cached until the archive changes.
 
 - [ ] Completion of dependency names, the expensive one. On a default depot the
   registry is a `General.tar.gz`, so the full version needs gzip and tar to
@@ -281,9 +66,6 @@ style remains project policy rather than language correctness.
   the depot: no new dependency, no network. Note that *nothing* enumerates
   `<depot>/packages` today — it is only ever probed by exact slug — so even the
   cheap pass is new code.
-
-- [x] Entry-file renames update `name` while preserving the package's `uuid`;
-  see `willRenameFiles` above.
 
 - [ ] **`resolve` is all-or-nothing**, found while landing stage 1: a good
   `Project.toml` beside a corrupt `Manifest.toml` loses the *entire*
@@ -309,18 +91,3 @@ style remains project policy rather than language correctness.
   text edit. Resolving a name to its UUID means reading the registry, and
   shelling out to `Pkg` is off the table: no Julia runtime, at any point in the
   pipeline.
-
-## Tooling
-
-## Documentation site
-
-- [x] Shorten `docs/src/guide/configuration.md` by consolidating option details
-  in `docs/src/reference/configuration.md`. Retain configuration resolution,
-  practical project setup, and standalone-script recipes in the guide, and
-  preserve existing anchors when moving content.
-- [ ] Split `docs/src/guide/editors.md` into focused editor recipes and a short
-  overview, separating capability lookup from setup instructions. Preserve
-  published URLs and anchors.
-- [x] Reduce duplicated usage examples across `README.md`, Getting Started,
-  Formatting, and Linting. Keep introductory examples short and link to the
-  detailed workflow instead of maintaining multiple explanations.
