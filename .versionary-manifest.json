@@ -1,11 +1,11 @@
 {
   "manifest-version": 1,
-  "baseline-sha": "31dd1842564ce15ebd6ce0671b5c43c57e77556f",
+  "baseline-sha": "46c8e9720c31904c705c00eade865e28ca657be8",
   "release-targets": [
     {
       "path": ".",
-      "version": "0.26.1",
-      "tag": "v0.26.1"
+      "version": "0.27.0",
+      "tag": "v0.27.0"
     },
     {
       "path": "crates/fatou-formatter",
@@ -19,8 +19,8 @@
     },
     {
       "path": "editors/code",
-      "version": "0.26.1",
-      "tag": "fatou-code-v0.26.1",
+      "version": "0.27.0",
+      "tag": "fatou-code-v0.27.0",
       "dependencies": [
         "."
       ]
@@ -34,13 +34,13 @@
   "pending-release-targets": [
     {
       "path": ".",
-      "version": "0.26.1",
-      "tag": "v0.26.1"
+      "version": "0.27.0",
+      "tag": "v0.27.0"
     },
     {
       "path": "editors/code",
-      "version": "0.26.1",
-      "tag": "fatou-code-v0.26.1",
+      "version": "0.27.0",
+      "tag": "fatou-code-v0.27.0",
       "dependencies": [
         "."
       ]

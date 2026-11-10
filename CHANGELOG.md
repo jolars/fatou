@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.27.0](https://github.com/jolars/fatou/compare/v0.26.1...v0.27.0) (2026-11-10)
+
+### Features
+
+- **docs:** add formatter playground ([`1127125`](https://github.com/jolars/fatou/commit/1127125fdd8144d8c38a84a8ded1b0da85b1de0c))
+
 ## [0.26.1](https://github.com/jolars/fatou/compare/v0.26.0...v0.26.1) (2026-11-08)
 
 ### Bug Fixes
