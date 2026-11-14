@@ -125,7 +125,9 @@ end
 function erode(mask::AbstractMatrix{Bool}, offs)
     isempty(offs) && return copy(mask)
     h, w = size(mask)
-    out = falses(h, w)
+    # Parallel row writes need separate bytes; BitMatrix packs adjacent rows
+    # into shared words and can lose updates between threads.
+    out = fill(false, h, w)
     Threads.@threads for i in 1:h
         @inbounds for j in 1:w
             keep = true
@@ -147,7 +149,7 @@ end
 function dilate(mask::AbstractMatrix{Bool}, offs)
     isempty(offs) && return copy(mask)
     h, w = size(mask)
-    out = falses(h, w)
+    out = fill(false, h, w)
     Threads.@threads for i in 1:h
         @inbounds for j in 1:w
             hit = false
@@ -398,7 +400,7 @@ end
 
 function set_mask(c, cx, cy, extent, maxiter, g, smooth)
     R2 = 4.0
-    mask = falses(g, g)
+    mask = Matrix{Bool}(undef, g, g)
     Threads.@threads for i in 1:g
         @inbounds for j in 1:g
             mask[i, j] = in_set(to_complex(i, j, g, g, cx, cy, extent), c, maxiter, R2)
@@ -571,4 +573,6 @@ function main(args)
     return println("$(round(t, digits = 2))s → $out.svg")
 end
 
-main(ARGS)
+if abspath(PROGRAM_FILE) == @__FILE__
+    main(ARGS)
+end

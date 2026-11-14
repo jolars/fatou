@@ -23,10 +23,25 @@ export default defineConfig({
   head: [
     [
       "link",
-      { rel: "icon", href: "/theme/favicon.svg", type: "image/svg+xml" },
+      {
+        rel: "icon",
+        type: "image/png",
+        href: "/favicon-96x96.png",
+        sizes: "96x96",
+      },
     ],
-    ["link", { rel: "icon", href: "/theme/favicon.png", type: "image/png" }],
-    ["link", { rel: "apple-touch-icon", href: "/apple-touch-icon.png" }],
+    ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
+    ["link", { rel: "shortcut icon", href: "/favicon.ico" }],
+    [
+      "link",
+      {
+        rel: "apple-touch-icon",
+        sizes: "180x180",
+        href: "/apple-touch-icon.png",
+      },
+    ],
+    ["meta", { name: "apple-mobile-web-app-title", content: "Fatou" }],
+    ["link", { rel: "manifest", href: "/site.webmanifest" }],
     ["meta", { property: "og:type", content: "website" }],
     ["meta", { property: "og:site_name", content: "Fatou" }],
     [
@@ -85,13 +100,15 @@ export default defineConfig({
     },
   },
   themeConfig: {
-    logo: { src: "/images/logo-small.png", alt: "Fatou logo" },
+    logo: {
+      light: "/images/logo-small.png",
+      dark: "/images/logo-small-dark.png",
+      alt: "Fatou logo",
+    },
     nav: [
       { text: "Guide", link: "/guide/getting-started.html" },
       { text: "Reference", link: "/reference/cli.html" },
       { text: "Playground", link: "/playground.html" },
-      { text: "Performance", link: "/guide/performance.html" },
-      { text: "Changelog", link: "/changelog.html" },
     ],
     sidebar: [
       group("Introduction", [

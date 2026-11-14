@@ -110,32 +110,30 @@ tasks:
       - ./scripts/aur_push.sh {{.CLI_ARGS}}
 
   logo:
-    desc: 'Generate the logo (pass params after --, e.g. `task logo -- mode=newton`)'
+    desc: Generate the basin triad logo and published brand assets (excluding favicons)
     cmds:
-      - julia -t auto scripts/generate-logo.jl {{.CLI_ARGS}}
+      - julia -t auto scripts/generate-brand.jl
 
   logo-watch:
-    desc: 'Re-generate the logo whenever the script changes (`task logo-watch -- mode=newton`)'
+    desc: Regenerate the basin triad logo when its source changes
     watch: true
     sources:
       - scripts/generate-logo.jl
+      - scripts/generate-brand.jl
     cmds:
-      - julia -t auto scripts/generate-logo.jl {{.CLI_ARGS}}
+      - julia -t auto scripts/generate-brand.jl
 
   logo-hero:
-    desc: Generate the borderless landing page fractal
+    desc: Regenerate the logo assets, including the landing page hero
     cmds:
-      - julia -t auto scripts/generate-logo.jl mode=newton width=1200 height=630 extent=3 whiten=20 border=0 out=docs/src/public/images/logo-hero
-      - magick docs/src/public/images/logo-hero.png -strip -define png:compression-level=9 docs/src/public/images/logo-hero.png
+      - task: logo
+
+  og-image:
+    desc: Render the manually edited social card SVG to PNG
+    cmds:
+      - magick -background none docs/src/public/images/og-image.svg -strip -define png:compression-level=9 docs/src/public/images/og-image.png
 
   icons:
-    desc: Derive the site icons (favicon, apple-touch-icon) from assets/logo.png
-    sources:
-      - assets/logo.png
-      - scripts/generate-icons.sh
-    generates:
-      - docs/src/public/theme/favicon.png
-      - docs/src/public/theme/favicon.svg
-      - docs/src/public/apple-touch-icon.png
+    desc: Install the RealFaviconGenerator bundle (optionally pass a new bundle URL)
     cmds:
-      - ./scripts/generate-icons.sh
+      - ./scripts/generate-icons.sh {{.CLI_ARGS}}

@@ -8,27 +8,41 @@
   --vp-c-brand-2: #839def;
   --vp-c-brand-3: #496bd8;
 }
-.VPHome .VPHero .image-src {
-  width: 360px;
+.VPHome .VPHero .image {
+  margin: -48px -24px 16px;
+}
+.VPHome .VPHero .image-container {
+  width: min(280px, calc(100vw - 64px));
   height: auto;
-  max-width: calc(100vw - 32px);
+  aspect-ratio: 1440 / 1591;
+  transform: none;
+}
+.VPHome .VPHero .image-src {
+  width: 100%;
+  height: auto;
+  max-width: none;
   max-height: none;
-  mask-image: url("/images/hero-mask.svg");
-  mask-size: 100% 100%;
-  mask-repeat: no-repeat;
 }
 @media (min-width: 640px) {
-  .VPHome .VPHero .image-src {
-    width: 480px;
+  .VPHome .VPHero .image-container {
+    width: 360px;
   }
 }
 @media (min-width: 960px) {
-  .VPHome .VPHero .image-src {
-    width: 640px;
-    max-width: calc(100% + 80px);
+  .VPHome .VPHero .main {
+    flex: 0 0 55%;
+    align-self: center;
   }
   .VPHome .VPHero .image-container {
-    transform: none;
+    width: 100%;
+    max-width: 480px;
+  }
+  .VPHome .VPHero .image {
+    margin: 0;
+    flex: 1 1 45%;
+    min-width: 0;
+    display: flex;
+    align-items: center;
   }
 }
 .bench-data[hidden] {

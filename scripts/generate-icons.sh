@@ -1,45 +1,45 @@
 #!/usr/bin/env bash
-# Derive the site icons from the master logo (assets/logo.png).
+# Install a RealFaviconGenerator bundle in the site's public directory.
 #
-# The Newton fractal has no vector original, so favicon.svg wraps an embedded
-# PNG. VitePress links both icon formats from its site configuration.
+# Usage: scripts/generate-icons.sh [bundle-url]
 #
-# Outputs (all overwritten):
-#   docs/src/public/theme/favicon.png     32x32
-#   docs/src/public/theme/favicon.svg     64x64
-#   docs/src/public/apple-touch-icon.png  180x180
-#
-# Usage: scripts/generate-icons.sh
+# Generate a new bundle on RealFaviconGenerator before updating the URL.
 set -euo pipefail
 
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-command -v magick >/dev/null || {
-  echo "error: magick not found (install imagemagick)" >&2
+command -v curl >/dev/null || {
+  echo "error: curl not found" >&2
   exit 1
 }
 
-logo=assets/logo.png
-
-# <size> <out>
-resize() {
-  magick "$logo" -resize "$1x$1" -strip -define png:compression-level=9 "$2"
-}
-
-resize 32 docs/src/public/theme/favicon.png
-resize 180 docs/src/public/apple-touch-icon.png
-
+bundle_url=${1:-https://realfavicongenerator.net/files/99f8beba-5fe6-4f37-9504-a1a0b14412f8}
+public_folder=docs/src/public
+files=(
+  favicon.svg
+  favicon-96x96.png
+  favicon.ico
+  apple-touch-icon.png
+  web-app-manifest-192x192.png
+  web-app-manifest-512x512.png
+  site.webmanifest
+)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-resize 64 "$tmp/favicon.png"
 
-{
-  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">'
-  printf '  <title>Fatou</title>\n'
-  printf '  <image width="64" height="64" href="data:image/png;base64,%s"/>\n' \
-    "$(base64 -w0 "$tmp/favicon.png")"
-  echo '</svg>'
-} >docs/src/public/theme/favicon.svg
+# Finish every download before replacing any installed files.
+for file in "${files[@]}"; do
+  curl --fail --location --silent --show-error --retry 2 \
+    --connect-timeout 15 --max-time 60 \
+    "${bundle_url%/}/$file" --output "$tmp/$file"
+done
+for file in "${files[@]}"; do
+  cp "$tmp/$file" "$public_folder/$file"
+done
 
-echo "wrote docs/src/public/theme/favicon.png docs/src/public/theme/favicon.svg docs/src/public/apple-touch-icon.png"
+# Preserve the previous icon URLs for cached pages and external references.
+cp "$public_folder/favicon.svg" "$public_folder/theme/favicon.svg"
+cp "$public_folder/favicon-96x96.png" "$public_folder/theme/favicon.png"
+
+echo "Installed the favicon bundle in $public_folder"

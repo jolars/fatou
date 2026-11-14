@@ -1,4 +1,4 @@
-# Fatou <img src='https://raw.githubusercontent.com/jolars/fatou/main/assets/logo.png' align="right" width="139" />
+# Fatou <picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jolars/fatou/main/assets/logo-dark.png"><img src="https://raw.githubusercontent.com/jolars/fatou/main/assets/logo.png" alt="Fatou logo" align="right" width="139"></picture>
 
 [![CI](https://img.shields.io/github/actions/workflow/status/jolars/fatou/build-and-test.yml?branch=main&label=CI)](https://github.com/jolars/fatou/actions/workflows/build-and-test.yml)
 [![Crates.io](https://img.shields.io/crates/v/fatou.svg?logo=rust)](https://crates.io/crates/fatou)
