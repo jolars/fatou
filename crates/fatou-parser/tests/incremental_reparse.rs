@@ -221,7 +221,48 @@ const HAZARD_SNIPPETS: &[&str] = &[
     // Editing `%` or `=` can change a broadcast operator's token boundary.
     include_str!("fixtures/parser/dotted_wrapping_arithmetic_operators/input.jl"),
     include_str!("fixtures/parser/labeled_keyword_recovery/input.jl"),
+    include_str!("fixtures/parser/macro_newline_operator/input.jl"),
 ];
+
+#[test]
+fn macro_newline_edits_change_operator_owner() {
+    use fatou_parser::parser::to_juliasyntax_sexpr;
+
+    for (gap, replacement, expected) in [
+        (" ", "\n ", "(call-i (macrocall @m x) - y)"),
+        ("\n ", " ", "(macrocall @m (call-i x - y))"),
+    ] {
+        let input = format!("function f()\n    before()\n    (@m x{gap}- y)\n    after()\nend\n");
+        let old = parse(&input);
+        let start = input.find('x').unwrap() + 1;
+        let edit = Edit {
+            range: start..start + gap.len(),
+            insert: replacement.to_string(),
+        };
+        let edited = edit.apply(&input);
+        let full = parse(&edited);
+        assert!(old.diagnostics.is_empty(), "{:?}", old.diagnostics);
+        assert!(full.diagnostics.is_empty(), "{:?}", full.diagnostics);
+        assert_eq!(
+            to_juliasyntax_sexpr(&full.cst, &full.diagnostics),
+            format!("(toplevel (function (call f) (block (call before) {expected} (call after))))"),
+        );
+
+        if let Some(reparsed) = reparse(
+            &input,
+            &old.cst.green().to_owned(),
+            &old.diagnostics,
+            &edit,
+            &edited,
+        ) {
+            assert_eq!(
+                fingerprint(&SyntaxNode::new_root(reparsed.green)),
+                fingerprint(&full.cst)
+            );
+            assert_eq!(reparsed.diagnostics, full.diagnostics);
+        }
+    }
+}
 
 /// Run one edit through `reparse` against a fresh parse of `src`. The
 /// Tenet-4 `debug_assert` inside `reparse` already cross-checks any success

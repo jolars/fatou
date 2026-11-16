@@ -228,35 +228,26 @@ pub(super) fn is_quotable_operator(kind: TokKind) -> bool {
 pub(super) fn next_operator(
     ctx: &ParserCtx<'_>,
     from: usize,
-    inside_brackets: bool,
+    allow_newlines: bool,
 ) -> Option<(usize, TokKind)> {
-    let op_idx = ctx.skip_ws_and_block_comments(from);
+    let op_idx = if allow_newlines {
+        ctx.skip_trivia(from)
+    } else {
+        ctx.skip_ws_and_block_comments(from)
+    };
     let op = ctx.token(op_idx)?;
-    if op.kind == TokKind::Newline {
-        if !inside_brackets {
-            return None;
-        }
-        let next_idx = ctx.skip_ws_and_newlines(from);
-        let next = ctx.token(next_idx)?;
-        return is_operator(next.kind).then_some((next_idx, next.kind));
-    }
     is_operator(op.kind).then_some((op_idx, op.kind))
 }
 
 pub(super) fn word_operator(
     ctx: &ParserCtx<'_>,
     from: usize,
-    inside_brackets: bool,
+    allow_newlines: bool,
 ) -> Option<usize> {
-    let op_idx = ctx.skip_ws_and_block_comments(from);
-    let op = ctx.token(op_idx)?;
-    let op_idx = if op.kind == TokKind::Newline {
-        if !inside_brackets {
-            return None;
-        }
-        ctx.skip_ws_and_newlines(from)
+    let op_idx = if allow_newlines {
+        ctx.skip_trivia(from)
     } else {
-        op_idx
+        ctx.skip_ws_and_block_comments(from)
     };
     is_word_operator_tok(ctx.token(op_idx)?).then_some(op_idx)
 }

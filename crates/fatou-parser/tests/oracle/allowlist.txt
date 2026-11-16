@@ -149,6 +149,7 @@ macro_definition
 macro_directive_names
 macro_keyword_name
 macro_name_brackets
+macro_newline_operator
 macro_operator_names
 macro_sigil_leading
 macro_sigil_trailing

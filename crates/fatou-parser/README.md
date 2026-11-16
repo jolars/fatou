@@ -24,6 +24,11 @@ Wrapping arithmetic includes broadcast `.+%`, `.-%`, and `.*%`, along with their
 `.+%=`, `.-%=`, and `.*%=` assignment forms. Each has a distinct `SyntaxKind`
 token and follows its undotted counterpart's precedence.
 
+Space-form macro arguments stop before operators on following lines, even inside
+parentheses: `(@m x\n - y)` parses as `(@m x) - y`. The boundary holds across
+comments and CRLF. The special two-argument `@doc` continuation retains its own
+newline rule.
+
 `break label, y` forms an enclosing tuple, while `break label x, y` gives the
 labeled break a tuple value. `continue` accepts a label without a value.
 Trailing junk recovers beside the keyword node and leaves later statements

@@ -129,6 +129,13 @@ struct ExprFlags {
     kw_generator_body: bool,
 }
 
+impl ExprFlags {
+    fn operator_newlines(self) -> bool {
+        // Space-form macro arguments end at a newline even inside parentheses.
+        self.inside_brackets && !self.array_mode
+    }
+}
+
 /// Whether a significant newline directly follows the operator at `op_idx`, so
 /// the operator cannot reach across it for a right operand. Newlines are
 /// significant at statement scope and inside array brackets (where a newline
@@ -596,7 +603,11 @@ fn parse_expr_in(
         // bind (`SPLAT_BP < min_bp`, e.g. inside colon's right operand) the loop
         // simply breaks and an enclosing parse consumes it.
         if SPLAT_BP >= min_bp {
-            let splat_idx = ctx.skip_ws(lhs.end);
+            let splat_idx = if flags.operator_newlines() {
+                ctx.skip_trivia(lhs.end)
+            } else {
+                ctx.skip_ws(lhs.end)
+            };
             if ctx.token(splat_idx).map(|t| t.kind) == Some(TokKind::DotDotDot) {
                 let mut events = vec![Event::Start(SyntaxKind::SPLAT_EXPR)];
                 events.extend(lhs.events);
@@ -623,7 +634,7 @@ fn parse_expr_in(
         if !no_where
             && WHERE_BP >= min_bp
             && let Some((where_idx, TokKind::WhereKw)) =
-                next_operator(&ctx, lhs.end, inside_brackets)
+                next_operator(&ctx, lhs.end, flags.operator_newlines())
         {
             lhs = parse_where_chain(tokens, &ctx, lhs, where_idx, diagnostics, flags);
             continue;
@@ -653,7 +664,9 @@ fn parse_expr_in(
         // divergence). Suppressed while parsing a loop variable, where `in` is the
         // for-spec separator. Checked after juxtaposition (so an adjacent `2in`
         // still juxtaposes) and before the symbolic operators.
-        if !for_spec_var && let Some(op_idx) = word_operator(&ctx, lhs.end, inside_brackets) {
+        if !for_spec_var
+            && let Some(op_idx) = word_operator(&ctx, lhs.end, flags.operator_newlines())
+        {
             if WORD_OP_L < min_bp {
                 break;
             }
@@ -674,7 +687,8 @@ fn parse_expr_in(
             continue;
         }
 
-        let Some((op_idx, op_kind)) = next_operator(&ctx, lhs.end, inside_brackets) else {
+        let Some((op_idx, op_kind)) = next_operator(&ctx, lhs.end, flags.operator_newlines())
+        else {
             break;
         };
 
@@ -918,7 +932,7 @@ fn parse_expr_in(
             && !no_where
             && !no_decl_where
             && let Some((where_idx, TokKind::WhereKw)) =
-                next_operator(&ctx, rhs.end, inside_brackets)
+                next_operator(&ctx, rhs.end, flags.operator_newlines())
         {
             rhs = parse_where_chain(tokens, &ctx, rhs, where_idx, diagnostics, flags);
         }
@@ -984,7 +998,7 @@ fn parse_where_chain(
             return error_expr_to_line_end(tokens, lhs.start, where_idx + 1);
         };
         lhs = build_binary(SyntaxKind::WHERE_EXPR, lhs, bound);
-        match next_operator(ctx, lhs.end, flags.inside_brackets) {
+        match next_operator(ctx, lhs.end, flags.operator_newlines()) {
             Some((idx, TokKind::WhereKw)) => where_idx = idx,
             _ => return lhs,
         }
@@ -1251,7 +1265,7 @@ fn parse_colon_range(
         // Continue the chain only on another range colon at the same level: not a
         // ternary separator (`no_range`) and not an array-element boundary
         // (`[1 :2]` splits into elements rather than ranging).
-        let continues = match next_operator(ctx, last_end, flags.inside_brackets) {
+        let continues = match next_operator(ctx, last_end, flags.operator_newlines()) {
             Some((idx, TokKind::Colon)) if !flags.no_range => {
                 let split = flags.array_mode && array_element_boundary(ctx, last_end, idx);
                 (!split).then_some(idx)
@@ -1331,7 +1345,7 @@ fn parse_operator_chain(
         op_count += 1;
         // Continue only while the run's own predicate holds and the operator is
         // not an array-element boundary (`[a <b]`, `[a +b]` split into elements).
-        let continues = match next_operator(ctx, last_end, flags.inside_brackets) {
+        let continues = match next_operator(ctx, last_end, flags.operator_newlines()) {
             Some((idx, kind)) if (spec.continues)(kind, idx) => {
                 let split = flags.array_mode && array_element_boundary(ctx, last_end, idx);
                 (!split).then_some(idx)

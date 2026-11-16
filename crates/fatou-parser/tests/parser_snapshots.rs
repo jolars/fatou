@@ -114,6 +114,50 @@ fn parenthesized_macro_loop_arguments_parse_cleanly() {
 }
 
 #[test]
+fn macro_arguments_stop_before_newline_operators() {
+    use fatou_parser::parser::to_juliasyntax_sexpr;
+
+    for newline in [
+        "\n",
+        "\r\n",
+        " # comment\n",
+        " #= comment =#\n",
+        "\n #= comment =#",
+        "\n # comment\n",
+    ] {
+        for (tail, expected) in [
+            ("- y", "(toplevel (call-i (macrocall @m x) - y))"),
+            ("-y", "(toplevel (call-i (macrocall @m x) - y))"),
+            ("+ y", "(toplevel (call-i (macrocall @m x) + y))"),
+            ("in ys", "(toplevel (call-i (macrocall @m x) in ys))"),
+            ("where T", "(toplevel (where (macrocall @m x) T))"),
+            ("::T", "(toplevel (::-i (macrocall @m x) T))"),
+        ] {
+            let input = format!("(@m x{newline} {tail})");
+            let output = parse(&input);
+            assert!(
+                output.diagnostics.is_empty(),
+                "{input:?}: {:?}",
+                output.diagnostics
+            );
+            assert_eq!(
+                to_juliasyntax_sexpr(&output.cst, &output.diagnostics),
+                expected,
+                "{input:?}",
+            );
+            assert_eq!(reconstruct(&input), input);
+        }
+    }
+}
+
+#[test]
+fn macro_newline_operator_fixture_parses_cleanly() {
+    let input = include_str!("fixtures/parser/macro_newline_operator/input.jl");
+    let output = parse(input);
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+}
+
+#[test]
 fn declarations_continue_after_newlines() {
     let input = include_str!("fixtures/parser/declaration_newline_continuation/input.jl");
     assert!(parse(input).diagnostics.is_empty());
