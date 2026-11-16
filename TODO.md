@@ -2,16 +2,6 @@
 
 ## Parser
 
-- [ ] Lex the *broadcast* wrapping arithmetic operators `.+% .-% .*%` (and their
-  augmented forms `.+%= .-%= .*%=`) in
-  `crates/fatou-parser/src/parser/lexer.rs`. Fatou supports undotted
-  `+% -% *%`; the dotted forms split into existing operators and produce
-  diagnostics. Ready to implement: Julia's bundled development JuliaSyntax
-  accepts all six dotted forms (verified 2026-11-16). Use
-  `scripts/refresh-juliasyntax-oracle.sh` to generate a development-revision
-  oracle; weekly CI proposes corpus updates as PRs. The committed regression
-  corpus remains on JuliaSyntax 1.0.2 until the first update is reviewed.
-
 - [ ] Two error-recovery gaps left over from labeled `break`/`continue`
   (`crates/fatou-parser/src/parser/structural.rs`). Junk after a complete
   labeled keyword drops JuliaSyntax's trailing zero-width marker

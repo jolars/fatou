@@ -176,6 +176,9 @@ fn is_broadcast_assign(kind: SyntaxKind) -> bool {
             | SyntaxKind::DOT_PLUS_EQ
             | SyntaxKind::DOT_MINUS_EQ
             | SyntaxKind::DOT_STAR_EQ
+            | SyntaxKind::DOT_PLUS_PERCENT_EQ
+            | SyntaxKind::DOT_MINUS_PERCENT_EQ
+            | SyntaxKind::DOT_STAR_PERCENT_EQ
             | SyntaxKind::DOT_SLASH_EQ
             | SyntaxKind::DOT_BACKSLASH_EQ
             | SyntaxKind::DOT_SLASH_SLASH_EQ

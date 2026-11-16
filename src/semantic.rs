@@ -527,6 +527,28 @@ mod tests {
     }
 
     #[test]
+    fn broadcast_wrapping_assignments_read_the_target() {
+        for op in [".+%=", ".-%=", ".*%="] {
+            let source = format!("x {op} y");
+            let output = crate::parser::parse(&source);
+            assert!(
+                output.diagnostics.is_empty(),
+                "{op}: {:?}",
+                output.diagnostics
+            );
+            let m = SemanticModel::build(&output.cst);
+            assert!(binding_names(&m).is_empty(), "{op}");
+            assert_eq!(free_read_names(&m), ["x", "y"], "{op}");
+
+            let m = model_of(&format!("x = [1]\nx {op} y"));
+            let x = find(&m, "x");
+            let occ: Vec<_> = m.occurrences(x).filter(|o| !o.is_def).collect();
+            assert_eq!(occ.len(), 1, "{op}");
+            assert_eq!(occ[0].access, Access::Read, "{op}");
+        }
+    }
+
+    #[test]
     fn annotated_assignment_binds_name_and_reads_type() {
         let m = model_of("x::Int = 1");
         assert_eq!(binding_names(&m), ["x"]);
