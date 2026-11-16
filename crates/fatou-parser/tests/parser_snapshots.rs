@@ -169,3 +169,168 @@ fn break_continue_commas_report_one_diagnostic_per_keyword() {
         }
     }
 }
+
+#[test]
+fn labeled_keyword_commas_form_tuples() {
+    for keyword in ["break", "continue"] {
+        for (input, expected) in [
+            (
+                format!("{keyword} lbl, y"),
+                format!("(toplevel (tuple ({keyword} lbl) y))"),
+            ),
+            (
+                format!("{keyword} lbl, y = values"),
+                format!("(toplevel (= (tuple ({keyword} lbl) y) values))"),
+            ),
+            (
+                format!("f({keyword} lbl, y)"),
+                format!("(toplevel (call f ({keyword} lbl) y))"),
+            ),
+            (
+                format!("[{keyword} lbl, y]"),
+                format!("(toplevel (vect ({keyword} lbl) y))"),
+            ),
+        ] {
+            let output = parse(&input);
+            assert!(
+                output.diagnostics.is_empty(),
+                "{input}: {:?}",
+                output.diagnostics
+            );
+            assert_eq!(
+                fatou_parser::parser::to_juliasyntax_sexpr(&output.cst, &output.diagnostics),
+                expected,
+                "{input}",
+            );
+            assert_eq!(reconstruct(&input), input);
+        }
+    }
+}
+
+#[test]
+fn labeled_keyword_recovery_records_eof() {
+    for (input, expected) in [
+        (
+            "break l x y",
+            "(toplevel (break l x) (error-t y (error-t)))",
+        ),
+        (
+            "continue l x y",
+            "(toplevel (continue l) (error-t x y (error-t)))",
+        ),
+        (
+            "break l x y # comment",
+            "(toplevel (break l x) (error-t y (error-t)))",
+        ),
+        (
+            "continue l x #= comment =#",
+            "(toplevel (continue l) (error-t x (error-t)))",
+        ),
+    ] {
+        let output = parse(input);
+        assert_eq!(
+            fatou_parser::parser::to_juliasyntax_sexpr(&output.cst, &output.diagnostics),
+            expected,
+            "{input}",
+        );
+        let diagnostics = &output.diagnostics;
+        assert_eq!(diagnostics.len(), 2, "{input}: {diagnostics:?}");
+        assert_eq!(
+            diagnostics[0].message,
+            format!(
+                "unexpected token after `{}`",
+                input.split_whitespace().next().unwrap()
+            ),
+            "{input}",
+        );
+        assert_eq!(diagnostics[1].message, "premature end of input", "{input}");
+        assert_eq!(
+            (diagnostics[1].start, diagnostics[1].end),
+            (input.len(), input.len())
+        );
+        assert_eq!(reconstruct(input), input);
+    }
+}
+
+#[test]
+fn labeled_keyword_recovery_stops_at_delimiters() {
+    for (input, expected) in [
+        (
+            "break l x y\nafter",
+            "(toplevel (break l x) (error-t y) after)",
+        ),
+        (
+            "continue l x\nafter",
+            "(toplevel (continue l) (error-t x) after)",
+        ),
+        (
+            "break l x y\r\nafter",
+            "(toplevel (break l x) (error-t y) after)",
+        ),
+        (
+            "continue l x # comment\nafter",
+            "(toplevel (continue l) (error-t x) after)",
+        ),
+        (
+            "break l x y; after",
+            "(toplevel (toplevel-; (break l x) (error-t y) after))",
+        ),
+        (
+            "f(continue l x, y)",
+            "(toplevel (call f (continue l) (error-t x) y))",
+        ),
+        (
+            "begin continue l x\nafter end",
+            "(toplevel (block (continue l) (error-t x) after))",
+        ),
+        (
+            "x ? continue l z : y",
+            "(toplevel (? x (continue l) (error-t z) y))",
+        ),
+    ] {
+        let output = parse(input);
+        assert_eq!(
+            fatou_parser::parser::to_juliasyntax_sexpr(&output.cst, &output.diagnostics),
+            expected,
+            "{input}",
+        );
+        assert_eq!(
+            output.diagnostics.len(),
+            1,
+            "{input}: {:?}",
+            output.diagnostics
+        );
+        assert_eq!(reconstruct(input), input);
+    }
+}
+
+#[test]
+fn labeled_keyword_recovery_projection() {
+    let input = include_str!("fixtures/parser/labeled_keyword_recovery/input.jl");
+    let output = parse(input);
+
+    // The released corpus predates labels, so this snapshot is checked against
+    // the pinned development oracle in an isolated corpus.
+    let projected = fatou_parser::parser::to_juliasyntax_sexpr(&output.cst, &output.diagnostics);
+    insta::assert_snapshot!("labeled_keyword_recovery_sexpr", projected);
+}
+
+#[test]
+fn labeled_keyword_break_values_keep_boundaries() {
+    for (input, expected) in [
+        ("break l x, y", "(toplevel (break l (tuple x y)))"),
+        ("x ? break l x : y", "(toplevel (? x (break l x) y))"),
+        (
+            "break l x, y z",
+            "(toplevel (break l (tuple x y)) (error-t z (error-t)))",
+        ),
+    ] {
+        let output = parse(input);
+        assert_eq!(
+            fatou_parser::parser::to_juliasyntax_sexpr(&output.cst, &output.diagnostics),
+            expected,
+            "{input}",
+        );
+        assert_eq!(reconstruct(input), input);
+    }
+}

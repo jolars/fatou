@@ -1,0 +1,448 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..608
+  BARE_TUPLE_EXPR@0..12
+    BREAK_EXPR@0..9
+      BREAK_KW@0..5 "break"
+      WHITESPACE@5..6 " "
+      NAME@6..9
+        IDENT@6..9 "lbl"
+    COMMA@9..10 ","
+    WHITESPACE@10..11 " "
+    NAME@11..12
+      IDENT@11..12 "y"
+  NEWLINE@12..13 "\n"
+  BARE_TUPLE_EXPR@13..28
+    CONTINUE_EXPR@13..25
+      CONTINUE_KW@13..21 "continue"
+      WHITESPACE@21..22 " "
+      NAME@22..25
+        IDENT@22..25 "lbl"
+    COMMA@25..26 ","
+    WHITESPACE@26..27 " "
+    NAME@27..28
+      IDENT@27..28 "y"
+  NEWLINE@28..29 "\n"
+  BARE_TUPLE_EXPR@29..42
+    BREAK_EXPR@29..39
+      BREAK_KW@29..34 "break"
+      WHITESPACE@34..35 " "
+      INTERPOLATION@35..39
+        DOLLAR@35..36 "$"
+        IDENT@36..39 "lbl"
+    COMMA@39..40 ","
+    WHITESPACE@40..41 " "
+    NAME@41..42
+      IDENT@41..42 "y"
+  NEWLINE@42..43 "\n"
+  BARE_TUPLE_EXPR@43..70
+    CONTINUE_EXPR@43..67
+      CONTINUE_KW@43..51 "continue"
+      WHITESPACE@51..52 " "
+      NONSTANDARD_IDENTIFIER@52..67
+        STRING_PREFIX@52..55 "var"
+        STRING_DELIM_OPEN@55..56 "\""
+        STRING_CONTENT@56..66 "label name"
+        STRING_DELIM_CLOSE@66..67 "\""
+    COMMA@67..68 ","
+    WHITESPACE@68..69 " "
+    NAME@69..70
+      IDENT@69..70 "y"
+  NEWLINE@70..71 "\n"
+  ASSIGNMENT_EXPR@71..92
+    BARE_TUPLE_EXPR@71..83
+      BREAK_EXPR@71..80
+        BREAK_KW@71..76 "break"
+        WHITESPACE@76..77 " "
+        NAME@77..80
+          IDENT@77..80 "lbl"
+      COMMA@80..81 ","
+      WHITESPACE@81..82 " "
+      NAME@82..83
+        IDENT@82..83 "y"
+    WHITESPACE@83..84 " "
+    EQ@84..85 "="
+    WHITESPACE@85..86 " "
+    NAME@86..92
+      IDENT@86..92 "values"
+  NEWLINE@92..93 "\n"
+  ASSIGNMENT_EXPR@93..117
+    BARE_TUPLE_EXPR@93..108
+      CONTINUE_EXPR@93..105
+        CONTINUE_KW@93..101 "continue"
+        WHITESPACE@101..102 " "
+        NAME@102..105
+          IDENT@102..105 "lbl"
+      COMMA@105..106 ","
+      WHITESPACE@106..107 " "
+      NAME@107..108
+        IDENT@107..108 "y"
+    WHITESPACE@108..109 " "
+    EQ@109..110 "="
+    WHITESPACE@110..111 " "
+    NAME@111..117
+      IDENT@111..117 "values"
+  NEWLINE@117..118 "\n"
+  ASSIGNMENT_EXPR@118..139
+    NAME@118..124
+      IDENT@118..124 "result"
+    WHITESPACE@124..125 " "
+    EQ@125..126 "="
+    WHITESPACE@126..127 " "
+    BARE_TUPLE_EXPR@127..139
+      BREAK_EXPR@127..136
+        BREAK_KW@127..132 "break"
+        WHITESPACE@132..133 " "
+        NAME@133..136
+          IDENT@133..136 "lbl"
+      COMMA@136..137 ","
+      WHITESPACE@137..138 " "
+      NAME@138..139
+        IDENT@138..139 "y"
+  NEWLINE@139..140 "\n"
+  RETURN_EXPR@140..162
+    RETURN_KW@140..146 "return"
+    WHITESPACE@146..147 " "
+    BARE_TUPLE_EXPR@147..162
+      CONTINUE_EXPR@147..159
+        CONTINUE_KW@147..155 "continue"
+        WHITESPACE@155..156 " "
+        NAME@156..159
+          IDENT@156..159 "lbl"
+      COMMA@159..160 ","
+      WHITESPACE@160..161 " "
+      NAME@161..162
+        IDENT@161..162 "y"
+  NEWLINE@162..163 "\n"
+  BARE_TUPLE_EXPR@163..179
+    BREAK_EXPR@163..172
+      BREAK_KW@163..168 "break"
+      WHITESPACE@168..169 " "
+      NAME@169..172
+        IDENT@169..172 "lbl"
+    COMMA@172..173 ","
+    NEWLINE@173..174 "\n"
+    WHITESPACE@174..178 "    "
+    NAME@178..179
+      IDENT@178..179 "y"
+  NEWLINE@179..180 "\n"
+  BEGIN_EXPR@180..226
+    BEGIN_KW@180..185 "begin"
+    BLOCK@185..223
+      NEWLINE@185..186 "\n"
+      WHITESPACE@186..190 "    "
+      BARE_TUPLE_EXPR@190..202
+        BREAK_EXPR@190..199
+          BREAK_KW@190..195 "break"
+          WHITESPACE@195..196 " "
+          NAME@196..199
+            IDENT@196..199 "lbl"
+        COMMA@199..200 ","
+        WHITESPACE@200..201 " "
+        NAME@201..202
+          IDENT@201..202 "y"
+      NEWLINE@202..203 "\n"
+      WHITESPACE@203..207 "    "
+      BARE_TUPLE_EXPR@207..222
+        CONTINUE_EXPR@207..219
+          CONTINUE_KW@207..215 "continue"
+          WHITESPACE@215..216 " "
+          NAME@216..219
+            IDENT@216..219 "lbl"
+        COMMA@219..220 ","
+        WHITESPACE@220..221 " "
+        NAME@221..222
+          IDENT@221..222 "y"
+      NEWLINE@222..223 "\n"
+    END_KW@223..226 "end"
+  NEWLINE@226..227 "\n"
+  TUPLE_EXPR@227..241
+    LPAREN@227..228 "("
+    ARG@228..237
+      BREAK_EXPR@228..237
+        BREAK_KW@228..233 "break"
+        WHITESPACE@233..234 " "
+        NAME@234..237
+          IDENT@234..237 "lbl"
+    COMMA@237..238 ","
+    WHITESPACE@238..239 " "
+    ARG@239..240
+      NAME@239..240
+        IDENT@239..240 "y"
+    RPAREN@240..241 ")"
+  NEWLINE@241..242 "\n"
+  TUPLE_EXPR@242..259
+    LPAREN@242..243 "("
+    ARG@243..255
+      CONTINUE_EXPR@243..255
+        CONTINUE_KW@243..251 "continue"
+        WHITESPACE@251..252 " "
+        NAME@252..255
+          IDENT@252..255 "lbl"
+    COMMA@255..256 ","
+    WHITESPACE@256..257 " "
+    ARG@257..258
+      NAME@257..258
+        IDENT@257..258 "y"
+    RPAREN@258..259 ")"
+  NEWLINE@259..260 "\n"
+  CALL_EXPR@260..275
+    NAME@260..261
+      IDENT@260..261 "f"
+    ARG_LIST@261..275
+      LPAREN@261..262 "("
+      ARG@262..271
+        BREAK_EXPR@262..271
+          BREAK_KW@262..267 "break"
+          WHITESPACE@267..268 " "
+          NAME@268..271
+            IDENT@268..271 "lbl"
+      COMMA@271..272 ","
+      WHITESPACE@272..273 " "
+      ARG@273..274
+        NAME@273..274
+          IDENT@273..274 "y"
+      RPAREN@274..275 ")"
+  NEWLINE@275..276 "\n"
+  CALL_EXPR@276..294
+    NAME@276..277
+      IDENT@276..277 "f"
+    ARG_LIST@277..294
+      LPAREN@277..278 "("
+      ARG@278..290
+        CONTINUE_EXPR@278..290
+          CONTINUE_KW@278..286 "continue"
+          WHITESPACE@286..287 " "
+          NAME@287..290
+            IDENT@287..290 "lbl"
+      COMMA@290..291 ","
+      WHITESPACE@291..292 " "
+      ARG@292..293
+        NAME@292..293
+          IDENT@292..293 "y"
+      RPAREN@293..294 ")"
+  NEWLINE@294..295 "\n"
+  VECT_EXPR@295..309
+    LBRACKET@295..296 "["
+    ARG@296..305
+      BREAK_EXPR@296..305
+        BREAK_KW@296..301 "break"
+        WHITESPACE@301..302 " "
+        NAME@302..305
+          IDENT@302..305 "lbl"
+    COMMA@305..306 ","
+    WHITESPACE@306..307 " "
+    ARG@307..308
+      NAME@307..308
+        IDENT@307..308 "y"
+    RBRACKET@308..309 "]"
+  NEWLINE@309..310 "\n"
+  VECT_EXPR@310..327
+    LBRACKET@310..311 "["
+    ARG@311..323
+      CONTINUE_EXPR@311..323
+        CONTINUE_KW@311..319 "continue"
+        WHITESPACE@319..320 " "
+        NAME@320..323
+          IDENT@320..323 "lbl"
+    COMMA@323..324 ","
+    WHITESPACE@324..325 " "
+    ARG@325..326
+      NAME@325..326
+        IDENT@325..326 "y"
+    RBRACKET@326..327 "]"
+  NEWLINE@327..328 "\n"
+  BREAK_EXPR@328..339
+    BREAK_KW@328..333 "break"
+    WHITESPACE@333..334 " "
+    NAME@334..337
+      IDENT@334..337 "lbl"
+    WHITESPACE@337..338 " "
+    NAME@338..339
+      IDENT@338..339 "x"
+  WHITESPACE@339..340 " "
+  ERROR@340..341
+    IDENT@340..341 "y"
+  NEWLINE@341..342 "\n"
+  CONTINUE_EXPR@342..354
+    CONTINUE_KW@342..350 "continue"
+    WHITESPACE@350..351 " "
+    NAME@351..354
+      IDENT@351..354 "lbl"
+  WHITESPACE@354..355 " "
+  ERROR@355..358
+    IDENT@355..356 "x"
+    WHITESPACE@356..357 " "
+    IDENT@357..358 "y"
+  NEWLINE@358..359 "\n"
+  BEGIN_EXPR@359..442
+    BEGIN_KW@359..364 "begin"
+    BLOCK@364..439
+      NEWLINE@364..365 "\n"
+      WHITESPACE@365..369 "    "
+      BREAK_EXPR@369..380
+        BREAK_KW@369..374 "break"
+        WHITESPACE@374..375 " "
+        NAME@375..378
+          IDENT@375..378 "lbl"
+        WHITESPACE@378..379 " "
+        NAME@379..380
+          IDENT@379..380 "x"
+      WHITESPACE@380..381 " "
+      ERROR@381..382
+        IDENT@381..382 "y"
+      NEWLINE@382..383 "\n"
+      WHITESPACE@383..387 "    "
+      NAME@387..398
+        IDENT@387..398 "after_break"
+      NEWLINE@398..399 "\n"
+      WHITESPACE@399..403 "    "
+      CONTINUE_EXPR@403..415
+        CONTINUE_KW@403..411 "continue"
+        WHITESPACE@411..412 " "
+        NAME@412..415
+          IDENT@412..415 "lbl"
+      WHITESPACE@415..416 " "
+      ERROR@416..419
+        IDENT@416..417 "x"
+        WHITESPACE@417..418 " "
+        IDENT@418..419 "y"
+      NEWLINE@419..420 "\n"
+      WHITESPACE@420..424 "    "
+      NAME@424..438
+        IDENT@424..438 "after_continue"
+      NEWLINE@438..439 "\n"
+    END_KW@439..442 "end"
+  NEWLINE@442..443 "\n"
+  PAREN_EXPR@443..458
+    LPAREN@443..444 "("
+    BREAK_EXPR@444..455
+      BREAK_KW@444..449 "break"
+      WHITESPACE@449..450 " "
+      NAME@450..453
+        IDENT@450..453 "lbl"
+      WHITESPACE@453..454 " "
+      NAME@454..455
+        IDENT@454..455 "x"
+    WHITESPACE@455..456 " "
+    ERROR@456..457
+      IDENT@456..457 "y"
+    RPAREN@457..458 ")"
+  NEWLINE@458..459 "\n"
+  CALL_EXPR@459..478
+    NAME@459..460
+      IDENT@459..460 "f"
+    ARG_LIST@460..478
+      LPAREN@460..461 "("
+      ARG@461..477
+        CONTINUE_EXPR@461..473
+          CONTINUE_KW@461..469 "continue"
+          WHITESPACE@469..470 " "
+          NAME@470..473
+            IDENT@470..473 "lbl"
+        WHITESPACE@473..474 " "
+        ERROR@474..477
+          IDENT@474..475 "x"
+          WHITESPACE@475..476 " "
+          IDENT@476..477 "y"
+      RPAREN@477..478 ")"
+  NEWLINE@478..479 "\n"
+  VECT_EXPR@479..494
+    LBRACKET@479..480 "["
+    ARG@480..493
+      BREAK_EXPR@480..491
+        BREAK_KW@480..485 "break"
+        WHITESPACE@485..486 " "
+        NAME@486..489
+          IDENT@486..489 "lbl"
+        WHITESPACE@489..490 " "
+        NAME@490..491
+          IDENT@490..491 "x"
+      WHITESPACE@491..492 " "
+      ERROR@492..493
+        IDENT@492..493 "y"
+    RBRACKET@493..494 "]"
+  NEWLINE@494..495 "\n"
+  BREAK_EXPR@495..506
+    BREAK_KW@495..500 "break"
+    WHITESPACE@500..501 " "
+    NAME@501..504
+      IDENT@501..504 "lbl"
+    WHITESPACE@504..505 " "
+    NAME@505..506
+      IDENT@505..506 "x"
+  WHITESPACE@506..507 " "
+  BLOCK_COMMENT@507..520 "#= comment =#"
+  WHITESPACE@520..521 " "
+  ERROR@521..522
+    IDENT@521..522 "y"
+  NEWLINE@522..523 "\n"
+  CONTINUE_EXPR@523..535
+    CONTINUE_KW@523..531 "continue"
+    WHITESPACE@531..532 " "
+    NAME@532..535
+      IDENT@532..535 "lbl"
+  WHITESPACE@535..536 " "
+  BLOCK_COMMENT@536..549 "#= comment =#"
+  WHITESPACE@549..550 " "
+  ERROR@550..551
+    IDENT@550..551 "x"
+  NEWLINE@551..552 "\n"
+  TOPLEVEL_SEMICOLON@552..572
+    BREAK_EXPR@552..563
+      BREAK_KW@552..557 "break"
+      WHITESPACE@557..558 " "
+      NAME@558..561
+        IDENT@558..561 "lbl"
+      WHITESPACE@561..562 " "
+      NAME@562..563
+        IDENT@562..563 "x"
+    WHITESPACE@563..564 " "
+    ERROR@564..565
+      IDENT@564..565 "y"
+    SEMICOLON@565..566 ";"
+    WHITESPACE@566..567 " "
+    NAME@567..572
+      IDENT@567..572 "after"
+  NEWLINE@572..573 "\n"
+  TOPLEVEL_SEMICOLON@573..594
+    CONTINUE_EXPR@573..585
+      CONTINUE_KW@573..581 "continue"
+      WHITESPACE@581..582 " "
+      NAME@582..585
+        IDENT@582..585 "lbl"
+    WHITESPACE@585..586 " "
+    ERROR@586..587
+      IDENT@586..587 "x"
+    SEMICOLON@587..588 ";"
+    WHITESPACE@588..589 " "
+    NAME@589..594
+      IDENT@589..594 "after"
+  NEWLINE@594..595 "\n"
+  BREAK_EXPR@595..606
+    BREAK_KW@595..600 "break"
+    WHITESPACE@600..601 " "
+    NAME@601..604
+      IDENT@601..604 "lbl"
+    WHITESPACE@604..605 " "
+    NAME@605..606
+      IDENT@605..606 "x"
+  WHITESPACE@606..607 " "
+  ERROR@607..608
+    IDENT@607..608 "y"
+
+diagnostic [340..341]: unexpected token after `break`
+diagnostic [355..356]: unexpected token after `continue`
+diagnostic [381..382]: unexpected token after `break`
+diagnostic [416..417]: unexpected token after `continue`
+diagnostic [456..457]: unexpected token after `break`
+diagnostic [474..475]: unexpected token after `continue`
+diagnostic [492..493]: unexpected token after `break`
+diagnostic [521..522]: unexpected token after `break`
+diagnostic [550..551]: unexpected token after `continue`
+diagnostic [564..565]: unexpected token after `break`
+diagnostic [586..587]: unexpected token after `continue`
+diagnostic [607..608]: unexpected token after `break`
+diagnostic [608..608]: premature end of input

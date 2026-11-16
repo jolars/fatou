@@ -1,0 +1,5 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: projected
+---
+(toplevel (tuple (break lbl) y) (tuple (continue lbl) y) (tuple (break ($ lbl)) y) (tuple (continue (var label name)) y) (= (tuple (break lbl) y) values) (= (tuple (continue lbl) y) values) (= result (tuple (break lbl) y)) (return (tuple (continue lbl) y)) (tuple (break lbl) y) (block (tuple (break lbl) y) (tuple (continue lbl) y)) (tuple-p (break lbl) y) (tuple-p (continue lbl) y) (call f (break lbl) y) (call f (continue lbl) y) (vect (break lbl) y) (vect (continue lbl) y) (break lbl x) (error-t y) (continue lbl) (error-t x y) (block (break lbl x) (error-t y) after_break (continue lbl) (error-t x y) after_continue) (parens (break lbl x) (error-t y)) (call f (continue lbl) (error-t x y)) (vect (break lbl x) (error-t y)) (break lbl x) (error-t y) (continue lbl) (error-t x) (toplevel-; (break lbl x) (error-t y) after) (toplevel-; (continue lbl) (error-t x) after) (break lbl x) (error-t y (error-t)))

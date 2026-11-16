@@ -24,6 +24,12 @@ Wrapping arithmetic includes broadcast `.+%`, `.-%`, and `.*%`, along with their
 `.+%=`, `.-%=`, and `.*%=` assignment forms. Each has a distinct `SyntaxKind`
 token and follows its undotted counterpart's precedence.
 
+`break label, y` forms an enclosing tuple, while `break label x, y` gives the
+labeled break a tuple value. `continue` accepts a label without a value.
+Trailing junk recovers beside the keyword node and leaves later statements
+available to parse. If that recovery reaches EOF, `parser::ParseDiagnostic`
+reports `premature end of input` with a zero-width range at EOF.
+
 `parser::reparse` tries token, nested-block, and top-level statement splices in
 that order; `ReparseTier::Block` identifies a nested body splice. Block
 fragments retain the owner's grammar context, including module `public`

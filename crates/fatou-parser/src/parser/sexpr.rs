@@ -1300,7 +1300,7 @@ fn project_args(container: &SyntaxNode) -> Vec<String> {
         match el {
             NodeOrToken::Node(n) => match n.kind() {
                 ARG => {
-                    out.push(project_first(&n));
+                    out.push(project_arg(&n));
                     // A misplaced-`end` recovery in a bracket that collapsed to a
                     // `vect` (`[1 end]` ⇒ `(vect 1 (error-t))`) splices a zero-width
                     // marker after the last real element, like its matrix sibling.
@@ -1346,7 +1346,7 @@ fn project_args(container: &SyntaxNode) -> Vec<String> {
 fn project_block_args(container: &SyntaxNode) -> Vec<String> {
     let mut out = Vec::new();
     let push_stmt = |n: &SyntaxNode, out: &mut Vec<String>| match n.kind() {
-        ARG => out.push(project_first(n)),
+        ARG => out.push(project_arg(n)),
         KEYWORD_ARG => out.push(project_keyword_arg(n)),
         _ => out.push(project(n)),
     };
@@ -1380,7 +1380,7 @@ fn project_parameters(node: &SyntaxNode) -> String {
     for el in significant(node) {
         if let NodeOrToken::Node(n) = el {
             match n.kind() {
-                ARG => out.push(project_first(&n)),
+                ARG => out.push(project_arg(&n)),
                 KEYWORD_ARG => out.push(project_keyword_arg(&n)),
                 _ => out.push(project(&n)),
             }
@@ -1493,7 +1493,7 @@ fn project_bracescat(node: &SyntaxNode) -> String {
 /// or `nrow-d` group, recursing on its own children.
 fn project_cat_child(node: &SyntaxNode, row_major: bool) -> String {
     match node.kind() {
-        ARG => project_first(node),
+        ARG => project_arg(node),
         MATRIX_ROW => {
             let d = group_dimension(node, row_major);
             let head = if d == 0 {
@@ -3325,7 +3325,7 @@ fn project_error(head: &str, node: &SyntaxNode) -> String {
     // (`var"x")` ⇒ `(error-t ✘)`, `x y, z` ⇒ `x (error-t y ✘ z)`, `x@y` ⇒
     // `x (error-t ✘ y)`). Other recovered tokens and child nodes project
     // normally, trivia/structure are dropped.
-    let parts: Vec<String> = node
+    let mut parts: Vec<String> = node
         .children_with_tokens()
         .filter_map(|el| match &el {
             NodeOrToken::Token(t) if is_error_glyph(t.kind()) => Some("✘".to_string()),
@@ -3345,6 +3345,17 @@ fn project_error(head: &str, node: &SyntaxNode) -> String {
             _ => project_element(&el),
         })
         .collect();
+    let range = node.text_range();
+    // An enclosing error may end at the same byte. Only the directly diagnosed
+    // recovery run owns the EOF marker.
+    if diag_count_from(usize::from(range.start()), DiagnosticKind::TrailingJunk) > 0
+        && diag_at(
+            usize::from(range.end()),
+            DiagnosticKind::PrematureEndOfInput,
+        )
+    {
+        parts.push("(error-t)".to_string());
+    }
     sexp(head, parts)
 }
 
@@ -3443,9 +3454,8 @@ fn first_node(node: &SyntaxNode) -> Option<SyntaxNode> {
 
 fn project_paren(node: &SyntaxNode) -> String {
     let children: Vec<_> = node.children().collect();
-    if matches!(children.first(), Some(first) if first.kind() == GENERATOR)
-        && children.iter().any(|child| child.kind() == ERROR)
-    {
+    // Julia keeps the parens when recovery leaves multiple children inside.
+    if children.len() > 1 {
         return sexp("parens", children.iter().map(project).collect());
     }
     match children.first() {
@@ -3462,6 +3472,11 @@ fn project_paren(node: &SyntaxNode) -> String {
             })
             .unwrap_or_else(|| "(block)".to_string()),
     }
+}
+
+fn project_arg(node: &SyntaxNode) -> String {
+    // Recovery can leave an error sibling beside the argument's expression.
+    project_each(child_nodes(node)).join(" ")
 }
 
 fn project_first(node: &SyntaxNode) -> String {

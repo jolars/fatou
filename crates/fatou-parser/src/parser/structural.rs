@@ -17,9 +17,9 @@ use crate::parser::core::stmt_is_doc_string;
 use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, finish, push_range};
 use crate::parser::expr::{
-    is_var_identifier_start, parse_block_stmt, parse_expr, parse_for_specs, parse_kw_stmt_operand,
-    parse_name_signature_expr, parse_paren, parse_prefix_interpolation, parse_quote_sym,
-    parse_signature_expr, parse_type_spec_expr, push_var_macro_name,
+    is_var_identifier_start, parse_block_stmt, parse_break_value, parse_expr, parse_for_specs,
+    parse_kw_stmt_operand, parse_name_signature_expr, parse_paren, parse_prefix_interpolation,
+    parse_quote_sym, parse_signature_expr, parse_type_spec_expr, push_var_macro_name,
 };
 use crate::parser::lexer::{TokKind, Token};
 use crate::syntax::SyntaxKind;
@@ -624,6 +624,7 @@ pub(crate) fn parse_keyword_stmt(
         } => {
             i = parse_break_label(&ctx, &mut events, i, takes_value, colon_ends, diagnostics);
             events.push(Event::Finish);
+            i = recover_keyword_junk(&ctx, &mut events, i, start, colon_ends, diagnostics);
             return Some(ExprParse {
                 start,
                 end: i,
@@ -718,7 +719,7 @@ pub(crate) fn parse_keyword_stmt(
 /// value. The label must be a name: an identifier, an interpolation, or a
 /// `var"…"` non-standard identifier; anything else is error-wrapped
 /// (`break 1` ⇒ `(break (error-t 1))`). A `continue` takes no value, so anything
-/// after its label is left to the enclosing trailing-junk driver.
+/// after its label is recovered after the completed keyword node.
 fn parse_break_label(
     ctx: &ParserCtx<'_>,
     events: &mut Vec<Event>,
@@ -733,11 +734,7 @@ fn parse_break_label(
     // (`break outer, y` ⇒ `(tuple (break outer) y)`), and — only where a `:` is
     // the ternary separator rather than a range colon — the `:` itself, so
     // `allow_ws ? continue : (result = false; break)` keeps its else-branch.
-    let ends = |at: usize| {
-        header_ends(ctx, at)
-            || matches!(ctx.token(at).map(|t| t.kind), Some(TokKind::Comma))
-            || (colon_ends && ctx.token(at).map(|t| t.kind) == Some(TokKind::Colon))
-    };
+    let ends = |at| label_ends(ctx, at, colon_ends);
     let label_start = ctx.skip_ws_and_block_comments(i);
     if ends(label_start) {
         if ctx.token(label_start).map(|t| t.kind) == Some(TokKind::Comma) {
@@ -803,16 +800,76 @@ fn parse_break_label(
     if ends(value_start) {
         return i;
     }
-    // The value is a plain expression, not a statement: a bare comma after it
-    // belongs to the enclosing tuple, not to the `break` (`break lbl, y` ⇒
-    // `(tuple (break lbl) y)`).
-    let Some(expr) = parse_expr(ctx.tokens(), value_start, 0, diagnostics) else {
+    // A supplied value owns its bare tuple (`break lbl x, y`), while a comma
+    // directly after the label belongs outside the keyword (`break lbl, y`).
+    let Some(expr) = parse_break_value(ctx.tokens(), value_start, colon_ends, diagnostics) else {
         return i;
     };
     push_range(events, i, value_start);
     events.extend(expr.events);
     i = expr.end;
     i
+}
+
+fn label_ends(ctx: &ParserCtx<'_>, at: usize, colon_ends: bool) -> bool {
+    header_ends(ctx, at)
+        || ctx
+            .token(at)
+            .is_some_and(|t| t.kind == TokKind::Comma || (colon_ends && t.kind == TokKind::Colon))
+}
+
+/// The keyword owns this recovery so a malformed line does not truncate its
+/// enclosing statement block.
+fn recover_keyword_junk(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    i: usize,
+    keyword: usize,
+    colon_ends: bool,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    let ends = |at| label_ends(ctx, at, colon_ends);
+    let first = ctx.skip_ws_and_block_comments(i);
+    if ends(first) {
+        return i;
+    }
+
+    push_range(events, i, first);
+    events.push(Event::Start(SyntaxKind::ERROR));
+    let mut end = first + 1;
+    loop {
+        // Leave separator trivia for the enclosing expression, which uses it
+        // to check ternary spacing. At EOF it belongs to the truncated run.
+        let next = ctx.skip_ws_and_comments(end);
+        if ctx.token(next).is_none() {
+            end = next;
+            break;
+        }
+        if ends(next) {
+            break;
+        }
+        end = next + 1;
+    }
+    push_range(events, first, end);
+    push_diagnostic(
+        diagnostics,
+        DiagnosticKind::TrailingJunk,
+        &format!("unexpected token after `{}`", ctx.tokens()[keyword].text),
+        ctx.tokens()[first].start,
+        ctx.tokens()[first].end,
+    );
+    if ctx.token(end).is_none() {
+        let eof = ctx.tokens()[end - 1].end;
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::PrematureEndOfInput,
+            "premature end of input",
+            eof,
+            eof,
+        );
+    }
+    events.push(Event::Finish);
+    end
 }
 
 /// Parse an `export`/`public` name-list statement. The keyword at `start` opens

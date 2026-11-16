@@ -18,6 +18,9 @@ pub enum DiagnosticKind {
     /// JuliaSyntax places a zero-width `(error-t)` after the keyword expression
     /// and leaves the comma to the enclosing tuple or argument list.
     UnexpectedComma,
+    /// A recovery run after a labeled `break`/`continue` reaches EOF. Anchored
+    /// at EOF; JuliaSyntax appends a zero-width `(error-t)` inside the run.
+    PrematureEndOfInput,
     /// Disallowed whitespace before a field-access dot (`x .y`). Anchored at the
     /// dot's end.
     DotWhitespace,
@@ -243,6 +246,7 @@ impl DiagnosticKind {
             | MissingTryHandler
             | StringJuxtapose
             | UnexpectedComma
+            | PrematureEndOfInput
             | DotWhitespace
             | QuoteColonWhitespace
             | EmptyQuoteParen

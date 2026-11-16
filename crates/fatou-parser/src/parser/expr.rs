@@ -203,6 +203,22 @@ pub(crate) fn parse_kw_stmt_operand(
     parse_expr_in(tokens, start, 0, diagnostics, flags)
 }
 
+/// A labeled `break` takes a statement-level value, but an enclosing ternary's
+/// colon still ends it instead of becoming a range operator.
+pub(crate) fn parse_break_value(
+    tokens: &[Token],
+    start: usize,
+    colon_ends: bool,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let flags = ExprFlags {
+        stmt_comma: true,
+        no_range: colon_ends,
+        ..ExprFlags::default()
+    };
+    parse_expr_in(tokens, start, 0, diagnostics, flags)
+}
+
 /// Parse one expression inside brackets (`(...)`, `[...]`), where newlines are
 /// insignificant and an operator may continue onto the next line. Note: this does
 /// *not* enable the `end` index marker — that is specific to square brackets and
@@ -424,10 +440,9 @@ fn parse_expr_in(
                     },
                     diagnostics,
                 )?;
-                // A comma after a bare keyword must reach the expression loop
-                // so tuples and assignments retain their usual precedence.
+                // A comma after the completed keyword must reach the expression
+                // loop so tuples and assignments retain their usual precedence.
                 if name_error_atom.is_some()
-                    || parsed.end != start + 1
                     || ctx
                         .token(ctx.skip_ws_and_block_comments(parsed.end))
                         .map(|t| t.kind)
