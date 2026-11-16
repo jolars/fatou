@@ -52,7 +52,8 @@ bootstrap may continue when Julia cannot be provisioned.
 
 The development parser oracle uses `scripts/julia-oracle.lock.json` instead: its
 verified Julia binary and JuliaSyntax checkout share one pinned commit. Only the
-weekly refresh or an explicit `--update` discovers a newer nightly.
+weekly refresh or an explicit `--update` discovers a newer nightly. On Linux
+x86-64, devenv's `julia` also follows that lock.
 
 Noninteractive agent shells may not inherit the Fish/direnv hook. Verify that
 the project environment is active before running repository tools; otherwise,

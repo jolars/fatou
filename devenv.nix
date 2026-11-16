@@ -55,17 +55,18 @@
     julia = {
       enable = true;
 
-      # nix provides only the bare interpreter. All Julia packages are managed by
-      # Pkg via the repo's root `Project.toml` + committed `Manifest.toml`, which
-      # every Julia invocation activates through `JULIA_PROJECT` (set below).
-      # nixpkgs' `withPackages` is deliberately avoided: it resolves an old
-      # registry snapshot (which pinned JuliaSyntax by accident, defeating the
-      # oracle's exact-version contract) and gives no version control. See
-      # AGENTS.md.
+      # Share the oracle's interpreter pin while keeping packages Pkg-managed.
+      # Native ELF patching also makes Julia's precompile workers work on NixOS.
       package =
-        (import inputs.nixpkgs-julia {
-          system = pkgs.stdenv.hostPlatform.system;
-        }).julia_113-bin;
+        if pkgs.stdenv.hostPlatform.system == "x86_64-linux" then
+          pkgs.callPackage ./nix/julia.nix {
+            pin = builtins.fromJSON (builtins.readFile ./scripts/julia-oracle.lock.json);
+          }
+        else
+          # The lock currently provides only a Linux x86-64 archive.
+          (import inputs.nixpkgs-julia {
+            system = pkgs.stdenv.hostPlatform.system;
+          }).julia_113-bin;
     };
 
     javascript = {

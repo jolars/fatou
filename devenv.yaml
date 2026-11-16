@@ -6,8 +6,7 @@ inputs:
         follows: nixpkgs
   nixpkgs:
     url: github:cachix/devenv-nixpkgs/rolling
-  # Remove once the regular nixpkgs input includes Julia 1.13.
-  # https://github.com/NixOS/nixpkgs/pull/561865
+  # Fallback for platforms without an archive in julia-oracle.lock.json.
   nixpkgs-julia:
     url: github:NixOS/nixpkgs/759db4b3e05ea6290cb614f1766d119183d68134
     flake: false

@@ -9,11 +9,17 @@ approach.
 ## Development environment
 
 The repository ships a [devenv](https://devenv.sh) (Nix) environment
-(`devenv.nix`) that provides the pinned Rust toolchain, a Julia interpreter,
-Node.js, pnpm, [`task`](https://taskfile.dev), and the auxiliary cargo tools.
-Enter it with `devenv shell`. Julia packages (JuliaSyntax.jl, the parser oracle,
-plus the formatter-comparison tools) are managed by Julia's own package manager
-via the repo's pinned `Project.toml`/`Manifest.toml`, not by Nix.
+(`devenv.nix`) that provides the pinned Rust toolchain, Julia, Node.js, pnpm,
+[`task`](https://taskfile.dev), and the auxiliary cargo tools. On Linux x86-64,
+`julia` uses the development build in `scripts/julia-oracle.lock.json`, matching
+the oracle runner. Nix patches its ELF loader so package precompilation also
+works on NixOS. Other platforms use the released Julia fallback until the lock
+includes their binaries.
+
+Enter with `devenv shell`; re-enter after changing the interpreter pin. The root
+`Project.toml`/`Manifest.toml` manages the Julia packages for comparison and
+asset tools through Julia's package manager. The parser oracle loads its
+matching JuliaSyntax checkout separately.
 
 Nix is not required, though. Rust 1.89 or newer is enough to build Fatou; the
 development toolchain tracks stable through `rust-toolchain.toml`:

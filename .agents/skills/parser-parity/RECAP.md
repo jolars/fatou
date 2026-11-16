@@ -120,14 +120,15 @@ corpus); trailing block-body junk (`function f g h end`).
   retained for 90 days. A retained archive can seed another cache. Explicit
   source-build overrides check the locked version/commit and record different
   provenance without claiming the archive's hash.
-- **Environment**: the upstream ELF binary runs through devenv's loader on
-  NixOS. Temporary checkouts disable precompile workers, which bypass that
-  loader. Devenv supplies Python; the root Julia environment remains separate.
+- **Environment**: Linux x86-64 devenv uses the same pin, with native ELF
+  patching so child interpreters and package precompilation work on NixOS. The
+  raw oracle runner uses the loader directly and disables precompile workers.
 - **Counts**: committed corpora remain JS **749/756** and dir **273/274**. The
   first weekly PR still proposes the reviewed migration to JuliaSyntax 2.
 - **Validation**: nine installer tests, full pinned generation (901 upstream
   cases), byte-identical replay through the normal wrapper, the local-runtime
-  override, workspace tests, and static checks pass.
+  override, workspace tests, and static checks pass. A fresh devenv shell also
+  verifies the locked runtime and precompiles a package in a child interpreter.
 
 ## Earlier sessions
 

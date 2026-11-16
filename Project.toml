@@ -1,7 +1,7 @@
-# The repo's pinned Julia environment. Fully Pkg-managed: nix provides only the
-# bare `julia-bin` interpreter (see devenv.nix), and normal Julia invocations
-# activate this project via `JULIA_PROJECT=@.` in the devenv shell. Development
-# oracle refreshes use a locked binary and matching upstream checkout (see
+# Julia packages in this environment are Pkg-managed. Nix supplies the bare
+# interpreter, pinned with the oracle on Linux x86-64 (see devenv.nix).
+# Normal Julia invocations activate this project via `JULIA_PROJECT=@.` in the
+# devenv shell. Oracle refreshes use a locked binary and matching upstream checkout (see
 # scripts/refresh-juliasyntax-oracle.sh).
 #
 # The released JuliaSyntax baseline is pinned exactly (`=1.0.2`). The oracle's
