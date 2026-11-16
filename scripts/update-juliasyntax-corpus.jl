@@ -11,24 +11,14 @@
 # Run via `scripts/update-juliasyntax-corpus.sh` (which resolves the repo root),
 # or directly: `julia scripts/update-juliasyntax-corpus.jl`.
 
-# JuliaSyntax comes from the *active* Julia environment, pinned two ways: the
-# repo's root project (devenv exports `JULIA_PROJECT=@.`, resolving the pinned
-# `Manifest.toml`), or a pinned checkout on `JULIA_LOAD_PATH` in the web
-# container (see `.claude/hooks/session-start.sh`, which avoids Pkg/registry
-# access). Run inside devenv, or pass `--project=.` to a bare `julia` yourself.
-using JuliaSyntax
+# JuliaSyntax comes from the active Julia environment: the root project's
+# released package or the isolated development checkout selected by
+# `refresh-juliasyntax-oracle.sh`.
+include("juliasyntax-oracle.jl")
 
 const REPO_ROOT = normpath(joinpath(@__DIR__, ".."))
 const CORPUS_DIR =
     joinpath(REPO_ROOT, "crates", "fatou-parser", "tests", "fixtures", "oracle")
-
-function render(src::AbstractString)
-    # `ignore_errors=true` lets us pin output for inputs Fatou parses but Julia
-    # rejects; the harness skips error cases by default, but a pinned rendering
-    # keeps the corpus uniform.
-    node = JuliaSyntax.parseall(JuliaSyntax.SyntaxNode, src; ignore_errors = true)
-    return sprint(print, node)
-end
 
 function main()
     isdir(CORPUS_DIR) || error("corpus dir not found: $CORPUS_DIR")
@@ -40,7 +30,7 @@ function main()
     for slug in slugs
         input = joinpath(CORPUS_DIR, slug, "input.jl")
         isfile(input) || continue
-        sexpr = render(read(input, String))
+        sexpr = render_oracle(read(input, String))
         open(joinpath(CORPUS_DIR, slug, "expected.sexpr"), "w") do io
             print(io, sexpr)
             print(io, '\n')
@@ -48,10 +38,7 @@ function main()
         written += 1
     end
 
-    open(joinpath(CORPUS_DIR, ".juliasyntax-source"), "w") do io
-        println(io, "julia_version=", VERSION)
-        println(io, "juliasyntax_version=", pkgversion(JuliaSyntax))
-    end
+    write_oracle_source(joinpath(CORPUS_DIR, ".juliasyntax-source"))
 
     println("wrote $written expected.sexpr file(s) to $CORPUS_DIR")
 end

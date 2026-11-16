@@ -13,8 +13,9 @@ formatter, linter, or other downstream follow-up, put the active task in that
 consumer's `RECAP.md` and `TODO.md` section; retain at most a historical note in
 the parser session log.
 
-No queued parser targets. See the Parser section of `TODO.md` and the deferred
-ledger below for remaining work.
+The two Parser targets in `TODO.md` are ready for development-oracle
+validation: dotted wrapping operators and labeled keyword recovery. Published
+JuliaSyntax releases no longer block either target.
 
 ## Persistent traps & invariants
 
@@ -104,31 +105,36 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-10-29 — Markdown admonition fences)
+## Latest session (2026-11-16 — weekly development oracle PRs)
 
-- **Parser gap**: recognize fences before the indented-container paragraph
-  fallback and flush preceding prose. Reuse fence emission with either fixed
-  list prefixes or four-space/tab container prefixes. Mixed prefixes, multiple
-  blank lines, code indentation, Documenter roles, and exact decoded ranges
-  survive without moving container trivia into code payloads.
-- **Fence boundaries**: tab-prefixed closing markers retain their own tokens.
-  A closer must start at the body's margin, matching Julia; deeper-indented
-  delimiter text stays code. Unclosed fences diagnose the opener and cannot
-  consume outside blocks or a sibling admonition.
-- **Coverage**: one generated Markdown fixture covers admonition examples,
-  REPLs, doctests, math, padded openings, indented delimiters, and empty bodies.
-  LF/CRLF, UTF-8 truncation, escaped/dedented source maps, classification, and
-  token ranges have regressions. Root linter tests verify exact REPL diagnostic
-  spans through container prefixes and escaped characters.
-- **Counts**: Markdown **22 → 23** fixtures. JS **749/756 → 749/756** and dir
-  **273/274 → 273/274**, with no oracle regressions or new blocked cases.
-- **Validation**: focused parser and Markdown tests, workspace tests, both
-  JuliaSyntax reports, Clippy with all targets and features, rustfmt, and both
-  member crates' Wasm release builds pass.
+- **Oracle infrastructure**: a weekly/manual workflow runs nightly Julia against
+  an isolated checkout of `JuliaLang/julia`'s `JuliaSyntax/` directory. It
+  proposes both refreshed corpora on one reusable PR branch, attaches parity
+  reports, and runs the workspace tests. Failed validation leaves a draft PR and
+  a failed workflow; the allowlists and blocked lists are never reseeded
+  automatically.
+- **Provenance**: a shared renderer separates syntax version from interpreter
+  version. Generated metadata records the Julia runtime commit, upstream source
+  commit, package version, and syntax version. The refresh script accepts an
+  exact source commit for replay without resolving the root Julia environment.
+- **Unblocked targets**: a development JuliaSyntax 2.0.0-DEV probe under Julia
+  1.13.0 accepts all six dotted wrapping forms, labeled `break`/`continue`, and
+  the two recovery shapes recorded in `TODO.md`.
+- **Counts**: the committed corpora stay at JS **749/756** and dir **273/274**.
+  The first scheduled PR proposes the development-oracle migration for review;
+  parser and generated-table changes belong in the reviewed migration.
+- **Validation**: workspace tests, actionlint, and an isolated full refresh
+  pass. The development candidate renders 274 curated fixtures plus a grammar
+  probe and harvests 901 upstream cases with no rendering exceptions. It changes
+  54 curated expectations; the existing regression gates remain intact.
+  Replaying the pinned source produces byte-identical artifacts.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
+
+- **2026-10-29** — Markdown admonition fences, margins, unclosed-container
+  recovery, and exact source ranges. Markdown 23 fixtures; 749 / 273.
 
 - **2026-10-29** — wrapped Markdown inlines and exact decoded ranges across
   paragraphs, lists, admonitions, quotes, and footnotes. 749 / 273.

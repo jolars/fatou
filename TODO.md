@@ -4,21 +4,23 @@
 
 - [ ] Lex the *broadcast* wrapping arithmetic operators `.+% .-% .*%` (and their
   augmented forms `.+%= .-%= .*%=`) in
-  `crates/fatou-parser/src/parser/lexer.rs`. Fatou supports undotted `+% -% *%`;
-  the dotted forms split into existing operators and produce diagnostics.
-  Deferred: Julia 1.13.0 and the latest JuliaSyntax release, 1.0.2, still reject
-  the entire wrapping-operator family (verified 2026-09-15). The Julia upgrade
-  does not unblock the pinned oracle. Implementing these extensions now would
-  require a development-revision oracle or hand-authored parser fixtures.
+  `crates/fatou-parser/src/parser/lexer.rs`. Fatou supports undotted
+  `+% -% *%`; the dotted forms split into existing operators and produce
+  diagnostics. Ready to implement: Julia's bundled development JuliaSyntax
+  accepts all six dotted forms (verified 2026-11-16). Use
+  `scripts/refresh-juliasyntax-oracle.sh` to generate a development-revision
+  oracle; weekly CI proposes corpus updates as PRs. The committed regression
+  corpus remains on JuliaSyntax 1.0.2 until the first update is reviewed.
 
 - [ ] Two error-recovery gaps left over from labeled `break`/`continue`
-  (`crates/fatou-parser/src/parser/structural.rs`). Junk after a complete labeled keyword drops
-  JuliaSyntax's trailing zero-width marker (`break l x y` ⇒ `(break l x)
-  (error-t y)`, not `(error-t y (error-t))`), and a bare comma after one does not
-  fold into a tuple (`break l, y` ⇒ `(break l) (error-t ✘ y)`, not
-  `(tuple (break l) y)`). The labeled cases remain deferred: both Julia 1.13.0
-  and JuliaSyntax 1.0.2 reject `break lbl` and `continue lbl` (verified
-  2026-09-15), so the current oracle cannot validate labeled recovery.
+  (`crates/fatou-parser/src/parser/structural.rs`). Junk after a complete
+  labeled keyword drops JuliaSyntax's trailing zero-width marker
+  (`break l x y` ⇒ `(break l x) (error-t y)`, not `(error-t y (error-t))`),
+  and a bare comma after one does not fold into a tuple (`break l, y` ⇒
+  `(break l) (error-t ✘ y)`, not `(tuple (break l) y)`). Ready to implement:
+  development JuliaSyntax validates both labeled forms and these recovery
+  shapes (verified 2026-11-16). Generate the development oracle with
+  `scripts/refresh-juliasyntax-oracle.sh`.
 
 ## Documentation
 

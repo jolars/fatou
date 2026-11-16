@@ -72,6 +72,44 @@ fix.
   (`crates/fatou-parser/tests/juliasyntax_oracle.rs`) that needs no Julia at
   test time.
 
+### Development JuliaSyntax oracle
+
+JuliaSyntax development for Julia 1.14 onward lives in the [`JuliaSyntax/`
+directory of Julia's
+repository](https://github.com/JuliaLang/julia/tree/master/JuliaSyntax). The
+**Update JuliaSyntax oracle** workflow runs every Monday at 05:30 UTC and can
+also be dispatched manually. It uses nightly Julia and an isolated checkout of
+Julia's development branch to regenerate both parser corpora, produce parity
+reports, and run the workspace tests. It opens or updates one PR on
+`automation/juliasyntax-oracle`; failed validation leaves a draft PR and fails
+the workflow. Review changed expectations and fix parser regressions before
+merging. The job never weakens the allowlists or blocked lists. The first PR
+proposes the migration from the released JuliaSyntax oracle.
+
+To generate a candidate locally, enter devenv and run:
+
+```sh
+bash scripts/refresh-juliasyntax-oracle.sh
+```
+
+Pass a Julia commit as the sole argument to replay a source revision. The
+generated `.juliasyntax-source` records that commit, the interpreter version and
+commit, and the requested syntax version. Use the recorded interpreter when
+reproducing an update. The syntax version comes from the source checkout's
+`VERSION` file, so a compatible stable interpreter can also exercise development
+grammar. The root `Project.toml` and `Manifest.toml` are unaffected. Changes to
+the parser's Unicode tables still require the table generators and their usual
+review before adopting a new oracle.
+
+After a development update is merged, the usual
+`scripts/update-juliasyntax-corpus.sh` command replays the recorded upstream
+revision rather than loading the released package from the root environment.
+
+The workflow uses the existing `RELEASE_TOKEN` when available so its PR triggers
+the normal CI workflows. Its `GITHUB_TOKEN` fallback runs validation in the
+refresh job itself; GitHub must allow Actions to create pull requests in the
+repository settings.
+
 ## Architecture and roadmap
 
 - [`AGENTS.md`](https://github.com/jolars/fatou/blob/main/AGENTS.md) documents

@@ -20,14 +20,12 @@
 # Output: `crates/fatou-parser/tests/fixtures/oracle/juliasyntax.jsonl`, one
 # `{"slug","input","expected"}` object per line, sorted by slug. Pinned to the
 # same JuliaSyntax version recorded in `.juliasyntax-source`. Re-run on a
-# version bump (then re-triage `crates/fatou-parser/tests/oracle/juliasyntax-blocked.txt`).
+# version bump, then re-triage against the existing allowlists.
 
-# JuliaSyntax comes from the *active* Julia environment, pinned two ways: the
-# repo's root project (devenv exports `JULIA_PROJECT=@.`, resolving the pinned
-# `Manifest.toml`), or a pinned checkout on `JULIA_LOAD_PATH` in the web
-# container (see `.claude/hooks/session-start.sh`, which avoids Pkg/registry
-# access). Run inside devenv, or pass `--project=.` to a bare `julia` yourself.
-using JuliaSyntax
+# JuliaSyntax comes from the active Julia environment: the root project's
+# released package or the isolated development checkout selected by
+# `refresh-juliasyntax-oracle.sh`.
+include("juliasyntax-oracle.jl")
 using SHA
 
 const REPO_ROOT = normpath(joinpath(@__DIR__, ".."))
@@ -79,11 +77,6 @@ function harvest_inputs()
     sort!(collect(collect_inputs!(Set{String}(), tests_value)))
 end
 
-function render(src::AbstractString)
-    node = JuliaSyntax.parseall(JuliaSyntax.SyntaxNode, src; ignore_errors = true)
-    sprint(print, node)
-end
-
 slug(src::AbstractString) = "js-" * bytes2hex(sha256(codeunits(src)))[1:8]
 
 function json_str(s::AbstractString)
@@ -132,7 +125,7 @@ function main()
             continue
         end
         sexpr = try
-            render(input)
+            render_oracle(input)
         catch
             skipped_throw += 1
             continue
@@ -154,6 +147,7 @@ function main()
         push!(rows, (s, input, sexpr))
     end
     sort!(rows; by = first)
+    isempty(rows) && error("JuliaSyntax harvest produced no usable parser cases")
 
     open(OUT_PATH, "w") do io
         for (s, input, sexpr) in rows

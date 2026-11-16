@@ -1,0 +1,83 @@
+name: Update JuliaSyntax oracle
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 5 * * 1"
+permissions:
+  contents: read
+concurrency:
+  group: update-juliasyntax-oracle
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: nightly
+      - name: Install Rust
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Refresh both oracle corpora
+        run: bash scripts/refresh-juliasyntax-oracle.sh
+      - name: Generate parity reports
+        run: cargo test -p fatou-parser --test juliasyntax_oracle -- --ignored
+      # A new upstream grammar can expose parser work. Still propose the update
+      # for review, retaining every existing allowlist entry as a regression gate.
+      - name: Validate candidate
+        id: validate
+        continue-on-error: true
+        run: cargo test --workspace
+      - name: Prepare review details
+        env:
+          VALIDATION: ${{ steps.validate.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo 'Refresh the pinned oracle from the Julia development tree.'
+            echo
+            echo '```text'
+            cat crates/fatou-parser/tests/fixtures/oracle/.juliasyntax-source
+            echo '```'
+            echo
+            echo "Workspace tests: **$VALIDATION**. [Run and parity reports]($RUN_URL)."
+            echo
+            echo '```text'
+            tail -n 1 crates/fatou-parser/tests/oracle/report.txt
+            tail -n 1 crates/fatou-parser/tests/oracle/juliasyntax-report.txt
+            echo '```'
+            echo
+            echo 'Review changed expectations and resolve regressions before merging.'
+            echo 'The refresh preserves the allowlists and blocked lists.'
+          } > "$RUNNER_TEMP/oracle-pr.md"
+          cat "$RUNNER_TEMP/oracle-pr.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: juliasyntax-parity-reports
+          path: crates/fatou-parser/tests/oracle/*report.txt
+          if-no-files-found: error
+      - name: Propose oracle update
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+          base: ${{ github.event.repository.default_branch }}
+          branch: automation/juliasyntax-oracle
+          delete-branch: true
+          title: "test(parser): refresh development JuliaSyntax oracle"
+          commit-message: "test(parser): refresh development JuliaSyntax oracle"
+          body-path: ${{ runner.temp }}/oracle-pr.md
+          draft: ${{ steps.validate.outcome != 'success' && 'always-true' || 'false' }}
+          add-paths: crates/fatou-parser/tests/fixtures/oracle
+      - name: Report validation failure
+        if: steps.validate.outcome == 'failure'
+        run: exit 1
