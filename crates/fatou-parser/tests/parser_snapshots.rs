@@ -96,6 +96,18 @@ fn radical_juxtaposition_parses_cleanly() {
 }
 
 #[test]
+fn dotted_wrapping_arithmetic_operators_parse_cleanly() {
+    let input = include_str!("fixtures/parser/dotted_wrapping_arithmetic_operators/input.jl");
+    let output = parse(input);
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+
+    // The released corpus predates these operators, so this snapshot is checked
+    // against the pinned development oracle in an isolated corpus.
+    let projected = fatou_parser::parser::to_juliasyntax_sexpr(&output.cst, &output.diagnostics);
+    insta::assert_snapshot!("dotted_wrapping_arithmetic_operators_sexpr", projected);
+}
+
+#[test]
 fn parenthesized_macro_loop_arguments_parse_cleanly() {
     let input = include_str!("fixtures/parser/parenthesized_macro_loop_argument/input.jl");
     assert!(parse(input).diagnostics.is_empty());

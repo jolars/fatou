@@ -1471,7 +1471,12 @@ fn parse_prefix(
             // an error-wrapped prefix call (handled below).
             let op_suffixed = matches!(
                 tok.kind,
-                TokKind::Plus | TokKind::Minus | TokKind::DotPlus | TokKind::DotMinus
+                TokKind::Plus
+                    | TokKind::Minus
+                    | TokKind::DotPlus
+                    | TokKind::DotMinus
+                    | TokKind::DotPlusPercent
+                    | TokKind::DotMinusPercent
             ) && tok.text.chars().any(is_op_suffix_char);
             let is_unary_paren_op = matches!(
                 tok.kind,
@@ -1483,6 +1488,8 @@ fn parse_prefix(
                     | TokKind::MinusPercent
                     | TokKind::DotPlus
                     | TokKind::DotMinus
+                    | TokKind::DotPlusPercent
+                    | TokKind::DotMinusPercent
                     | TokKind::Bang
                     | TokKind::Tilde
                     | TokKind::DotTilde
@@ -3691,6 +3698,7 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             | LeftRightArrow
             | LeftLongArrow
             | DotStar
+            | DotStarPercent
             | DotSlash
             | DotBackslash
             | DotSlashSlash
@@ -3760,6 +3768,8 @@ fn is_curly_operator_name(kind: TokKind) -> bool {
                 | MinusPercent
                 | DotPlus
                 | DotMinus
+                | DotPlusPercent
+                | DotMinusPercent
                 | Bang
                 | Tilde
                 | DotTilde

@@ -203,6 +203,9 @@ impl SyntaxKind {
                 | DOT_PLUS
                 | DOT_MINUS
                 | DOT_STAR
+                | DOT_PLUS_PERCENT
+                | DOT_MINUS_PERCENT
+                | DOT_STAR_PERCENT
                 | DOT_STAR_STAR
                 | DOT_MINUS_MINUS
                 | DOT_SLASH
@@ -252,6 +255,9 @@ impl SyntaxKind {
                 | DIV_EQ
                 | XOR_EQ
                 | DOT_PLUS_EQ
+                | DOT_PLUS_PERCENT_EQ
+                | DOT_MINUS_PERCENT_EQ
+                | DOT_STAR_PERCENT_EQ
                 | DOT_AMP_EQ
                 | DOT_PIPE_EQ
                 | DOT_MINUS_EQ

@@ -41,7 +41,9 @@ pub(super) fn array_element_boundary(
 /// the unary-and-binary infix operators `+ - +% -% & ~` (broadcast `.+ .- .~`)
 /// and the symbol-quote `:` (glued `:a` is a quoted symbol). Binary-only
 /// operators (`* / % *% | :: <: >:`, broadcast `.& .|`) and any *suffixed* (`+₁`,
-/// never unary) stay infix and do not split. Unary-only prefixes (`! ¬ √`) have
+/// never unary) stay infix and do not split. Dotted wrapping operators also
+/// stay infix, matching JuliaSyntax's single-element vector for `[a .+%b]`.
+/// Unary-only prefixes (`! ¬ √`) have
 /// no infix binding power, so they end the element naturally and are not listed
 /// here; the interpolation sigil `$` does have one (Julia's old xor operator),
 /// so it is listed. Mirrors JuliaSyntax's whitespace-sensitive array splitting.

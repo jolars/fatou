@@ -454,6 +454,9 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         DOT_PLUS => DotCallI("+"),
         DOT_MINUS => DotCallI("-"),
         DOT_STAR => DotCallI("*"),
+        DOT_PLUS_PERCENT => DotCallI("+%"),
+        DOT_MINUS_PERCENT => DotCallI("-%"),
+        DOT_STAR_PERCENT => DotCallI("*%"),
         DOT_STAR_STAR => DotCallI("(Error**)"),
         DOT_MINUS_MINUS => DotCallI("(ErrorInvalidOperator)"),
         DOT_SLASH => DotCallI("/"),
@@ -555,6 +558,16 @@ fn project_operator_atom(node: &SyntaxNode) -> String {
     significant(node)
         .iter()
         .find_map(|el| match el {
+            NodeOrToken::Token(t)
+                if matches!(
+                    t.kind(),
+                    DOT_PLUS_PERCENT_EQ | DOT_MINUS_PERCENT_EQ | DOT_STAR_PERCENT_EQ
+                ) =>
+            {
+                // These new operators use the development oracle's update
+                // encoding even when they appear as quoted values.
+                Some(format!("(.op= {})", &t.text()[1..t.text().len() - 1]))
+            }
             NodeOrToken::Token(t) if matches!(infix_head(t.kind()), InfixHead::DotCallI(_)) => {
                 // A suffixed broadcast operator (`.+₁`) keeps its suffix, which
                 // `operator_func_repr` (keyed on kind) would drop; strip the
@@ -1033,6 +1046,8 @@ fn project_unary(node: &SyntaxNode) -> String {
         AMP => format!("(& {operand})"),
         DOT_PLUS => format!("(dotcall-pre + {operand})"),
         DOT_MINUS => format!("(dotcall-pre - {operand})"),
+        DOT_PLUS_PERCENT => format!("(dotcall-pre +% {operand})"),
+        DOT_MINUS_PERCENT => format!("(dotcall-pre -% {operand})"),
         DOT_TILDE => format!("(dotcall-pre ~ {operand})"),
         DOT_BANG => format!("(dotcall-pre ! {operand})"),
         // A broadcast Unicode radical (`.√x`) carries the leading `.` in its

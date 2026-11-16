@@ -20,6 +20,10 @@ assert!(output.diagnostics.is_empty());
 assert_eq!(output.cst.text().to_string(), "f(x) = x + 1\n");
 ```
 
+Wrapping arithmetic includes broadcast `.+%`, `.-%`, and `.*%`, along with their
+`.+%=`, `.-%=`, and `.*%=` assignment forms. Each has a distinct `SyntaxKind`
+token and follows its undotted counterpart's precedence.
+
 `parser::reparse` tries token, nested-block, and top-level statement splices in
 that order; `ReparseTier::Block` identifies a nested body splice. Block
 fragments retain the owner's grammar context, including module `public`

@@ -1628,6 +1628,9 @@ fn is_dotted_op_name(kind: TokKind) -> bool {
         DotPlus
             | DotMinus
             | DotStar
+            | DotPlusPercent
+            | DotMinusPercent
+            | DotStarPercent
             | DotSlash
             | DotSlashSlash
             | DotCaret

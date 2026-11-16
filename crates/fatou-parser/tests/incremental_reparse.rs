@@ -218,6 +218,8 @@ const HAZARD_SNIPPETS: &[&str] = &[
     // Degenerate inputs.
     "",
     "\n",
+    // Editing `%` or `=` can change a broadcast operator's token boundary.
+    include_str!("fixtures/parser/dotted_wrapping_arithmetic_operators/input.jl"),
 ];
 
 /// Run one edit through `reparse` against a fresh parse of `src`. The

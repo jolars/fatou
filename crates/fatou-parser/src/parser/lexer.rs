@@ -737,6 +737,9 @@ const OPS: &[(&[u8], TokKind)] = &[
     (b".<--",  TokKind::DotLeftLongArrow),
     (b".===",  TokKind::DotEqEqEq),
     (b".!==",  TokKind::DotNotEqEq),
+    (b".+%=",  TokKind::DotPlusPercentEq),
+    (b".-%=",  TokKind::DotMinusPercentEq),
+    (b".*%=",  TokKind::DotStarPercentEq),
     (b"...",   TokKind::DotDotDot),
     (b".==",   TokKind::DotEqEq),
     (b".!=",   TokKind::DotNotEq),
@@ -754,6 +757,9 @@ const OPS: &[(&[u8], TokKind)] = &[
     (b".|>",   TokKind::DotPipeGt),
     (b".&&",   TokKind::DotAndAnd),
     (b".||",   TokKind::DotOrOr),
+    (b".+%",   TokKind::DotPlusPercent),
+    (b".-%",   TokKind::DotMinusPercent),
+    (b".*%",   TokKind::DotStarPercent),
     // Broadcast augmented assignment `.op=`.
     (b".+=",   TokKind::DotPlusEq),
     (b".-=",   TokKind::DotMinusEq),
@@ -1092,6 +1098,9 @@ fn op_takes_suffix(kind: TokKind) -> bool {
             | DotPlus
             | DotMinus
             | DotStar
+            | DotPlusPercent
+            | DotMinusPercent
+            | DotStarPercent
             | DotSlash
             | DotBackslash
             | DotSlashSlash
@@ -1754,7 +1763,7 @@ mod tests {
         // shorter operator as a prefix, and must still lex as one token.
         for spelling in [
             ".>>>=", ".<-->", ".<--", ".//=", ".===", ".!==", "...", "<-->", ">>>=", "-->", "//=",
-            "+%=", "!==", "===",
+            "+%=", ".+%", ".-%", ".*%", ".+%=", ".-%=", ".*%=", "!==", "===",
         ] {
             assert_eq!(kinds(spelling).len(), 1, "{spelling:?} was split");
         }

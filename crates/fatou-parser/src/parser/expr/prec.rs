@@ -134,6 +134,8 @@ pub(super) fn is_unary_prefix_op(kind: TokKind, text: &str) -> bool {
             | MinusPercent
             | DotPlus
             | DotMinus
+            | DotPlusPercent
+            | DotMinusPercent
             | Bang
             | DotBang
             | Tilde
@@ -165,6 +167,9 @@ pub(super) fn is_value_operator(kind: TokKind) -> bool {
                 | DotPlus
                 | DotMinus
                 | DotStar
+                | DotPlusPercent
+                | DotMinusPercent
+                | DotStarPercent
                 | DotSlash
                 | DotBackslash
                 | DotSlashSlash
@@ -289,6 +294,9 @@ pub(super) fn is_assignment_op(kind: TokKind) -> bool {
             | TokKind::DotPlusEq
             | TokKind::DotMinusEq
             | TokKind::DotStarEq
+            | TokKind::DotPlusPercentEq
+            | TokKind::DotMinusPercentEq
+            | TokKind::DotStarPercentEq
             | TokKind::DotSlashEq
             | TokKind::DotBackslashEq
             | TokKind::DotSlashSlashEq
@@ -410,6 +418,8 @@ pub(super) fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         | TokKind::PlusPlus
         | TokKind::DotPlus
         | TokKind::DotMinus
+        | TokKind::DotPlusPercent
+        | TokKind::DotMinusPercent
         | TokKind::Pipe
         | TokKind::DotPipe => (20, 21),
         // Bitwise-and `&` shares the `*` (times) precedence family, left-associative
@@ -423,6 +433,7 @@ pub(super) fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         | TokKind::Amp
         | TokKind::DotAmp
         | TokKind::DotStar
+        | TokKind::DotStarPercent
         | TokKind::DotSlash
         | TokKind::DotBackslash
         | TokKind::DotPercent => (24, 25),

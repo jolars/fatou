@@ -235,6 +235,11 @@ macro_rules! token_table_rows {
             DotPlus DOT_PLUS,
             DotMinus DOT_MINUS,
             DotStar DOT_STAR,
+            /// Broadcast wrapping arithmetic `.+%`, `.-%`, `.*%`, with the
+            /// precedence and unary/binary classification of `+%`, `-%`, `*%`.
+            DotPlusPercent DOT_PLUS_PERCENT,
+            DotMinusPercent DOT_MINUS_PERCENT,
+            DotStarPercent DOT_STAR_PERCENT,
             /// Broadcast form of the invalid doubled `**` (projects
             /// `(dotcall-i a (Error**) b)`).
             DotStarStar DOT_STAR_STAR,
@@ -304,6 +309,10 @@ macro_rules! token_table_rows {
             DotPlusEq DOT_PLUS_EQ,
             DotMinusEq DOT_MINUS_EQ,
             DotStarEq DOT_STAR_EQ,
+            /// Broadcast wrapping augmented assignment `.+%=`, `.-%=`, `.*%=`.
+            DotPlusPercentEq DOT_PLUS_PERCENT_EQ,
+            DotMinusPercentEq DOT_MINUS_PERCENT_EQ,
+            DotStarPercentEq DOT_STAR_PERCENT_EQ,
             DotSlashEq DOT_SLASH_EQ,
             DotBackslashEq DOT_BACKSLASH_EQ,
             DotSlashSlashEq DOT_SLASH_SLASH_EQ,
