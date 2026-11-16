@@ -20,6 +20,9 @@ Detail lives in `git log`, not here.
   on the rules + layout engine, never on the input's line breaks / whitespace /
   operator spelling / numeric form. Author `expected.jl` to the canonical
   fully-reflowed form.
+- **Reflow must protect macro argument scope.** Before an operator, fence an
+  operand whose tail is an undelimited macro. Decide from the parsed expression,
+  not a source newline: `(@m x\n - y)` and `((@m x) - y)` must format alike.
 - **Gate = file presence.** A fixture is gated iff it has `expected.jl`
   (`crates/fatou-formatter/tests/formatter.rs::formatter_fixtures_match_expected`).
   No allowlist, no blocked list. Stability
@@ -118,7 +121,7 @@ source-break read is the comment-bearing matrix path (debt #1).
   via `is_short_circuit_guard`), `lower_arrow`, `lower_comparison`,
   `lower_ternary`, `lower_range`, `lower_type_annotation`, `lower_where` (single
   param atomic, short multi-param via `Ir::CondGroup`), `lower_unary`,
-  `lower_splat`.
+  `lower_splat`. `lower_before_operator` protects undelimited macro tails.
 - Calls/collections: `lower_arg_list` (trailing hug + explode fallback, gated by
   `suppress_multi_item_hug`), `lower_keyword_arg`/`lower_parameters`,
   `lower_collection` (`collect_collection_items`/`collection_body`),
@@ -156,15 +159,23 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (block boundary blank lines, #140)
+## Latest session (2026-11-16 — macro operator boundaries)
 
-`feat(formatter)`. The shared block-body engine retains boundary blanks only
-when its direct parent is a module definition. Module indentation and nesting
-do not affect the exception. Three fixtures cover the reporter's example,
-ordinary blocks and branches, comment-only and empty bodies, and nested modules
-and baremodules. Existing function and do-block expectations lose their leading
-blank. Gate 128→131 of 160. Formatter gate, stability, AST preservation, full
-workspace tests, clippy, and rustfmt are green. No parser or lexer blocker.
+`fix(formatter)`. After the parser correction, `(@m x\n - y)` lowers to
+`((@m x) - y)` so canonical reflow preserves macro scope. Operator lowerings
+protect undelimited macro tails, including nested unary and binary operands;
+attached calls and sole bracket arguments remain closed forms. Clean `where`,
+range, and annotation expressions reflow across newlines consistently.
+
+Regression tests compare implicit and explicit grouping at widths 24 and 80,
+reject the formerly unsafe flattening, and cover safe CLI output with LF and
+CRLF. The fixture gate remains 131 of 160. Two AST surface-shape entries use
+the existing `where T` → `where {T}` normalization policy; independent Julia
+expression checks confirm that normalization preserves the program. All 118
+formatting comparisons across 59 valid probes preserve expressions under Julia
+1.13.0 and locked Julia 1.15.0-DEV.783, and pass safe-format and idempotence
+checks. Formatter, stability, AST preservation, CLI, full workspace, clippy,
+rustfmt, and both parser and formatter Wasm gates pass.
 
 **Ranked next target:** no formatter target is currently queued in `TODO.md`.
 
@@ -201,6 +212,8 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Block boundary blank lines** (`feat`, #140): kept boundary blanks only for
+  modules, including nested and bare modules. Gate 128→131 of 160.
 - **Short-circuit guards** (`fix`, #139): kept control-flow keywords attached to
   wrapped conditions without changing ordinary logical-chain reflow. Gate 128.
 - **Verifier hardening** (`fix`): compared opaque literal payloads exactly,
@@ -272,64 +285,8 @@ Newest first. One line each; the commit is the detail.
   `lower_for_binding` directly and never double-indent. 106→107.
 - **Control-flow condition continuation double-indent** (`feat`): the original
   +8 rule. `condition_break`. 105→106.
-- **Fluent method chains** (`feat`):
-  `lower_call`/`try_lower_chain`/`collect_chain`; trailing-dot spelling forced
-  by reparse. `method_chain_break`. 104→105.
-- **String/command interpolation** (`feat`): a genuine bug — the transparent
-  path was breaking inside literals. `render_flat` + whole-literal bail.
-  103→104.
-- **Bracescat `{a; b}`** (`feat`, two sessions, 101→103): routed through
-  `lower_matrix` (structurally identical to a matrix) rather than a bespoke
-  rule, then registered in `construct_reflow_body` for the `{a; b}[k]` subject
-  break.
-- **The comma-list family** (`feat`, three sessions, 97→100): bare tuples 97→98
-  established the `group(concat[first, indent(rest)])` shape;
-  import/using/export lists 98→99 reused it; let bindings 99→100 generalized
-  `lower_bare_tuple` → `lower_comma_list`.
-- **Splat operator snug** (`feat`): postfix analog of `lower_unary`;
-  bracket-closing operand bails pending the outstanding parser gap.
-  `splat_spacing`. 100→101.
-- **Chained-pair hug through the whole spine** (`feat`): `pair_operands` +
-  recursive `pair_hug_chain`. `chained_pair_hug`. 96→97.
-- **Widen `arrow_pair_chain` for `<--`/`.<--`** and **widen the braces
-  comprehension index case** (`test`, no code): both unblocked by resolved
-  parser gaps. Gate 96.
-- **The index-break family — subject yields first** (`feat`, six sessions,
-  84→96): collection subject 84→85 (the original user decision), call/curly via
-  `call_reflow_body` + `ArgListParts` 85→86, chained postfix via the recursive
-  `index_reflow_body` 88→89, through hugs and `;`-params tails 89→91 (an
-  *ungrouped* `Ir::HugGroup` hands flat-vs-yield to the owning group, zero
-  printer changes), name-rooted via `applied_args_body` 93→94, comprehensions
-  via `comprehension_reflow_body`/`typed_comprehension_reflow_body` 94→95,
-  parens via `paren_reflow_body` 95→96.
-- **The hugging family** (`feat`, three sessions, 82→88): trailing bracket
-  argument as a bare concat 82→83; `Ir::HugGroup` + the explode fallback 83→84
-  (printer `hug_fits` seeds the shared `fits_stack` loop with the body in Break
-  mode; nested hugs measure conservatively, by user choice); kwarg values and
-  collection elements 86→88 (`item_is_huggable`/`huggable_kind`, explode bodies
-  unified on `bracket_explode_body`).
-- **Pair-value hugging** (`feat`): `=>`/`.=>` are hug-transparent; `-->`/`<-->`
-  explode. Source of the four-hug-site trap above. `pair_hug`. 92→93.
-- **Arrow/pair tier flatten + Runic doc-comment sweep** (`feat`):
-  `binary_prec_class` tier 3; \~25 rationale comments reworded. 91→92.
-- **Postfix tails on breaking groups** (three `test`-only sessions): single tail
-  on a call, chained tails on a call, tails on a non-call bracket group.
-  Continuation-aware `fits` already made all three canonical. 79→82.
-- **Uniform mixed same-precedence chain break** (`feat`): `binary_prec_class` +
-  `same_break_tier` mirroring the parser's `infix_binding_power`. Consequence:
-  bitwise `|`/`&` share the plus/times tiers. 78→79.
-- **Uniform same-operator chain break** (`feat`): `collect_binary_chain`. 77→78.
-- **Continuation-aware `fits`** (`feat`): the first post-pivot printer change,
-  and the one the Standing trap above describes. `where_break`. 76→77.
-- **Paren-block break + newline reflow** (`feat`): `;` snug after each but the
-  last. 75→76.
-- **`;`-keyword tail break** (`feat`): the `;`-`PARAMETERS` tail folds into the
-  same group as the positionals; `;` trails the last positional. 74→75.
-- **Comprehension/generator reflow** (`feat`): each `for`/`if` clause on its own
-  line; `NEWLINE` skipping dropped a `has_newline_token` call site. 71→74.
-- **Unary prefix operators** (`feat`): snug, with the `- -a` → `--a`
-  retokenization bail. 70→71.
-- **Macro-call spacing** (`feat`): the call-form vs space-form split. 69→70.
-- **Earlier reflow foundation:** blocks, operators, top-level structure,
-  parens, brackets, matrices, comments, and the hand-authored fixture gate.
-  Detailed pre-pivot history lives in `git log`; old Runic parity is not a spec.
+- **Earlier reflow foundation:** method chains, interpolation, bracescat,
+  comma lists, splats, pair and collection hugging, index subjects, uniform
+  operator breaks, continuation-aware `fits`, macros, and block layout.
+  Gate → 105. Details live in `git log`; recorded decisions and standing traps
+  above retain the active policies.

@@ -18,6 +18,7 @@ block_form_operand
 js-063e192a
 js-11e2e762
 js-12ef57ec
+js-238e9ee4
 js-41e2a5cf
 js-488a8833
 js-4a7ae664
@@ -31,6 +32,7 @@ js-cbd92fc9
 js-cd3e3ee0
 js-d0103ba8
 js-e0aa726d
+macro_newline_operator
 parametric_types
 parenthesized_anonymous_function_parameters
 unicode_operator_call

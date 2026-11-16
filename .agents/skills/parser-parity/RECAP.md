@@ -62,7 +62,7 @@ No queued parser targets.
 ## Progress
 
 JS corpus (**756 cases**, error shapes included): **749 allowlisted**, 7
-divergence, 0 unsupported. Dir corpus (**274 cases**): **273 allowlisted**, 1
+divergence, 0 unsupported. Dir corpus (**275 cases**): **274 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -105,37 +105,40 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-11-16 — labeled keyword recovery)
+## Latest session (2026-11-16 — macro newline safety)
 
-- **Grammar**: completed labeled `break`/`continue` statements reach the comma
-  loop, preserving tuple and assignment precedence. A supplied `break` value
-  owns its comma tuple and respects an enclosing ternary's colon.
-- **Recovery**: the keyword parser collects trailing junk as a sibling `ERROR`
-  and stops at newlines, semicolons, commas, closing delimiters, and ternary
-  separators. Later block statements remain available to parse.
-- **Diagnostics and projection**: `PrematureEndOfInput` records a zero-width EOF
-  point in the parser stream. The projector replays its nested marker only in
-  the diagnosed run, unwraps every argument child, and retains parentheses
-  around multiple recovered children.
-- **Coverage**: the `labeled_keyword_recovery` parser fixture has CST and
-  projection snapshots. Focused cases guard EOF, comments, CRLF, tuple and
-  assignment precedence, argument lists, block continuation, and ternaries.
-  The incremental hazard sweep includes the new fixture without changing
-  existing random seeds.
-- **Oracle**: the new fixture projection matches the isolated development
-  oracle at `a11d632fa576` byte-for-byte. The 63-case probe set improves from
-  **21** to **60** matches with no regressions. Its three remaining divergences
-  are pre-existing: two trailing-comma-at-EOF cases and a macro-name encoding
-  control. Committed gates stay on JuliaSyntax 1.0.2: JS **749/756** and dir
-  **273/274**, with no allowlist or blocked-list changes.
-- **Validation**: the new tests fail before the fix. Focused parser tests, both
-  oracle reports, workspace tests, clippy, rustfmt, and parser/formatter Wasm
-  builds pass afterward. Valid labeled forms parse losslessly and format safely
-  and idempotently without changing their projected syntax.
+- **Grammar**: space-form macro arguments stop before newline operators inside
+  parentheses. Operator lookup uses the enclosing expression's newline policy,
+  including comments, word operators, `where`, ranges, and splats. The special
+  `@doc` continuation remains intact. No projector changes.
+- **Formatter coupling**: operands ending in undelimited macros gain
+  parentheses before a following operator. Grouping follows expression
+  structure rather than source line breaks. Attached macro forms retain their
+  delimiters.
+- **Coverage**: the 57-case `macro_newline_operator` fixture has a reviewed CST
+  snapshot and a generated Julia 1.13 / JuliaSyntax 1.0.2 projection. Focused
+  tests cover comments, CRLF, operator ownership, and incremental edits in both
+  directions. The hazard sweep appends the fixture without changing old seeds.
+- **Oracle**: the expanded 60-case probe has 59 exact old-oracle matches; the
+  remaining invalid-transpose error shape predates this change. All 59 valid
+  cases preserve Julia expressions after formatting at widths 24 and 80 under
+  both Julia 1.13.0 and locked Julia 1.15.0-DEV.783. All 118 safe-format and
+  idempotence checks pass. Committed gates stay pinned: JS **749/756**, dir
+  **274/275**, with no new blocked entries.
+- **Validation**: regression tests fail before the fix. Parser, incremental,
+  formatter, AST preservation, CLI, and workspace gates pass afterward, along
+  with clippy, rustfmt, and both parser and formatter Wasm builds.
+
+**Ranked next target:** Julia 1.14 multiline arguments for macros directly
+inside parentheses, as recorded in `TODO.md`. This session fixes the older
+operator boundary bug without enabling that syntax.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
+
+- **2026-11-16** — labeled keyword tuple precedence, trailing-junk recovery,
+  EOF diagnostics, and 63 development-oracle probes. 749 / 273.
 
 - **2026-11-16** — dotted wrapping arithmetic operators, canonical broadcast
   semantics, 52 development-oracle expressions, and incremental coverage.
@@ -284,21 +287,6 @@ Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 - **2026-06-25b** — array `;;` line continuation → `hcat` (valid syntax, no
   diagnostic). 666 / 174.
 - **2026-06-25a** — invalid bracketed macro name `@[x]`. 665 / 173.
-- **2026-06-24a…p** — the error-shape campaign's second half: parenthesized
-  `export` item; `:(end)`; glued colon `:<`/`:>`; docstring + stray closer;
-  unterminated char literals; C2 flat arithmetic chains; C3 flat comparison
-  chains; `&&`/`||` right-associativity (C1); `end`/`begin` marker scoped to
-  genuine `ref`; prefix-op spaced call-form paren; `: end` bare Colon atom;
-  doubled operators `**`/`--`; stray middle/closing block keyword;
-  non-identifier `catch` var; string-escape error classification; bare-name
-  `function` signature. JS 640 → 665, dir 155 → 173.
-- **2026-06-23a…z** — the error-shape lineage proper, including the
-  **2026-06-23i architecture reversal** to the rust-analyzer model (deleted
-  `ERROR_TRIVIA`; the zero-width markers became diagnostics-only, reconstructed
-  by the projector). Covers missing operand/condition `(error)`, `else if`
-  recovery, array separator mismatch, trailing-junk runs, lone syntactic
-  operators, char/string error classification, `import`/`as` colon shapes,
-  incomplete `try`, missing `end`. JS 553 → 640, dir 128 → 155.
-- **2026-06-22o…v** — error diagnostics and oracle harvesting. JS 553 → 576.
-- **2026-06-17a…2026-06-22n** — oracle build-out, operators, literals, and
-  structural grammar. JS 251 → 553; details live in git history.
+- **2026-06-17…24** — oracle build-out and error recovery, including the
+  diagnostics-only missing-marker model and arithmetic/comparison chain fixes.
+  JS 251 → 665, dir → 173; details live in git history.

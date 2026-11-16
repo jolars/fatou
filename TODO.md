@@ -10,11 +10,10 @@
 
 ## Parser
 
-- [ ] **Macro newline safety:** fix the pre-existing operator boundary bug in
-  `(@m x\n - y)`, where `\n` denotes a newline. Julia parses this as
-  `(@m x) - y`, but Fatou gives `x - y` to the macro. `format --safe`
-  currently removes the newline and changes the program's meaning. Fix the
-  parser and guard formatting with old and development oracle cases.
+- [x] **Macro newline safety:** keep operators on following lines outside macro
+  arguments. `(@m x\n - y)` parses as `(@m x) - y`, and formatting protects
+  the macro call with parentheses. Regression coverage includes comments,
+  CRLF, incremental edits, and released and development Julia oracles.
 
 - [ ] Support Julia 1.14's multiline macro arguments when a macro call is the
   immediate child of parentheses, such as `(@info "message"\n x=1)`. Cover

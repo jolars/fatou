@@ -160,6 +160,20 @@ fn safe_formats_verified_stdin() {
 }
 
 #[test]
+fn safe_preserves_macro_newline_operator_boundary() {
+    let dir = sandbox();
+    for (input, expected) in [
+        ("(@m x\n - y)", "((@m x) - y)\n"),
+        ("(@m x\r\n -y)", "((@m x) - y)\r\n"),
+    ] {
+        let output = run_stdin(dir.path(), &["format", "--safe", "-"], Some(input));
+        assert!(output.status.success(), "{input:?}: {output:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+        assert!(output.stderr.is_empty(), "{output:?}");
+    }
+}
+
+#[test]
 fn safe_config_applies_to_stdin_and_no_config_bypasses_it() {
     let dir = sandbox();
     std::fs::write(dir.path().join("fatou.toml"), "[format]\nsafe = true\n").unwrap();
