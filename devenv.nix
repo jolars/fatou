@@ -29,6 +29,7 @@
     pkgs.go-task
     pkgs.llvmPackages.bintools
     pkgs.prettier
+    pkgs.python3
     pkgs.ruff
     pkgs.shfmt
     pkgs.wasm-pack

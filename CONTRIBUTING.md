@@ -78,32 +78,61 @@ JuliaSyntax development for Julia 1.14 onward lives in the [`JuliaSyntax/`
 directory of Julia's
 repository](https://github.com/JuliaLang/julia/tree/master/JuliaSyntax). The
 **Update JuliaSyntax oracle** workflow runs every Monday at 05:30 UTC and can
-also be dispatched manually. It uses nightly Julia and an isolated checkout of
-Julia's development branch to regenerate both parser corpora, produce parity
-reports, and run the workspace tests. It opens or updates one PR on
+also be dispatched manually. Its discovery step resolves a nightly build into
+`scripts/julia-oracle.lock.json`, which pins its exact version, full Julia
+commit, commit-specific archive URL, and SHA-256. Regeneration verifies that
+archive and runtime, then loads JuliaSyntax from the same commit. The workflow
+proposes the lock and both refreshed parser corpora in one PR on
 `automation/juliasyntax-oracle`; failed validation leaves a draft PR and fails
-the workflow. Review changed expectations and fix parser regressions before
-merging. The job never weakens the allowlists or blocked lists. The first PR
-proposes the migration from the released JuliaSyntax oracle.
+the workflow. It attaches parity reports and runs the workspace tests. Review
+changed expectations and fix parser regressions before merging. The job never
+weakens the allowlists or blocked lists. The first PR proposes the migration
+from the released JuliaSyntax oracle.
 
-To generate a candidate locally, enter devenv and run:
+The pinned runner targets Linux x86-64 and requires Python 3.12 or newer and
+Git. The devenv shell also supplies the ELF loader needed on NixOS. To discover
+and generate a new candidate, run:
 
 ```sh
-bash scripts/refresh-juliasyntax-oracle.sh
+bash scripts/refresh-juliasyntax-oracle.sh --update
 ```
 
-Pass a Julia commit as the sole argument to replay a source revision. The
-generated `.juliasyntax-source` records that commit, the interpreter version and
-commit, and the requested syntax version. Use the recorded interpreter when
-reproducing an update. The syntax version comes from the source checkout's
-`VERSION` file, so a compatible stable interpreter can also exercise development
-grammar. The root `Project.toml` and `Manifest.toml` are unaffected. Changes to
-the parser's Unicode tables still require the table generators and their usual
-review before adopting a new oracle.
+Without `--update`, that command replays the committed lock without resolving
+nightly or `master`. Restore the lock from the same Git revision as the corpus
+to replay an older update. The generated `.juliasyntax-source` records the
+runtime and source commit, requested syntax version, and verified archive hash.
+The root Julia environment stays separate. Changes to the parser's Unicode
+tables still require the table generators and their usual review before adopting
+a new oracle.
 
 After a development update is merged, the usual
 `scripts/update-juliasyntax-corpus.sh` command replays the recorded upstream
-revision rather than loading the released package from the root environment.
+revision and locked binary. Before that migration, it still uses the root
+project's released baseline.
+
+Verified archives are cached under `$XDG_CACHE_HOME/fatou/julia-oracle` (default
+`~/.cache/fatou/julia-oracle`); `FATOU_JULIA_ORACLE_CACHE` overrides that
+location. The workflow retains a `julia-oracle-binary` artifact for 90 days
+because upstream nightly archives expire. To seed the cache from a retained
+copy:
+
+```sh
+python3 scripts/julia-oracle.py install --archive /path/to/archive.tar.gz
+```
+
+The installer rejects checksum, runtime-version, and commit mismatches. If no
+retained binary is available, clone Julia, check out the lock's full commit, and
+[build that
+revision](https://github.com/JuliaLang/julia/blob/master/doc/src/devdocs/build/build.md).
+You can explicitly select the resulting interpreter:
+
+```sh
+FATOU_ORACLE_JULIA=/path/to/julia/usr/bin/julia bash scripts/refresh-juliasyntax-oracle.sh
+```
+
+This fallback checks the locked runtime version and commit and records
+`source-build` provenance. It does not claim to reproduce the downloaded
+archive's bytes; compare its generated fixtures before using the results.
 
 The workflow uses the existing `RELEASE_TOKEN` when available so its PR triggers
 the normal CI workflows. Its `GITHUB_TOKEN` fallback runs validation in the

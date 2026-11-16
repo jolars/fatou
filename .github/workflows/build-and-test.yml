@@ -9,6 +9,13 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  oracle-tooling:
+    name: Julia oracle tooling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
   test:
     name: build & test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -161,7 +168,7 @@ jobs:
 
   versionary:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test, msrv, wasm, zed, code, minimal-versions, supply-chain]
+    needs: [test, oracle-tooling, msrv, wasm, zed, code, minimal-versions, supply-chain]
     runs-on: ubuntu-latest
     permissions:
       contents: write

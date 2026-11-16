@@ -22,9 +22,12 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
-      - uses: julia-actions/setup-julia@v3
-        with:
-          version: nightly
+      - name: Configure the oracle cache
+        run: echo "FATOU_JULIA_ORACLE_CACHE=$RUNNER_TEMP/julia-oracle-cache" >> "$GITHUB_ENV"
+      - name: Test oracle tooling
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+      - name: Resolve the next Julia pin
+        run: python3 scripts/julia-oracle.py update
       - name: Install Rust
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -66,6 +69,16 @@ jobs:
           name: juliasyntax-parity-reports
           path: crates/fatou-parser/tests/oracle/*report.txt
           if-no-files-found: error
+      - name: Locate the verified Julia archive
+        id: archive
+        run: echo "path=$(python3 scripts/julia-oracle.py archive)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: julia-oracle-binary
+          path: ${{ steps.archive.outputs.path }}
+          retention-days: 90
+          compression-level: 0
+          if-no-files-found: error
       - name: Propose oracle update
         uses: peter-evans/create-pull-request@v8
         with:
@@ -77,7 +90,9 @@ jobs:
           commit-message: "test(parser): refresh development JuliaSyntax oracle"
           body-path: ${{ runner.temp }}/oracle-pr.md
           draft: ${{ steps.validate.outcome != 'success' && 'always-true' || 'false' }}
-          add-paths: crates/fatou-parser/tests/fixtures/oracle
+          add-paths: |
+            scripts/julia-oracle.lock.json
+            crates/fatou-parser/tests/fixtures/oracle
       - name: Report validation failure
         if: steps.validate.outcome == 'failure'
         run: exit 1
