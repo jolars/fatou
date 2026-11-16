@@ -76,6 +76,47 @@ fn lower_node(node: &SyntaxNode) -> Ir {
     }
 }
 
+/// Fence an undelimited macro at the end of an operand before printing an
+/// operator. Otherwise, replacing a semantic newline with a space gives that
+/// operator to the macro's last argument instead of the enclosing expression.
+fn lower_before_operator(node: &SyntaxNode) -> Ir {
+    let body = lower_node(node);
+    let mut tail = node.clone();
+    loop {
+        if tail.kind() == SyntaxKind::MACRO_CALL {
+            let mut args = tail
+                .children()
+                .filter(|child| child.kind() != SyntaxKind::MACRO_NAME);
+            // A sole vector or brace argument becomes the attached, closed form.
+            let delimited = args.next().is_some_and(|arg| {
+                let has_comment = tail
+                    .children_with_tokens()
+                    .any(|el| matches!(el.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT));
+                !has_comment
+                    && (!macro_call_has_spaced_arg(&tail)
+                        || (matches!(arg.kind(), SyntaxKind::BRACES | SyntaxKind::VECT_EXPR)
+                            && args.next().is_none()))
+            });
+            if delimited {
+                return body;
+            }
+            return Ir::group(Ir::concat([
+                Ir::text("("),
+                Ir::indent(Ir::concat([Ir::SoftLine, body])),
+                Ir::SoftLine,
+                Ir::text(")"),
+            ]));
+        }
+        if ends_with_closer(&tail) {
+            return body;
+        }
+        match tail.last_child() {
+            Some(child) => tail = child,
+            None => return body,
+        }
+    }
+}
+
 /// Emit every child in order, lowering child nodes recursively and passing
 /// tokens through verbatim. Keeps unhandled constructs (including their
 /// whitespace and comments) byte-identical while still normalizing any handled
@@ -209,13 +250,18 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
     // integer-literal retokenization hazard before snugging.
     let mut prev_operand: Option<SyntaxNode> = None;
 
-    for el in items {
+    let last_item = items.len().saturating_sub(1);
+    for (index, el) in items.into_iter().enumerate() {
         match el {
             NodeOrToken::Node(child) => {
                 if !expect_operand {
                     return lower_transparent(node);
                 }
-                let ir = lower_node(&child);
+                let ir = if index < last_item {
+                    lower_before_operator(&child)
+                } else {
+                    lower_node(&child)
+                };
                 if operand_count == 0 {
                     first = Some(ir);
                 } else {
@@ -692,7 +738,7 @@ fn lower_splat(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     }
 
-    Ir::concat([lower_node(&operand), Ir::text(dots)])
+    Ir::concat([lower_before_operator(&operand), Ir::text(dots)])
 }
 
 /// Split a clean splat into its operand and postfix token. Comments, missing
@@ -742,7 +788,11 @@ fn lower_arrow(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     };
 
-    Ir::concat([lower_node(lhs), Ir::text(" -> "), lower_node(rhs)])
+    Ir::concat([
+        lower_before_operator(lhs),
+        Ir::text(" -> "),
+        lower_node(rhs),
+    ])
 }
 
 /// Lay out a parenthesized expression (`(a + b)`).
@@ -941,8 +991,8 @@ fn paren_block_statement(params: &SyntaxNode) -> Result<Option<Ir>, ()> {
 /// so a nested `where` (`f(x) where T where S`, itself a left-nested `WHERE_EXPR`)
 /// and the bound's own spacing keep normalizing.
 ///
-/// As with [`lower_arrow`], only the clean single-line shape `<lhs> where <rhs>`
-/// is reshaped: an interleaved comment or newline, error recovery, or a missing
+/// As with [`lower_arrow`], only the clean shape `<lhs> where <rhs>`
+/// is reshaped: an interleaved comment, error recovery, or a missing
 /// operand falls back to the verbatim transparent lowering.
 fn lower_where(node: &SyntaxNode) -> Ir {
     let mut operands: Vec<SyntaxNode> = Vec::new();
@@ -952,7 +1002,7 @@ fn lower_where(node: &SyntaxNode) -> Ir {
         match el {
             NodeOrToken::Node(child) => operands.push(child),
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::WHERE_KW if kw.is_none() => kw = Some(tok),
                 _ => return lower_transparent(node),
             },
@@ -990,7 +1040,7 @@ fn lower_where(node: &SyntaxNode) -> Ir {
 
     if let Some(params) = braces_params.as_ref().filter(|p| p.len() > 1) {
         if let Some(prefix) = where_closing_prefix(lhs) {
-            let head = lower_node(lhs);
+            let head = lower_before_operator(lhs);
             let bound_flat = braces_flat(params);
             let primary = Ir::concat([head.clone(), Ir::text(" where "), bound_flat.clone()]);
             let fallback = Ir::concat([head, Ir::text(" where "), lower_node(rhs)]);
@@ -1001,14 +1051,22 @@ fn lower_where(node: &SyntaxNode) -> Ir {
             return Ir::cond_group(primary, fallback, probe);
         }
         // No breakable argument list to break around, keep the exploding bound.
-        return Ir::concat([lower_node(lhs), Ir::text(" where "), lower_node(rhs)]);
+        return Ir::concat([
+            lower_before_operator(lhs),
+            Ir::text(" where "),
+            lower_node(rhs),
+        ]);
     }
 
     if matches!(
         rhs.kind(),
         SyntaxKind::BRACESCAT_EXPR | SyntaxKind::BRACES_COMPREHENSION
     ) {
-        return Ir::concat([lower_node(lhs), Ir::text(" where "), lower_node(rhs)]);
+        return Ir::concat([
+            lower_before_operator(lhs),
+            Ir::text(" where "),
+            lower_node(rhs),
+        ]);
     }
 
     let bound = match braces_params {
@@ -1022,7 +1080,7 @@ fn lower_where(node: &SyntaxNode) -> Ir {
         None => Ir::concat([Ir::text("{"), lower_node(rhs), Ir::text("}")]),
     };
 
-    Ir::concat([lower_node(lhs), Ir::text(" where "), bound])
+    Ir::concat([lower_before_operator(lhs), Ir::text(" where "), bound])
 }
 
 /// Join a `BRACES` bound's parameters into a flat, non-breaking `{a, b, …}`. Used
@@ -1668,7 +1726,11 @@ fn lower_comparison(node: &SyntaxNode) -> Ir {
                 if !expect_operand {
                     return lower_transparent(node);
                 }
-                let ir = lower_node(&child);
+                let ir = if child.next_sibling().is_some() {
+                    lower_before_operator(&child)
+                } else {
+                    lower_node(&child)
+                };
                 if operand_count == 0 {
                     first = Some(ir);
                 } else {
@@ -1750,7 +1812,11 @@ fn lower_ternary(node: &SyntaxNode) -> Ir {
                 if !expect_operand {
                     return lower_transparent(node);
                 }
-                let ir = lower_node(&child);
+                let ir = if child.next_sibling().is_some() {
+                    lower_before_operator(&child)
+                } else {
+                    lower_node(&child)
+                };
                 if operand_count == 0 {
                     first = Some(ir);
                 } else {
@@ -1796,7 +1862,7 @@ fn lower_ternary(node: &SyntaxNode) -> Ir {
 /// the parser folds from a step.)
 ///
 /// As with the other operator rules, only the clean alternating shape is
-/// reshaped: an interleaved comment or newline, error recovery, or a degenerate
+/// reshaped: an interleaved comment, error recovery, or a degenerate
 /// operand count falls back to the verbatim transparent lowering.
 fn lower_range(node: &SyntaxNode) -> Ir {
     let mut parts: Vec<Ir> = Vec::new();
@@ -1809,12 +1875,16 @@ fn lower_range(node: &SyntaxNode) -> Ir {
                 if !expect_operand {
                     return lower_transparent(node);
                 }
-                parts.push(lower_node(&child));
+                parts.push(if child.next_sibling().is_some() {
+                    lower_before_operator(&child)
+                } else {
+                    lower_node(&child)
+                });
                 operand_count += 1;
                 expect_operand = false;
             }
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::COLON if !expect_operand => {
                     parts.push(Ir::text(":"));
                     expect_operand = true;
@@ -1841,9 +1911,13 @@ fn lower_type_annotation(node: &SyntaxNode) -> Ir {
 
     for el in node.children_with_tokens() {
         match el {
-            NodeOrToken::Node(child) => parts.push(lower_node(&child)),
+            NodeOrToken::Node(child) => parts.push(if seen_colons {
+                lower_node(&child)
+            } else {
+                lower_before_operator(&child)
+            }),
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::COLON_COLON if !seen_colons => {
                     seen_colons = true;
                     parts.push(Ir::text("::"));

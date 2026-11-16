@@ -101,6 +101,63 @@ end
     );
 }
 
+#[test]
+fn macro_newline_operators_preserve_the_program() {
+    let expected = ast_shape("((@m x) - y)").unwrap();
+    for input in ["(@m x\n - y)", "(@m x\r\n -y)", "((@m x) - y)"] {
+        assert_eq!(ast_shape(input).as_ref(), Some(&expected), "{input:?}");
+        let formatted = format(input).unwrap();
+        assert_eq!(
+            ast_shape(&formatted).as_ref(),
+            Some(&expected),
+            "{input:?}: {formatted:?}"
+        );
+        verify_format(input, &formatted).unwrap();
+        assert_eq!(format(&formatted).unwrap(), formatted);
+    }
+    assert_eq!(
+        verify_format("(@m x\n - y)", "(@m x - y)\n"),
+        Err(fatou_formatter::verify::VerificationError::ChangedProgram),
+    );
+}
+
+#[test]
+fn macro_operator_fences_follow_expression_structure() {
+    for (input, explicit) in [
+        ("(@m\n - y)", "((@m) - y)"),
+        ("(@m @n x\n - y)", "((@m @n x) - y)"),
+        ("(-@m x\n - y)", "((-@m x) - y)"),
+        ("(a + @m x\n - y)", "(a + (@m x) - y)"),
+        ("(@m x\n == y)", "((@m x) == y)"),
+        ("(@m x\n ? y : z)", "((@m x) ? y : z)"),
+        ("(@m x\n where T)", "((@m x) where T)"),
+        ("(@m x\n ::T)", "((@m x)::T)"),
+        ("(@m x\n ...)", "((@m x)... )"),
+        ("(@m [x]\n - y)", "(@m[x] - y)"),
+        ("(@m(x)\n - y)", "(@m(x) - y)"),
+        (
+            "(@m very_long_function_name(first, second)\n - third)",
+            "((@m very_long_function_name(first, second)) - third)",
+        ),
+    ] {
+        assert_eq!(ast_shape(input), ast_shape(explicit), "{input:?}");
+        for line_width in [24, 80] {
+            let style = FormatStyle {
+                line_width,
+                ..FormatStyle::default()
+            };
+            let formatted = format_with_style(input, style).unwrap();
+            verify_format(input, &formatted).unwrap();
+            assert_eq!(
+                format_with_style(explicit, style).unwrap(),
+                formatted,
+                "{input:?} at width {line_width}",
+            );
+            assert_eq!(format_with_style(&formatted, style).unwrap(), formatted);
+        }
+    }
+}
+
 /// Gate: every fixture with an `expected.jl` must format to it exactly.
 #[test]
 fn formatter_fixtures_match_expected() {

@@ -31,6 +31,10 @@ assert_eq!(formatted, "f(x) = x + 1\n");
 Verified formatting rejects malformed input and syntax outside the verifier's
 projection rather than silently skipping the check.
 
+Macro calls used as operator operands gain parentheses when needed to keep the
+operator outside their argument list. For example, `(@m x\n - y)` formats to
+`((@m x) - y)`.
+
 `format_node` and `format_range` accept an already-parsed
 [fatou-parser](https://crates.io/crates/fatou-parser) CST, whole or a byte range
 of it.
