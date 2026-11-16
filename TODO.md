@@ -1,17 +1,5 @@
 # TODOs
 
-## Parser
-
-- [ ] Two error-recovery gaps left over from labeled `break`/`continue`
-  (`crates/fatou-parser/src/parser/structural.rs`). Junk after a complete
-  labeled keyword drops JuliaSyntax's trailing zero-width marker
-  (`break l x y` ⇒ `(break l x) (error-t y)`, not `(error-t y (error-t))`),
-  and a bare comma after one does not fold into a tuple (`break l, y` ⇒
-  `(break l) (error-t ✘ y)`, not `(tuple (break l) y)`). Ready to implement:
-  development JuliaSyntax validates both labeled forms and these recovery
-  shapes (verified 2026-11-16). Generate the development oracle with
-  `scripts/refresh-juliasyntax-oracle.sh`.
-
 ## Documentation
 
 - [ ] **Formatting docstrings (opt-in):** only consider docstring reflow after
