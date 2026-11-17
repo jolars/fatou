@@ -102,6 +102,39 @@ end
 }
 
 #[test]
+fn parenthesized_multiline_macros_preserve_argument_scope() {
+    for (input, explicit) in [
+        ("(@m a\n b)", "(@m a b)"),
+        ("(A.@m a\n b)", "(A.@m a b)"),
+        ("(@m @n a\n b)", "(@m (@n a) b)"),
+        ("(@m a + @n b\n c)", "(@m (a + @n b) c)"),
+        ("(@m a, @n b\n c)", "(@m a, (@n b) c)"),
+        ("(@m (@n a\n b)\n c)", "(@m (@n a b) c)"),
+        ("(@m a\n [b])", "(@m a [b])"),
+        ("(@m +\n x)", "(@m (+) x)"),
+        ("(@m a b\n for i in xs)", "((@m a b) for i in xs)"),
+    ] {
+        for newline in ["\n", "\r\n"] {
+            let input = input.replace('\n', newline);
+            assert_eq!(ast_shape(&input), ast_shape(explicit), "{input:?}");
+            for line_width in [24, 80] {
+                let style = FormatStyle {
+                    line_width,
+                    ..FormatStyle::default()
+                };
+                let formatted = format_with_style(&input, style).unwrap();
+                verify_format(&input, &formatted).unwrap();
+                assert_eq!(
+                    format_with_style(explicit, style).unwrap(),
+                    formatted.replace("\r\n", "\n")
+                );
+                assert_eq!(format_with_style(&formatted, style).unwrap(), formatted);
+            }
+        }
+    }
+}
+
+#[test]
 fn macro_newline_operators_preserve_the_program() {
     let expected = ast_shape("((@m x) - y)").unwrap();
     for input in ["(@m x\n - y)", "(@m x\r\n -y)", "((@m x) - y)"] {

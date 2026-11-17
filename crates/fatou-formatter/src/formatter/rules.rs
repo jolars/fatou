@@ -77,10 +77,15 @@ fn lower_node(node: &SyntaxNode) -> Ir {
 }
 
 /// Fence an undelimited macro at the end of an operand before printing an
-/// operator, comma, or generator clause. Otherwise, replacing a semantic newline
-/// with a space gives the following syntax to the macro instead of its enclosing
-/// node.
+/// operator, comma, generator clause, or next macro argument. Otherwise,
+/// replacing a semantic newline with a space gives the following syntax to the
+/// macro instead of its enclosing node.
 fn lower_before_operator(node: &SyntaxNode) -> Ir {
+    // Parenthesizing a bare tuple would change its surface form. Protect its
+    // final element instead, so the tuple remains the same macro argument.
+    if node.kind() == SyntaxKind::BARE_TUPLE_EXPR {
+        return lower_comma_list_in(node, true);
+    }
     let body = lower_node(node);
     let mut tail = node.clone();
     loop {
@@ -3445,7 +3450,11 @@ fn lower_macro_call(node: &SyntaxNode) -> Ir {
                     if had_gap && !gluable {
                         parts.push(Ir::text(" "));
                     }
-                    parts.push(lower_node(&child));
+                    parts.push(if child.next_sibling().is_some() {
+                        lower_before_macro_argument(&child)
+                    } else {
+                        lower_node(&child)
+                    });
                     saw_arg = true;
                     had_gap = false;
                 }
@@ -3458,6 +3467,15 @@ fn lower_macro_call(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     }
     Ir::concat(parts)
+}
+
+fn lower_before_macro_argument(node: &SyntaxNode) -> Ir {
+    if node.kind() == SyntaxKind::OPERATOR_ATOM {
+        // A value operator followed by another argument must stay a value:
+        // `@m +` followed by a newline and `x` cannot become `@m + x`.
+        return Ir::concat([Ir::text("("), lower_node(node), Ir::text(")")]);
+    }
+    lower_before_operator(node)
 }
 
 /// Render a `MACRO_NAME` (`@name`, or a dotted `Base.@kwdef`) as flat text, joining
@@ -3499,6 +3517,10 @@ fn lower_macro_name(node: &SyntaxNode) -> Option<Ir> {
 /// level anyway), an interleaved comment, or any unexpected token falls back to
 /// the verbatim transparent lowering.
 fn lower_comma_list(node: &SyntaxNode) -> Ir {
+    lower_comma_list_in(node, false)
+}
+
+fn lower_comma_list_in(node: &SyntaxNode, fence_last: bool) -> Ir {
     let mut first: Option<Ir> = None;
     let mut rest: Vec<Ir> = Vec::new();
     let mut item_count = 0usize;
@@ -3521,7 +3543,11 @@ fn lower_comma_list(node: &SyntaxNode) -> Ir {
                 if item_count > 0 && !pending_comma {
                     return lower_transparent(node);
                 }
-                let ir = lower_node(&child);
+                let ir = if fence_last && child.next_sibling().is_none() {
+                    lower_before_macro_argument(&child)
+                } else {
+                    lower_node(&child)
+                };
                 if item_count == 0 {
                     first = Some(ir);
                 } else {
