@@ -4,7 +4,7 @@
 # pinned JSONL corpus for the differential parser oracle (track 1; see
 # `AGENTS.md` and `crates/fatou-parser/tests/juliasyntax_oracle.rs`).
 #
-# JuliaSyntax's `test/parser.jl` holds ~690 hand-curated `"source" => "(sexpr)"`
+# JuliaSyntax's `test/parser.jl` holds hand-curated `"source" => "(sexpr)"`
 # pairs, organized per *production rule*. We cannot reuse their expected strings
 # directly — they are produced per-production (no `(toplevel …)` root) and with
 # `keep_parens=true`. So we harvest only the **input strings** and regenerate
@@ -27,6 +27,7 @@
 # `refresh-juliasyntax-oracle.sh`.
 include("juliasyntax-oracle.jl")
 using SHA
+using TOML
 
 const REPO_ROOT = normpath(joinpath(@__DIR__, ".."))
 const OUT_PATH = joinpath(
@@ -38,6 +39,7 @@ const OUT_PATH = joinpath(
     "oracle",
     "juliasyntax.jsonl",
 )
+const RETAINED_PATH = joinpath(dirname(OUT_PATH), "retained-inputs.toml")
 
 "Recursively collect the left-hand input string of every `… => …` pair."
 function collect_inputs!(into::Set{String}, ex)
@@ -108,7 +110,10 @@ function json_str(s::AbstractString)
 end
 
 function main()
-    inputs = harvest_inputs()
+    harvested = harvest_inputs()
+    # Retained inputs keep regression slugs alive when upstream reorganizes tests.
+    retained = TOML.parsefile(RETAINED_PATH)["inputs"]
+    inputs = sort!(collect(union(harvested, retained)))
     rows = Tuple{String,String,String}[]
     (skipped_empty, skipped_throw, skipped_invalid, dup) = (0, 0, 0, 0)
     seen = Set{String}()
@@ -164,7 +169,8 @@ function main()
         end
     end
 
-    println("harvested $(length(inputs)) inputs from JuliaSyntax test/parser.jl")
+    println("harvested $(length(harvested)) inputs from JuliaSyntax test/parser.jl")
+    println("retained $(length(setdiff(retained, harvested))) earlier inputs")
     println(
         "wrote $(length(rows)) cases to $OUT_PATH " *
         "(skipped: $skipped_empty empty, " *

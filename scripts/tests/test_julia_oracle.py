@@ -4,6 +4,7 @@ import io
 import json
 import tarfile
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -18,6 +19,38 @@ SPEC.loader.exec_module(oracle)
 class JuliaOracleTests(unittest.TestCase):
     def test_checked_in_lock_is_valid(self):
         oracle.validate_lock(json.loads(oracle.LOCK_PATH.read_text()))
+
+    def test_committed_corpus_uses_locked_toolchain(self):
+        lock = json.loads(oracle.LOCK_PATH.read_text())
+        corpus = oracle.REPO_ROOT / "crates/fatou-parser/tests/fixtures/oracle"
+        source = dict(
+            line.split("=", 1)
+            for line in (corpus / ".juliasyntax-source").read_text().splitlines()
+        )
+        self.assertEqual(source["julia_version"], lock["version"])
+        self.assertEqual(source["julia_commit"], lock["commit"])
+        self.assertEqual(source["juliasyntax_revision"], lock["commit"])
+        self.assertTrue(source["juliasyntax_version"].startswith("2."))
+        self.assertIn(source["julia_binary_source"], ("archive", "source-build"))
+        if source["julia_binary_source"] == "archive":
+            self.assertEqual(source["julia_archive_sha256"], lock["sha256"])
+        else:
+            self.assertNotIn("julia_archive_sha256", source)
+        self.assertEqual(
+            source["syntax_version"], ".".join(lock["version"].split(".")[:2]) + ".0"
+        )
+
+    def test_harvest_preserves_retained_inputs(self):
+        corpus = oracle.REPO_ROOT / "crates/fatou-parser/tests/fixtures/oracle"
+        retained = tomllib.loads((corpus / "retained-inputs.toml").read_text())["inputs"]
+        cases = {
+            case["slug"]: case["input"]
+            for case in map(json.loads, (corpus / "juliasyntax.jsonl").read_text().splitlines())
+        }
+        for source in retained:
+            slug = "js-" + hashlib.sha256(source.encode()).hexdigest()[:8]
+            with self.subTest(slug=slug):
+                self.assertEqual(cases.get(slug), source)
 
     def test_rejects_moving_download_urls(self):
         lock = self.lock()

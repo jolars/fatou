@@ -18,6 +18,7 @@ block_form_operand
 js-063e192a
 js-11e2e762
 js-12ef57ec
+js-1b2f6b1c
 js-238e9ee4
 js-41e2a5cf
 js-488a8833
@@ -26,6 +27,7 @@ js-4eeda108
 js-6278bb20
 js-63fa1644
 js-964375a2
+js-ab545a0c
 js-bf71b3b1
 js-c4d48e55
 js-cbd92fc9
@@ -58,3 +60,4 @@ toplevel_semicolon
 # `1f0` -> `1.0f0`). The projector renders a float's source spelling, so every
 # such row moves; each rewrite is value- and type-preserving.
 numeric_literals
+js-ae1c5672

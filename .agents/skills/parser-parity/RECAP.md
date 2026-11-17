@@ -13,7 +13,13 @@ formatter, linter, or other downstream follow-up, put the active task in that
 consumer's `RECAP.md` and `TODO.md` section; retain at most a historical note in
 the parser session log.
 
-No queued parser targets.
+The JuliaSyntax 2 migration exposes grammar and recovery gaps in
+`tests/oracle/blocked.txt` and `tests/oracle/juliasyntax-blocked.txt` (under the
+parser crate). They retain exact inputs and grouped causes. Prefer the
+parenthesized multiline macro target already recorded in `TODO.md`; its 58
+harvested cases cover both valid arguments and boundaries/recovery. Other
+clusters include adjacent assignment/comparison tokens, qualified literal macro
+callees, and the seven changed curated grammar cases.
 
 ## Persistent traps & invariants
 
@@ -54,19 +60,21 @@ No queued parser targets.
 - **Reports are gitignored and untracked** (force-added once, untracked again in
   2026-08-07c); `expected.sexpr` is generated — never hand-edit.
 - **Shell `raw"""…"""` Julia probes break on `"`/`$`** — use a temp file.
-- **Corpus pinned** in `.juliasyntax-source` (currently 1.0.2/Julia 1.13.0).
+- **Corpus pinned** in `.juliasyntax-source` (JuliaSyntax 2.0.0-DEV,
+  Julia 1.15.0-DEV.783, syntax version 1.15).
   Development updates also pin the binary URL, SHA-256, version, and shared
   Julia/JuliaSyntax commit in `scripts/julia-oracle.lock.json`. Only `--update`
   discovers a nightly. Bumps require corpus/table regeneration and triage.
 
 ## Progress
 
-JS corpus (**756 cases**, error shapes included): **749 allowlisted**, 7
-divergence, 0 unsupported. Dir corpus (**275 cases**): **274 allowlisted**, 1
-blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
-1.0.2 added 71 harvested cases; all remaining harvested divergences are the
-permanent cases recorded below. A green report means "no regression", not
-"nothing to do".
+JS corpus (**907 cases**, error shapes included): **827 allowlisted**, 80
+classified divergences, 0 unsupported. All 756 original inputs remain, including
+six removed from upstream's harvested binding, and all 749 original passing
+cases remain allowlisted. Dir corpus (**275 cases**): **267 allowlisted**, 8
+blocked. Seven curated grammar changes moved to blocked with identical parser
+fixtures and reviewed CST snapshots; numeric display remains blocked. Both
+corpora enforce complete triage and reject stale blocked entries.
 
 Markdown stdlib corpus: **23 fixtures**, pinned to Julia 1.13.0. Wrapped-inline
 and admonition-fence fixtures also check CRLF projections and lossless
@@ -83,8 +91,8 @@ display. Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully executed.
 Permanent (never "fix"): **float-literal display** (hex floats/
 `1.0e-1000`/`x.3` — needs Julia's `show`); **n-ary juxtaposition** `(2)(3)x`;
 **`x 'y`** char lexing (needs bracket-depth-aware `'`, and also leaves
-`10.0f100'` divergent after its overflow diagnostic). These account for all 7
-remaining JS FAILs.
+`10.0f100'` divergent after its overflow diagnostic). These account for the original 7
+JS divergences; the current blocked lists classify the migration's additions.
 
 Modeling divergences, recorded not fixed: word-op chains `a isa b isa c` and
 mixed `a < b isa c` stay nested (separate `word_operator` branch).
@@ -105,37 +113,44 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-11-16 — macro newline safety)
+## Latest session (2026-11-17 — JuliaSyntax 2 oracle migration)
 
-- **Grammar**: space-form macro arguments stop before newline operators inside
-  parentheses. Operator lookup uses the enclosing expression's newline policy,
-  including comments, word operators, `where`, ranges, and splats. The special
-  `@doc` continuation remains intact. No projector changes.
-- **Formatter coupling**: operands ending in undelimited macros gain
-  parentheses before a following operator. Grouping follows expression
-  structure rather than source line breaks. Attached macro forms retain their
-  delimiters.
-- **Coverage**: the 57-case `macro_newline_operator` fixture has a reviewed CST
-  snapshot and a generated Julia 1.13 / JuliaSyntax 1.0.2 projection. Focused
-  tests cover comments, CRLF, operator ownership, and incremental edits in both
-  directions. The hazard sweep appends the fixture without changing old seeds.
-- **Oracle**: the expanded 60-case probe has 59 exact old-oracle matches; the
-  remaining invalid-transpose error shape predates this change. All 59 valid
-  cases preserve Julia expressions after formatting at widths 24 and 80 under
-  both Julia 1.13.0 and locked Julia 1.15.0-DEV.783. All 118 safe-format and
-  idempotence checks pass. Committed gates stay pinned: JS **749/756**, dir
-  **274/275**, with no new blocked entries.
-- **Validation**: regression tests fail before the fix. Parser, incremental,
-  formatter, AST preservation, CLI, and workspace gates pass afterward, along
-  with clippy, rustfmt, and both parser and formatter Wasm builds.
+- **Toolchain**: regenerated both corpora with locked Julia 1.15.0-DEV.783 and
+  JuliaSyntax 2.0.0-DEV at their shared `a11d632` commit. Syntax version 1.15 is
+  explicit and replayed from `.juliasyntax-source`. Quick probes must use that
+  locked checkout, not the root project's separate released JuliaSyntax 1.0.2.
+- **Encoding**: explicit `macro_name` wrappers preserve the sigil's position;
+  modules and `@VERSION` carry oracle edition metadata; compound assignment
+  values and dot-only names retain their structural heads. Grammar differences
+  remain visible rather than being repaired in the projector.
+- **Coverage**: harvested **749/756 -> 827/907**, with all old inputs and passing
+  gates retained. Curated **274/275 -> 267/275** after classifying seven changed
+  grammar cases. Their CST/diagnostic/losslessness snapshots remain gated;
+  `operator_method_declaration` gains the missing parser fixture and snapshot.
+- **Generation**: the operator generator classifies raw lexer tokens with their
+  precedence metadata. Its 597 entries retain all 594 old entries and tiers,
+  adding the three aliases already handled by the lexer. The generated table
+  now owns those aliases. Full replay reproduced all **278 generated corpus and
+  table artifacts byte-for-byte**; 11 Python tooling tests pass.
+- **Formatter coupling**: the new macro-generator case exposed unsafe newline
+  collapse. Generator bodies and positional list items reuse the existing macro
+  operand fence, including singleton tuples. Regression coverage checks equivalent
+  forms, nested macros, attached vectors, CRLF, and widths 24/80. Three new surface
+  differences join the existing `where` and numeric-canonicalization policy groups.
+- **Validation**: focused parser, oracle, incremental, formatter, and complete
+  workspace gates pass, as do clippy, rustfmt, and both engine Wasm builds.
+  Encoding and macro-generator regression tests fail before their fixes.
 
-**Ranked next target:** Julia 1.14 multiline arguments for macros directly
-inside parentheses, as recorded in `TODO.md`. This session fixes the older
-operator boundary bug without enabling that syntax.
+**Ranked next target:** the existing Julia 1.14 parenthesized multiline macro
+argument task in `TODO.md`. Migration gaps are classified in the blocked lists.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
+
+- **2026-11-16** — macro newline operator boundaries and formatter operand
+  fences, with comments, CRLF, incremental edits, and both Julia oracles.
+  749 / 274.
 
 - **2026-11-16** — labeled keyword tuple precedence, trailing-junk recovery,
   EOF diagnostics, and 63 development-oracle probes. 749 / 273.
@@ -276,17 +291,6 @@ Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
   immediately followed by `=` (so `f!`/`push!` still lex). 677 / 182.
 - **2026-06-25j** — projector faithfulness audit, no parser change: classified
   every non-trivial arm, probed each non-local one. **Zero latent CST bugs.**
-- **2026-06-25i** — `.'` → trailing-junk recovery; lexer `prev_is_dot()`. 677 / 181.
-- **2026-06-25h** — misplaced `end` in a space-separated array. 676 / 180.
-- **2026-06-25g** — leading-`@` dotted macro `$`/inner-`@` sigil reflow. 675 / 179.
-- **2026-06-25f** — misplaced macro sigil `A.@B.x` (trailing form). 673 / 178.
-- **2026-06-25e** — broadcast call on a macro name `@M.(x)`. 672 / 177.
-- **2026-06-25d** — bare block keyword `function`/`macro` empty recovery. 671 / 176.
-- **2026-06-25c** — incomplete ternary recovered as `if`, decided *locally* by
-  the terminator. 670 / 175.
-- **2026-06-25b** — array `;;` line continuation → `hcat` (valid syntax, no
-  diagnostic). 666 / 174.
-- **2026-06-25a** — invalid bracketed macro name `@[x]`. 665 / 173.
-- **2026-06-17…24** — oracle build-out and error recovery, including the
-  diagnostics-only missing-marker model and arithmetic/comparison chain fixes.
-  JS 251 → 665, dir → 173; details live in git history.
+- **2026-06-17…25** — oracle build-out, diagnostics-only recovery, macro names,
+  operator tables, and arithmetic/comparison chain fixes. JS 251 → 677;
+  dir → 181. Detailed sessions live in git history.

@@ -92,8 +92,10 @@ proposes the lock and both refreshed parser corpora in one PR on
 `automation/juliasyntax-oracle`; failed validation leaves a draft PR and fails
 the workflow. It attaches parity reports and runs the workspace tests. Review
 changed expectations and fix parser regressions before merging. The job never
-weakens the allowlists or blocked lists. The first PR proposes the migration
-from the released JuliaSyntax oracle.
+weakens the allowlists or blocked lists. The committed corpora use JuliaSyntax 2
+from the locked development tree, with an explicit syntax version recorded in
+their provenance. The root Julia project's released JuliaSyntax dependency is
+separate from this oracle.
 
 The pinned runner targets Linux x86-64 and requires Python 3.12 or newer and
 Git. The devenv shell also supplies the ELF loader needed on NixOS. To discover
@@ -107,14 +109,21 @@ Without `--update`, that command replays the committed lock without resolving
 nightly or `master`. Restore the lock from the same Git revision as the corpus
 to replay an older update. The generated `.juliasyntax-source` records the
 runtime and source commit, requested syntax version, and verified archive hash.
-The root Julia environment stays separate. Changes to the parser's Unicode
-tables still require the table generators and their usual review before adopting
-a new oracle.
+The refresh also regenerates the Unicode operator table with that toolchain.
+Review its diff along with the corpora. Identifier tables still require their
+separate generator when Julia's Unicode version changes.
 
-After a development update is merged, the usual
-`scripts/update-juliasyntax-corpus.sh` command replays the recorded upstream
-revision and locked binary. Before that migration, it still uses the root
-project's released baseline.
+The usual `scripts/update-juliasyntax-corpus.sh` command replays the recorded
+upstream revision and locked binary, including the harvested cases and operator
+table. Inputs that upstream removes from its harvested test binding belong in
+`crates/fatou-parser/tests/fixtures/oracle/retained-inputs.toml`, so
+regeneration preserves their regression coverage.
+
+Both corpora require complete triage: every input belongs to its allowlist or
+blocked list, and a resolved blocked case must return to the allowlist. Keep
+encoding changes separate from grammar and recovery gaps. A curated case moved
+to blocked must retain identical input in the parser fixture suite, which guards
+its CST, diagnostics, and losslessness independently of the new oracle.
 
 Verified archives are cached under `$XDG_CACHE_HOME/fatou/julia-oracle` (default
 `~/.cache/fatou/julia-oracle`); `FATOU_JULIA_ORACLE_CACHE` overrides that

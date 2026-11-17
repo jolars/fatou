@@ -31,7 +31,7 @@ jobs:
       - name: Install Rust
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
-      - name: Refresh both oracle corpora
+      - name: Refresh oracle corpora and operator table
         run: bash scripts/refresh-juliasyntax-oracle.sh
       - name: Generate parity reports
         run: cargo test -p fatou-parser --test juliasyntax_oracle -- --ignored
@@ -47,7 +47,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           {
-            echo 'Refresh the pinned oracle from the Julia development tree.'
+            echo 'Refresh the pinned oracle and Unicode operator table from the Julia development tree.'
             echo
             echo '```text'
             cat crates/fatou-parser/tests/fixtures/oracle/.juliasyntax-source
@@ -60,7 +60,7 @@ jobs:
             tail -n 1 crates/fatou-parser/tests/oracle/juliasyntax-report.txt
             echo '```'
             echo
-            echo 'Review changed expectations and resolve regressions before merging.'
+            echo 'Review changed expectations and operator entries, and resolve regressions before merging.'
             echo 'The refresh preserves the allowlists and blocked lists.'
           } > "$RUNNER_TEMP/oracle-pr.md"
           cat "$RUNNER_TEMP/oracle-pr.md" >> "$GITHUB_STEP_SUMMARY"
@@ -93,6 +93,7 @@ jobs:
           add-paths: |
             scripts/julia-oracle.lock.json
             crates/fatou-parser/tests/fixtures/oracle
+            crates/fatou-parser/src/parser/unicode_ops.rs
       - name: Report validation failure
         if: steps.validate.outcome == 'failure'
         run: exit 1

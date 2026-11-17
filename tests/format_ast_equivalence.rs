@@ -7,8 +7,8 @@
 //!
 //! - `crates/fatou-parser/tests/fixtures/oracle/<slug>/input.jl` — the pinned
 //!   JuliaSyntax corpus.
-//! - `crates/fatou-parser/tests/fixtures/oracle/juliasyntax.jsonl` — the 756
-//!   micro-cases harvested from JuliaSyntax's own `test/parser.jl`.
+//! - `crates/fatou-parser/tests/fixtures/oracle/juliasyntax.jsonl` — micro-cases
+//!   harvested from JuliaSyntax's own `test/parser.jl`, including retained inputs.
 //!
 //! Those corpora exist to pin *parser* shape, so they reach far more grammar
 //! than hand-authored formatter fixtures do — which is exactly why the formatter

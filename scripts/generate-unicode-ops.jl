@@ -1,11 +1,10 @@
 #!/usr/bin/env julia
 
-# Regenerate the Unicode operator table from the pinned JuliaSyntax package.
-# Run from the project environment on a Julia or JuliaSyntax version bump:
+# Regenerate the Unicode operator table with the locked oracle toolchain:
 #
-#     julia --startup-file=no scripts/generate-unicode-ops.jl
+#     bash scripts/refresh-juliasyntax-oracle.sh
 
-using JuliaSyntax
+include("juliasyntax-oracle.jl")
 
 const TIERS = [
     JuliaSyntax.is_prec_assignment => "UniAssign",
@@ -17,24 +16,34 @@ const TIERS = [
     JuliaSyntax.is_prec_power => "UniPower",
 ]
 
-function operator_tier(kind)
+function operator_tier(token, char)
     for (predicate, tier) in TIERS
-        predicate(kind) && return tier
+        predicate(token) && return tier
     end
     # These prefix-only operators have no infix precedence tier.
-    string(kind) in ("¬", "√", "∛", "∜") && return "UniRadical"
-    error("unmapped Unicode operator: $kind")
+    char in ('¬', '√', '∛', '∜') && return "UniRadical"
+    error("unmapped Unicode operator: $char")
 end
 
 operators = Tuple{Char,String}[]
-for kind in JuliaSyntax.Tokenize._nondot_symbolic_operator_kinds()
-    spelling = string(kind)
-    length(spelling) == 1 || continue
-    char = only(spelling)
-    isascii(char) && continue
-    push!(operators, (char, operator_tier(kind)))
+for codepoint in 0x80:0x10ffff
+    char = Char(codepoint)
+    isvalid(char) && JuliaSyntax.Tokenize.is_operator_start_char(char) || continue
+    # JuliaSyntax 2 stores generic operators' precedence on tokens, not kinds.
+    # Asking the lexer also includes operators with dedicated token kinds.
+    tokens = collect(JuliaSyntax.Tokenize.tokenize(string(char)))
+    length(tokens) == 2 && JuliaSyntax.kind(last(tokens)) == JuliaSyntax.K"EndMarker" ||
+        error("expected one operator token and EOF: $char")
+    raw = first(tokens)
+    head = JuliaSyntax.SyntaxHead(
+        JuliaSyntax.kind(raw), JuliaSyntax.set_numeric_flags(Int(raw.op_precedence)),
+    )
+    token = JuliaSyntax.Token(head, UInt32(1):UInt32(ncodeunits(string(char))))
+    JuliaSyntax.is_operator(token) || error("expected an operator: $char")
+    push!(operators, (char, operator_tier(token, char)))
 end
 sort!(operators; by = first)
+isempty(operators) && error("JuliaSyntax produced no Unicode operators")
 
 const OUTPUT = joinpath(
     @__DIR__, "..", "crates", "fatou-parser", "src", "parser", "unicode_ops.rs")
@@ -42,11 +51,13 @@ const OUTPUT = joinpath(
 open(OUTPUT, "w") do io
     println(io, "//! Single-codepoint Unicode operators and their precedence tiers.")
     println(io, "//!")
-    println(io, "//! Generated from JuliaSyntax's operator-kind tables ",
+    println(io, "//! Generated from JuliaSyntax's lexer ",
         "(julia_version=", VERSION, " juliasyntax_version=", pkgversion(JuliaSyntax), ").")
-    println(io, "//! Every entry is a length-1 non-ASCII operator string from")
-    println(io, "//! `Tokenize._nondot_symbolic_operator_kinds()`, classified by the")
-    println(io, "//! `is_prec_*` predicate for its kind. The table is sorted by code point so")
+    if haskey(ENV, "FATOU_ORACLE_REVISION")
+        println(io, "//! Julia and JuliaSyntax commit: ", ENV["FATOU_ORACLE_REVISION"], ".")
+    end
+    println(io, "//! Every entry is a non-ASCII operator start character, classified by the")
+    println(io, "//! `is_prec_*` predicates on its token. The table is sorted by code point so")
     println(io, "//! [`unicode_op_kind`] can binary-search it. Regenerate with")
     println(io, "//! `scripts/generate-unicode-ops.jl` on a Julia or JuliaSyntax bump;")
     println(io, "//! do not hand-edit.")

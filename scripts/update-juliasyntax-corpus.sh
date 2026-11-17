@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
-# Regenerate the pinned JuliaSyntax oracle corpus (`expected.sexpr` files plus
-# the `.juliasyntax-source` version sidecar). Thin wrapper around the Julia
-# helper. Development snapshots replay their recorded upstream revision;
+# Regenerate the pinned JuliaSyntax oracle corpora and Unicode operator table,
+# including their provenance. Development snapshots replay their upstream revision;
 # released snapshots use the root Julia project. Run inside the devenv shell
 # or provide a compatible Julia interpreter on PATH.
 set -euo pipefail
@@ -12,6 +11,8 @@ source_file="$script_dir/../crates/fatou-parser/tests/fixtures/oracle/.juliasynt
 
 revision="$(sed -n 's/^juliasyntax_revision=//p' "$source_file")"
 if [[ -n "$revision" ]]; then
+	syntax_version="$(sed -n 's/^syntax_version=//p' "$source_file")"
+	export FATOU_ORACLE_SYNTAX_VERSION="${FATOU_ORACLE_SYNTAX_VERSION:-$syntax_version}"
 	exec bash "$script_dir/refresh-juliasyntax-oracle.sh" "$revision"
 fi
 

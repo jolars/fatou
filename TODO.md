@@ -35,7 +35,7 @@
 
 ### Oracle tooling
 
-- [ ] Migrate the committed Julia 1.13 / JuliaSyntax 1.0.2 oracle corpora to the
+- [x] Migrate the committed Julia 1.13 / JuliaSyntax 1.0.2 oracle corpora to the
   locked development Julia and matching JuliaSyntax 2.0. Keep the syntax
   version explicit, separate changed encodings (`macro_name`, module edition
   metadata, and operator representations) from grammar gaps, and preserve

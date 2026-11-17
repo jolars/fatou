@@ -20,8 +20,9 @@ Detail lives in `git log`, not here.
   on the rules + layout engine, never on the input's line breaks / whitespace /
   operator spelling / numeric form. Author `expected.jl` to the canonical
   fully-reflowed form.
-- **Reflow must protect macro argument scope.** Before an operator, fence an
-  operand whose tail is an undelimited macro. Decide from the parsed expression,
+- **Reflow must protect macro argument scope.** Before an operator or a
+  parenthesized generator's `for`, fence an operand whose tail is an
+  undelimited macro. Decide from the parsed expression,
   not a source newline: `(@m x\n - y)` and `((@m x) - y)` must format alike.
 - **Gate = file presence.** A fixture is gated iff it has `expected.jl`
   (`crates/fatou-formatter/tests/formatter.rs::formatter_fixtures_match_expected`).
@@ -159,56 +160,28 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (2026-11-16 — macro operator boundaries)
+## Latest session (2026-11-17 — macro generator and comma boundaries)
 
-`fix(formatter)`. After the parser correction, `(@m x\n - y)` lowers to
-`((@m x) - y)` so canonical reflow preserves macro scope. Operator lowerings
-protect undelimited macro tails, including nested unary and binary operands;
-attached calls and sole bracket arguments remain closed forms. Clean `where`,
-range, and annotation expressions reflow across newlines consistently.
-
-Regression tests compare implicit and explicit grouping at widths 24 and 80,
-reject the formerly unsafe flattening, and cover safe CLI output with LF and
-CRLF. The fixture gate remains 131 of 160. Two AST surface-shape entries use
-the existing `where T` → `where {T}` normalization policy; independent Julia
-expression checks confirm that normalization preserves the program. All 118
-formatting comparisons across 59 valid probes preserve expressions under Julia
-1.13.0 and locked Julia 1.15.0-DEV.783, and pass safe-format and idempotence
-checks. Formatter, stability, AST preservation, CLI, full workspace, clippy,
-rustfmt, and both parser and formatter Wasm gates pass.
-
-**Ranked next target:** no formatter target is currently queued in `TODO.md`.
-
-## Parser dependencies and follow-ups
-
-Everything else handed off has been resolved parser-side: the `<--`/`<-->` arrow
-family, the newline-broken braces comprehension, newline-after-comma, the
-compound-assign lexer, and whitespace-before-arglist (whose premise turned out
-stale). No other formatter-surfaced parser gap is outstanding.
-
-## Standing traps
-
-- Default **indent width is 4**; default **`line_width` is 92** (`style.rs`),
-  not the 80 in `printer.rs`'s own unit tests.
-- `print()` appends **no** trailing newline of its own — the document IR must
-  end with one (`lower_root` pushes a final `HardLine`).
-- The transparent path emits raw `\n` as `Ir::Text`; the printer resets `col`
-  after an embedded newline. Prefer `Ir::Line`/`SoftLine`/`HardLine` inside
-  groups.
-- `fits` is **continuation-aware**: it measures the group flat plus the trailing
-  stack up to the next taken break, so a group followed by a long tail breaks by
-  width — don't assume a group's own contents alone decide its mode. A break
-  **inside** the tested group forbids flat; the same in **trailing** content
-  just ends the measured line. Trailing nested groups are read in their carried
-  (Break) mode, so an earlier small group stays flat while a later one breaks.
-- **Grouped hug sites use the popped lowered item as hug body**, so any future
-  hug-through-`X` must move the `X`-prefix into the hug prefix at *all* sites,
-  not just `item_hug_parts`.
-- Clippy traps: `bool.then_some(x).unwrap_or_else(...)` trips
-  `obfuscated_if_else` (use a plain early return); `!(a && !b)` trips
-  `nonminimal_bool` (bind the condition first).
+- The expanded JuliaSyntax 2 corpus exposed `(@foo x\n for i in xs)` formatting
+  to `(@foo x for i in xs)`, which no longer parses. Parenthesized generator
+  bodies now reuse the existing macro operand fence, producing
+  `((@foo x) for i in xs)` from expression structure. Positional list items also
+  retain commas outside undelimited macros, including a singleton tuple's
+  semantic comma.
+- Regression tests compare implicit and explicit grouping for ordinary,
+  argumentless, and nested macros, CRLF, and attached vectors at widths 24/80.
+  They require program preservation, idempotence, and canonical agreement.
+  Tuple, vector, and call tests cover comma ownership. Three new corpus entries
+  join the existing `where`/numeric policy drift groups.
+- No fixture style decision changes. All formatter fixtures, program-preservation
+  checks over the enlarged parser corpora, workspace tests, clippy, rustfmt, and
+  both engine Wasm builds pass. The regression test fails before the fix.
 
 ## Earlier sessions
+
+- **2026-11-16** — macro operator boundaries: fence undelimited operand tails
+  before operators, with structure-driven canonicalization and 118 oracle
+  format/idempotence checks at widths 24/80.
 
 Newest first. One line each; the commit is the detail.
 

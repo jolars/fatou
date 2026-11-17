@@ -36,7 +36,7 @@ git -C "$source_dir" checkout --quiet --detach FETCH_HEAD
 export FATOU_ORACLE_REVISION
 FATOU_ORACLE_REVISION="$(git -C "$source_dir" rev-parse HEAD)"
 export FATOU_ORACLE_SYNTAX_VERSION
-FATOU_ORACLE_SYNTAX_VERSION="$(cat "$source_dir/VERSION")"
+FATOU_ORACLE_SYNTAX_VERSION="${FATOU_ORACLE_SYNTAX_VERSION:-$(cat "$source_dir/VERSION")}"
 export FATOU_ORACLE_BINARY_SOURCE
 FATOU_ORACLE_BINARY_SOURCE=archive
 if [[ -n "${FATOU_ORACLE_JULIA:-}" ]]; then
@@ -54,3 +54,4 @@ oracle_project="$source_dir/JuliaSyntax"
 # process also prevents precompile workers from bypassing the NixOS loader.
 "$oracle_bin_dir/julia" --startup-file=no --compiled-modules=no --project="$oracle_project" "$script_dir/update-juliasyntax-corpus.jl"
 "$oracle_bin_dir/julia" --startup-file=no --compiled-modules=no --project="$oracle_project" "$script_dir/harvest-juliasyntax-corpus.jl"
+"$oracle_bin_dir/julia" --startup-file=no --compiled-modules=no --project="$oracle_project" "$script_dir/generate-unicode-ops.jl"
