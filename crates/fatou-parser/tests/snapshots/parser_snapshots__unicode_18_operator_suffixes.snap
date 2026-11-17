@@ -1,0 +1,339 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..394
+  BINARY_EXPR@0..8
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    PLUS@2..6 "+ᵅ"
+    WHITESPACE@6..7 " "
+    NAME@7..8
+      IDENT@7..8 "b"
+  NEWLINE@8..9 "\n"
+  BINARY_EXPR@9..20
+    NAME@9..10
+      IDENT@9..10 "a"
+    WHITESPACE@10..11 " "
+    UNICODE_OP@11..18 ".⊗ᵅ"
+    WHITESPACE@18..19 " "
+    NAME@19..20
+      IDENT@19..20 "b"
+  NEWLINE@20..21 "\n"
+  BINARY_EXPR@21..29
+    NAME@21..22
+      IDENT@21..22 "a"
+    WHITESPACE@22..23 " "
+    PLUS@23..27 "+ᵋ"
+    WHITESPACE@27..28 " "
+    NAME@28..29
+      IDENT@28..29 "b"
+  NEWLINE@29..30 "\n"
+  BINARY_EXPR@30..41
+    NAME@30..31
+      IDENT@30..31 "a"
+    WHITESPACE@31..32 " "
+    UNICODE_OP@32..39 ".⊗ᵋ"
+    WHITESPACE@39..40 " "
+    NAME@40..41
+      IDENT@40..41 "b"
+  NEWLINE@41..42 "\n"
+  BINARY_EXPR@42..50
+    NAME@42..43
+      IDENT@42..43 "a"
+    WHITESPACE@43..44 " "
+    PLUS@44..48 "+ᶲ"
+    WHITESPACE@48..49 " "
+    NAME@49..50
+      IDENT@49..50 "b"
+  NEWLINE@50..51 "\n"
+  BINARY_EXPR@51..62
+    NAME@51..52
+      IDENT@51..52 "a"
+    WHITESPACE@52..53 " "
+    UNICODE_OP@53..60 ".⊗ᶲ"
+    WHITESPACE@60..61 " "
+    NAME@61..62
+      IDENT@61..62 "b"
+  NEWLINE@62..63 "\n"
+  BINARY_EXPR@63..70
+    NAME@63..64
+      IDENT@63..64 "a"
+    WHITESPACE@64..65 " "
+    PLUS@65..68 "+˱"
+    WHITESPACE@68..69 " "
+    NAME@69..70
+      IDENT@69..70 "b"
+  NEWLINE@70..71 "\n"
+  BINARY_EXPR@71..81
+    NAME@71..72
+      IDENT@71..72 "a"
+    WHITESPACE@72..73 " "
+    UNICODE_OP@73..79 ".⊗˱"
+    WHITESPACE@79..80 " "
+    NAME@80..81
+      IDENT@80..81 "b"
+  NEWLINE@81..82 "\n"
+  BINARY_EXPR@82..89
+    NAME@82..83
+      IDENT@82..83 "a"
+    WHITESPACE@83..84 " "
+    PLUS@84..87 "+˲"
+    WHITESPACE@87..88 " "
+    NAME@88..89
+      IDENT@88..89 "b"
+  NEWLINE@89..90 "\n"
+  BINARY_EXPR@90..100
+    NAME@90..91
+      IDENT@90..91 "a"
+    WHITESPACE@91..92 " "
+    UNICODE_OP@92..98 ".⊗˲"
+    WHITESPACE@98..99 " "
+    NAME@99..100
+      IDENT@99..100 "b"
+  NEWLINE@100..101 "\n"
+  BINARY_EXPR@101..109
+    NAME@101..102
+      IDENT@101..102 "a"
+    WHITESPACE@102..103 " "
+    PLUS@103..107 "+ₔ"
+    WHITESPACE@107..108 " "
+    NAME@108..109
+      IDENT@108..109 "b"
+  NEWLINE@109..110 "\n"
+  BINARY_EXPR@110..121
+    NAME@110..111
+      IDENT@110..111 "a"
+    WHITESPACE@111..112 " "
+    UNICODE_OP@112..119 ".⊗ₔ"
+    WHITESPACE@119..120 " "
+    NAME@120..121
+      IDENT@120..121 "b"
+  NEWLINE@121..122 "\n"
+  BINARY_EXPR@122..130
+    NAME@122..123
+      IDENT@122..123 "a"
+    WHITESPACE@123..124 " "
+    PLUS@124..128 "+\u{209d}"
+    WHITESPACE@128..129 " "
+    NAME@129..130
+      IDENT@129..130 "b"
+  NEWLINE@130..131 "\n"
+  BINARY_EXPR@131..142
+    NAME@131..132
+      IDENT@131..132 "a"
+    WHITESPACE@132..133 " "
+    UNICODE_OP@133..140 ".⊗\u{209d}"
+    WHITESPACE@140..141 " "
+    NAME@141..142
+      IDENT@141..142 "b"
+  NEWLINE@142..143 "\n"
+  BINARY_EXPR@143..151
+    NAME@143..144
+      IDENT@143..144 "a"
+    WHITESPACE@144..145 " "
+    PLUS@145..149 "+\u{209e}"
+    WHITESPACE@149..150 " "
+    NAME@150..151
+      IDENT@150..151 "b"
+  NEWLINE@151..152 "\n"
+  BINARY_EXPR@152..163
+    NAME@152..153
+      IDENT@152..153 "a"
+    WHITESPACE@153..154 " "
+    UNICODE_OP@154..161 ".⊗\u{209e}"
+    WHITESPACE@161..162 " "
+    NAME@162..163
+      IDENT@162..163 "b"
+  NEWLINE@163..164 "\n"
+  BINARY_EXPR@164..172
+    NAME@164..165
+      IDENT@164..165 "a"
+    WHITESPACE@165..166 " "
+    PLUS@166..170 "+\u{209f}"
+    WHITESPACE@170..171 " "
+    NAME@171..172
+      IDENT@171..172 "b"
+  NEWLINE@172..173 "\n"
+  BINARY_EXPR@173..184
+    NAME@173..174
+      IDENT@173..174 "a"
+    WHITESPACE@174..175 " "
+    UNICODE_OP@175..182 ".⊗\u{209f}"
+    WHITESPACE@182..183 " "
+    NAME@183..184
+      IDENT@183..184 "b"
+  NEWLINE@184..185 "\n"
+  BINARY_EXPR@185..194
+    NAME@185..186
+      IDENT@185..186 "a"
+    WHITESPACE@186..187 " "
+    PLUS@187..192 "+\u{1dfd0}"
+    WHITESPACE@192..193 " "
+    NAME@193..194
+      IDENT@193..194 "b"
+  NEWLINE@194..195 "\n"
+  BINARY_EXPR@195..207
+    NAME@195..196
+      IDENT@195..196 "a"
+    WHITESPACE@196..197 " "
+    UNICODE_OP@197..205 ".⊗\u{1dfd0}"
+    WHITESPACE@205..206 " "
+    NAME@206..207
+      IDENT@206..207 "b"
+  NEWLINE@207..208 "\n"
+  BINARY_EXPR@208..214
+    NAME@208..209
+      IDENT@208..209 "a"
+    PLUS@209..213 "+\u{209d}"
+    NAME@213..214
+      IDENT@213..214 "b"
+  NEWLINE@214..215 "\n"
+  BINARY_EXPR@215..236
+    NAME@215..216
+      IDENT@215..216 "a"
+    WHITESPACE@216..217 " "
+    PLUS@217..234 "+ᵅᵋᶲ˱˲ₔ"
+    WHITESPACE@234..235 " "
+    NAME@235..236
+      IDENT@235..236 "b"
+  NEWLINE@236..237 "\n"
+  BINARY_EXPR@237..256
+    NAME@237..238
+      IDENT@237..238 "a"
+    WHITESPACE@238..239 " "
+    DOT_PLUS@239..254 ".+\u{209d}\u{209e}\u{209f}\u{1dfd0}"
+    WHITESPACE@254..255 " "
+    NAME@255..256
+      IDENT@255..256 "b"
+  NEWLINE@256..257 "\n"
+  BINARY_EXPR@257..267
+    NAME@257..258
+      IDENT@257..258 "a"
+    WHITESPACE@258..259 " "
+    LONG_ARROW@259..265 "-->\u{209d}"
+    WHITESPACE@265..266 " "
+    NAME@266..267
+      IDENT@266..267 "b"
+  NEWLINE@267..268 "\n"
+  BINARY_EXPR@268..279
+    NAME@268..269
+      IDENT@268..269 "a"
+    WHITESPACE@269..270 " "
+    UNICODE_OP@270..277 "≈\u{1dfd0}"
+    WHITESPACE@277..278 " "
+    NAME@278..279
+      IDENT@278..279 "b"
+  NEWLINE@279..280 "\n"
+  POSTFIX_EXPR@280..286
+    NAME@280..281
+      IDENT@280..281 "a"
+    TRANSPOSE@281..286 "'\u{1dfd0}"
+  NEWLINE@286..287 "\n"
+  CALL_EXPR@287..294
+    MINUS@287..291 "-ᵅ"
+    ARG_LIST@291..294
+      LPAREN@291..292 "("
+      ARG@292..293
+        NAME@292..293
+          IDENT@292..293 "a"
+      RPAREN@293..294 ")"
+  NEWLINE@294..295 "\n"
+  CALL_EXPR@295..307
+    PAREN_EXPR@295..301
+      LPAREN@295..296 "("
+      PLUS@296..300 "+ᵋ"
+      RPAREN@300..301 ")"
+    ARG_LIST@301..307
+      LPAREN@301..302 "("
+      ARG@302..303
+        NAME@302..303
+          IDENT@302..303 "a"
+      COMMA@303..304 ","
+      WHITESPACE@304..305 " "
+      ARG@305..306
+        NAME@305..306
+          IDENT@305..306 "b"
+      RPAREN@306..307 ")"
+  NEWLINE@307..308 "\n"
+  QUOTE_SYM@308..315
+    COLON@308..309 ":"
+    UNICODE_OP@309..315 "⊗ᶲ"
+  NEWLINE@315..316 "\n"
+  QUOTE_SYM@316..323
+    COLON@316..317 ":"
+    PAREN_EXPR@317..323
+      LPAREN@317..318 "("
+      OPERATOR_ATOM@318..322
+        PLUS@318..322 "+ₔ"
+      RPAREN@322..323 ")"
+  NEWLINE@323..324 "\n"
+  CALL_EXPR@324..337
+    PAREN_EXPR@324..331
+      LPAREN@324..325 "("
+      OPERATOR_ATOM@325..330
+        DOT_PLUS@325..330 ".+\u{209e}"
+      RPAREN@330..331 ")"
+    ARG_LIST@331..337
+      LPAREN@331..332 "("
+      ARG@332..333
+        NAME@332..333
+          IDENT@332..333 "a"
+      COMMA@333..334 ","
+      WHITESPACE@334..335 " "
+      ARG@335..336
+        NAME@335..336
+          IDENT@335..336 "b"
+      RPAREN@336..337 ")"
+  NEWLINE@337..338 "\n"
+  FUNCTION_DEF@338..367
+    FUNCTION_KW@338..346 "function"
+    WHITESPACE@346..347 " "
+    SIGNATURE@347..357
+      CALL_EXPR@347..357
+        PLUS@347..351 "+\u{209f}"
+        ARG_LIST@351..357
+          LPAREN@351..352 "("
+          ARG@352..353
+            NAME@352..353
+              IDENT@352..353 "a"
+          COMMA@353..354 ","
+          WHITESPACE@354..355 " "
+          ARG@355..356
+            NAME@355..356
+              IDENT@355..356 "b"
+          RPAREN@356..357 ")"
+    BLOCK@357..364
+      NEWLINE@357..358 "\n"
+      WHITESPACE@358..362 "    "
+      NAME@362..363
+        IDENT@362..363 "a"
+      NEWLINE@363..364 "\n"
+    END_KW@364..367 "end"
+  NEWLINE@367..368 "\n"
+  CALL_EXPR@368..393
+    NAME@368..369
+      IDENT@368..369 "f"
+    ARG_LIST@369..393
+      LPAREN@369..370 "("
+      ARG@370..373
+        NAME@370..373
+          IDENT@370..373 "\u{209d}"
+      COMMA@373..374 ","
+      WHITESPACE@374..375 " "
+      ARG@375..379
+        NAME@375..379
+          IDENT@375..379 "x\u{209d}"
+      COMMA@379..380 ","
+      WHITESPACE@380..381 " "
+      ARG@381..385
+        NAME@381..385
+          IDENT@381..385 "\u{1dfd0}"
+      COMMA@385..386 ","
+      WHITESPACE@386..387 " "
+      ARG@387..392
+        NAME@387..392
+          IDENT@387..392 "x\u{1dfd0}"
+      RPAREN@392..393 ")"
+  NEWLINE@393..394 "\n"

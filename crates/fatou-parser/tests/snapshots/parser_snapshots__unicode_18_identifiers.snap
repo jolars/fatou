@@ -1,0 +1,278 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..532
+  ASSIGNMENT_EXPR@0..7
+    NAME@0..3
+      IDENT@0..3 "\u{209d}"
+    WHITESPACE@3..4 " "
+    EQ@4..5 "="
+    WHITESPACE@5..6 " "
+    LITERAL@6..7
+      INTEGER@6..7 "1"
+  NEWLINE@7..8 "\n"
+  ASSIGNMENT_EXPR@8..17
+    NAME@8..11
+      IDENT@8..11 "\u{209e}"
+    WHITESPACE@11..12 " "
+    EQ@12..13 "="
+    WHITESPACE@13..14 " "
+    NAME@14..17
+      IDENT@14..17 "\u{209d}"
+  NEWLINE@17..18 "\n"
+  ASSIGNMENT_EXPR@18..27
+    NAME@18..21
+      IDENT@18..21 "\u{209f}"
+    WHITESPACE@21..22 " "
+    EQ@22..23 "="
+    WHITESPACE@23..24 " "
+    NAME@24..27
+      IDENT@24..27 "\u{209e}"
+  NEWLINE@27..28 "\n"
+  ASSIGNMENT_EXPR@28..39
+    CALL_EXPR@28..35
+      NAME@28..32
+        IDENT@28..32 "\u{1dfd0}"
+      ARG_LIST@32..35
+        LPAREN@32..33 "("
+        ARG@33..34
+          NAME@33..34
+            IDENT@33..34 "x"
+        RPAREN@34..35 ")"
+    WHITESPACE@35..36 " "
+    EQ@36..37 "="
+    WHITESPACE@37..38 " "
+    NAME@38..39
+      IDENT@38..39 "x"
+  NEWLINE@39..40 "\n"
+  CALL_EXPR@40..51
+    NAME@40..41
+      IDENT@40..41 "f"
+    ARG_LIST@41..51
+      LPAREN@41..42 "("
+      ARG@42..44
+        NAME@42..44
+          IDENT@42..44 "\u{558}"
+      COMMA@44..45 ","
+      WHITESPACE@45..46 " "
+      ARG@46..50
+        NAME@46..50
+          IDENT@46..50 "x\u{558}!"
+      RPAREN@50..51 ")"
+  WHITESPACE@51..52 " "
+  COMMENT@52..60 "# U+0558"
+  NEWLINE@60..61 "\n"
+  CALL_EXPR@61..74
+    NAME@61..62
+      IDENT@61..62 "f"
+    ARG_LIST@62..74
+      LPAREN@62..63 "("
+      ARG@63..66
+        NAME@63..66
+          IDENT@63..66 "\u{a7dd}"
+      COMMA@66..67 ","
+      WHITESPACE@67..68 " "
+      ARG@68..73
+        NAME@68..73
+          IDENT@68..73 "x\u{a7dd}!"
+      RPAREN@73..74 ")"
+  WHITESPACE@74..75 " "
+  COMMENT@75..83 "# U+A7DD"
+  NEWLINE@83..84 "\n"
+  CALL_EXPR@84..99
+    NAME@84..85
+      IDENT@84..85 "f"
+    ARG_LIST@85..99
+      LPAREN@85..86 "("
+      ARG@86..90
+        NAME@86..90
+          IDENT@86..90 "\u{107bb}"
+      COMMA@90..91 ","
+      WHITESPACE@91..92 " "
+      ARG@92..98
+        NAME@92..98
+          IDENT@92..98 "x\u{107bb}!"
+      RPAREN@98..99 ")"
+  WHITESPACE@99..100 " "
+  COMMENT@100..109 "# U+107BB"
+  NEWLINE@109..110 "\n"
+  CALL_EXPR@110..125
+    NAME@110..111
+      IDENT@110..111 "f"
+    ARG_LIST@111..125
+      LPAREN@111..112 "("
+      ARG@112..116
+        NAME@112..116
+          IDENT@112..116 "\u{10ed9}"
+      COMMA@116..117 ","
+      WHITESPACE@117..118 " "
+      ARG@118..124
+        NAME@118..124
+          IDENT@118..124 "x\u{10ed9}!"
+      RPAREN@124..125 ")"
+  WHITESPACE@125..126 " "
+  COMMENT@126..135 "# U+10ED9"
+  NEWLINE@135..136 "\n"
+  CALL_EXPR@136..151
+    NAME@136..137
+      IDENT@136..137 "f"
+    ARG_LIST@137..151
+      LPAREN@137..138 "("
+      ARG@138..142
+        NAME@138..142
+          IDENT@138..142 "\u{12550}"
+      COMMA@142..143 ","
+      WHITESPACE@143..144 " "
+      ARG@144..150
+        NAME@144..150
+          IDENT@144..150 "x\u{12550}!"
+      RPAREN@150..151 ")"
+  WHITESPACE@151..152 " "
+  COMMENT@152..161 "# U+12550"
+  NEWLINE@161..162 "\n"
+  CALL_EXPR@162..177
+    NAME@162..163
+      IDENT@162..163 "f"
+    ARG_LIST@163..177
+      LPAREN@163..164 "("
+      ARG@164..168
+        NAME@164..168
+          IDENT@164..168 "\u{18e00}"
+      COMMA@168..169 ","
+      WHITESPACE@169..170 " "
+      ARG@170..176
+        NAME@170..176
+          IDENT@170..176 "x\u{18e00}!"
+      RPAREN@176..177 ")"
+  WHITESPACE@177..178 " "
+  COMMENT@178..187 "# U+18E00"
+  NEWLINE@187..188 "\n"
+  CALL_EXPR@188..203
+    NAME@188..189
+      IDENT@188..189 "f"
+    ARG_LIST@189..203
+      LPAREN@189..190 "("
+      ARG@190..194
+        NAME@190..194
+          IDENT@190..194 "\u{1dfd0}"
+      COMMA@194..195 ","
+      WHITESPACE@195..196 " "
+      ARG@196..202
+        NAME@196..202
+          IDENT@196..202 "x\u{1dfd0}!"
+      RPAREN@202..203 ")"
+  WHITESPACE@203..204 " "
+  COMMENT@204..213 "# U+1DFD0"
+  NEWLINE@213..214 "\n"
+  CALL_EXPR@214..229
+    NAME@214..215
+      IDENT@214..215 "f"
+    ARG_LIST@215..229
+      LPAREN@215..216 "("
+      ARG@216..220
+        NAME@216..220
+          IDENT@216..220 "\u{3d000}"
+      COMMA@220..221 ","
+      WHITESPACE@221..222 " "
+      ARG@222..228
+        NAME@222..228
+          IDENT@222..228 "x\u{3d000}!"
+      RPAREN@228..229 ")"
+  WHITESPACE@229..230 " "
+  COMMENT@230..239 "# U+3D000"
+  NEWLINE@239..240 "\n"
+  CALL_EXPR@240..255
+    NAME@240..241
+      IDENT@240..241 "f"
+    ARG_LIST@241..255
+      LPAREN@241..242 "("
+      ARG@242..246
+        NAME@242..246
+          IDENT@242..246 "\u{3fc3f}"
+      COMMA@246..247 ","
+      WHITESPACE@247..248 " "
+      ARG@248..254
+        NAME@248..254
+          IDENT@248..254 "x\u{3fc3f}!"
+      RPAREN@254..255 ")"
+  WHITESPACE@255..256 " "
+  COMMENT@256..265 "# U+3FC3F"
+  NEWLINE@265..266 "\n"
+  ASSIGNMENT_EXPR@266..273
+    NAME@266..269
+      IDENT@266..269 "x\u{5c8}"
+    WHITESPACE@269..270 " "
+    EQ@270..271 "="
+    WHITESPACE@271..272 " "
+    LITERAL@272..273
+      INTEGER@272..273 "1"
+  WHITESPACE@273..274 " "
+  COMMENT@274..301 "# U+05C8, continuatio ..."
+  NEWLINE@301..302 "\n"
+  ASSIGNMENT_EXPR@302..310
+    NAME@302..306
+      IDENT@302..306 "x\u{b53}"
+    WHITESPACE@306..307 " "
+    EQ@307..308 "="
+    WHITESPACE@308..309 " "
+    LITERAL@309..310
+      INTEGER@309..310 "1"
+  WHITESPACE@310..311 " "
+  COMMENT@311..338 "# U+0B53, continuatio ..."
+  NEWLINE@338..339 "\n"
+  ASSIGNMENT_EXPR@339..347
+    NAME@339..343
+      IDENT@339..343 "x\u{1ade}"
+    WHITESPACE@343..344 " "
+    EQ@344..345 "="
+    WHITESPACE@345..346 " "
+    LITERAL@346..347
+      INTEGER@346..347 "1"
+  WHITESPACE@347..348 " "
+  COMMENT@348..375 "# U+1ADE, continuatio ..."
+  NEWLINE@375..376 "\n"
+  ASSIGNMENT_EXPR@376..385
+    NAME@376..381
+      IDENT@376..381 "x\u{10ec9}"
+    WHITESPACE@381..382 " "
+    EQ@382..383 "="
+    WHITESPACE@383..384 " "
+    LITERAL@384..385
+      INTEGER@384..385 "1"
+  WHITESPACE@385..386 " "
+  COMMENT@386..414 "# U+10EC9, continuati ..."
+  NEWLINE@414..415 "\n"
+  ASSIGNMENT_EXPR@415..424
+    NAME@415..420
+      IDENT@415..420 "x\u{11df0}"
+    WHITESPACE@420..421 " "
+    EQ@421..422 "="
+    WHITESPACE@422..423 " "
+    LITERAL@423..424
+      INTEGER@423..424 "1"
+  WHITESPACE@424..425 " "
+  COMMENT@425..453 "# U+11DF0, continuati ..."
+  NEWLINE@453..454 "\n"
+  ASSIGNMENT_EXPR@454..463
+    NAME@454..459
+      IDENT@454..459 "x\u{1d127}"
+    WHITESPACE@459..460 " "
+    EQ@460..461 "="
+    WHITESPACE@461..462 " "
+    LITERAL@462..463
+      INTEGER@462..463 "1"
+  WHITESPACE@463..464 " "
+  COMMENT@464..492 "# U+1D127, continuati ..."
+  NEWLINE@492..493 "\n"
+  ASSIGNMENT_EXPR@493..502
+    NAME@493..498
+      IDENT@493..498 "x\u{1d250}"
+    WHITESPACE@498..499 " "
+    EQ@499..500 "="
+    WHITESPACE@500..501 " "
+    LITERAL@501..502
+      INTEGER@501..502 "1"
+  WHITESPACE@502..503 " "
+  COMMENT@503..531 "# U+1D250, continuati ..."
+  NEWLINE@531..532 "\n"

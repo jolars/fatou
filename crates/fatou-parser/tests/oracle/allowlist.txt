@@ -256,6 +256,8 @@ typed_concat
 unary_operator_call
 unclosed_delimiter
 unicode_17_identifiers
+unicode_18_identifiers
+unicode_18_operator_suffixes
 unicode_assignment_value
 unicode_identifiers
 unicode_identifiers_nfc

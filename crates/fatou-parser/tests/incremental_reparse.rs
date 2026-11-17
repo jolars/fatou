@@ -225,9 +225,57 @@ const HAZARD_SNIPPETS: &[&str] = &[
     include_str!("fixtures/parser/parenthesized_multiline_macro/input.jl"),
     include_str!("fixtures/parser/macro_newline_boundaries/input.jl"),
     include_str!("fixtures/parser/return_context/input.jl"),
+    include_str!("fixtures/parser/unicode_18_identifiers/input.jl"),
+    include_str!("fixtures/parser/unicode_18_operator_suffixes/input.jl"),
     "(x, @m a\n b)\n",
     "\"$(@m a\n b)\"\n",
 ];
+
+#[test]
+fn unicode_18_edits_preserve_token_boundaries() {
+    for (source, before, after) in [
+        ("x = 1", "x", "\u{3d000}"),
+        ("x₝ = 1", "₝", "𝿐"),
+        ("x𝿐 = 1", "𝿐", ""),
+        ("x = 1", "x", "x\u{5c8}"),
+        ("x\u{5c8} = 1", "x", ""),
+        ("x+y", "+", "+ᵅ"),
+        ("x+₝y", "₝", "𝿐"),
+        ("x.+y", ".+", ".+₞"),
+        ("x.⊗₟y", "₟", ""),
+        ("x'ᶲ", "ᶲ", "ₔ"),
+        ("x+₝y", "+₝", "₝"),
+        ("x₝y", "₝", "+₝"),
+    ] {
+        for newline in ["\n", "\r\n"] {
+            let input = format!("function f(x)\n    before()\n    {source}\n    after()\nend\n")
+                .replace('\n', newline);
+            let old = parse(&input);
+            assert!(old.diagnostics.is_empty(), "{:?}", old.diagnostics);
+            let start = input.find(source).unwrap() + source.find(before).unwrap();
+            let edit = Edit {
+                range: start..start + before.len(),
+                insert: after.to_string(),
+            };
+            let edited = edit.apply(&input);
+            let full = parse(&edited);
+            let reparsed = reparse(
+                &input,
+                &old.cst.green().to_owned(),
+                &old.diagnostics,
+                &edit,
+                &edited,
+            )
+            .expect("an interior Unicode edit should reparse");
+            assert_eq!(
+                fingerprint(&SyntaxNode::new_root(reparsed.green)),
+                fingerprint(&full.cst),
+                "{edit:?} on {input:?}",
+            );
+            assert_eq!(reparsed.diagnostics, full.diagnostics);
+        }
+    }
+}
 
 #[test]
 fn return_edits_preserve_index_and_ternary_context() {

@@ -1047,9 +1047,8 @@ pub fn is_ident_continue(c: char) -> bool {
 /// The explicit operator-suffix characters Julia allows after an operator
 /// (subscripts, superscripts, and primes), mirroring JuliaSyntax's `isopsuffix`
 /// "additional allowed cases" set. The combining-mark categories (Mn/Mc/Me) that
-/// `isopsuffix` also accepts are not handled here (a pragmatic subset, like
-/// [`is_unicode_ident`]); these cover every realistic operator suffix.
-const OP_SUFFIX_CHARS: &str = "²³¹ʰʲʳʷʸˡˢˣᴬᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᴿᵀᵁᵂᵃᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶥᶦᶫᶰᶸᶻᶿ′″‴‵‶‷⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜⱼⱽꜛꜜꜝ";
+/// `isopsuffix` also accepts are not handled here.
+const OP_SUFFIX_CHARS: &str = "²³¹ʰʲʳʷʸˡˢˣ˱˲ᴬᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᴿᵀᵁᵂᵃᵅᵇᵈᵉᵋᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶥᶦᶫᶰᶲᶸᶻᶿ′″‴‵‶‷⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₔₕₖₗₘₙₚₛₜ₝₞₟ⱼⱽꜛꜜꜝ𝿐";
 
 /// Whether `c` can extend an operator token as a sub/superscript or prime suffix
 /// (`+₁`, `-->₁`, `f'ᵀ`). See [`OP_SUFFIX_CHARS`].
@@ -1440,6 +1439,79 @@ mod tests {
         assert_eq!(kinds("x\u{11b60}"), vec![TokKind::Ident]);
         assert_eq!(kinds("\u{11b60}"), vec![TokKind::ErrorIdentifierStart]);
         assert!(roundtrips("\u{88f} = \u{11db0} + x\u{11b60}"));
+    }
+
+    #[test]
+    fn unicode_18_identifier_chars() {
+        for c in [
+            '\u{558}',
+            '\u{209d}',
+            '\u{209e}',
+            '\u{209f}',
+            '\u{a7dd}',
+            '\u{107bb}',
+            '\u{10ed9}',
+            '\u{12550}',
+            '\u{18e00}',
+            '\u{1dfd0}',
+            '\u{3d000}',
+            '\u{3fc3f}',
+        ] {
+            for input in [c.to_string(), format!("x{c}!")] {
+                assert_eq!(kinds(&input), vec![TokKind::Ident], "{input:?}");
+                assert!(roundtrips(&input));
+            }
+        }
+        for c in [
+            '\u{5c8}',
+            '\u{b53}',
+            '\u{1ade}',
+            '\u{10ec9}',
+            '\u{11df0}',
+            '\u{1d127}',
+            '\u{1d250}',
+        ] {
+            assert_eq!(kinds(&format!("x{c}")), vec![TokKind::Ident], "{c:?}");
+            assert_eq!(
+                kinds(&c.to_string()),
+                vec![TokKind::ErrorIdentifierStart],
+                "{c:?}"
+            );
+            assert!(roundtrips(&format!("{c} x{c}")));
+        }
+        for c in ['\u{3cfff}', '\u{3fc40}'] {
+            assert_eq!(kinds(&c.to_string()), vec![TokKind::Unknown], "{c:?}");
+        }
+    }
+
+    #[test]
+    fn unicode_18_operator_suffixes() {
+        for suffix in "ᵅᵋᶲ˱˲ₔ₝₞₟\u{1dfd0}".chars() {
+            for (op, kind) in [
+                ("+", TokKind::Plus),
+                (".+", TokKind::DotPlus),
+                ("⊗", TokKind::UniTimes),
+                (".⊗", TokKind::UniTimes),
+                ("-->", TokKind::LongArrow),
+                ("'", TokKind::Transpose),
+            ] {
+                let operator = format!("{op}{suffix}");
+                let input = format!("a{operator}b");
+                let tokens = lex(&input);
+                assert_eq!(tokens.len(), 3, "{input:?}: {tokens:?}");
+                assert_eq!(tokens[1].kind, kind, "{input:?}");
+                assert_eq!(tokens[1].text, operator, "{input:?}");
+                assert_eq!(tokens[1].start, 1);
+                assert_eq!(tokens[1].end, 1 + operator.len());
+                assert_eq!(tokens[2].text, "b");
+                assert!(roundtrips(&input));
+            }
+            for op in ["=", ":", "::", "&&", "||", "->", "<:", "!", "~", "+="] {
+                let input = format!("{op}{suffix}");
+                assert_eq!(lex(&input)[0].text, op, "{input:?}");
+                assert!(roundtrips(&input));
+            }
+        }
     }
 
     #[test]

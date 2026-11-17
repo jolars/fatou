@@ -71,6 +71,33 @@ fn return_operands_keep_index_and_ternary_context() {
 }
 
 #[test]
+fn unicode_18_fixtures_match_the_oracle() {
+    use fatou_parser::parser::{normalize_sexpr, to_juliasyntax_sexpr};
+
+    for (input, expected) in [
+        (
+            include_str!("fixtures/parser/unicode_18_identifiers/input.jl"),
+            include_str!("fixtures/oracle/unicode_18_identifiers/expected.sexpr"),
+        ),
+        (
+            include_str!("fixtures/parser/unicode_18_operator_suffixes/input.jl"),
+            include_str!("fixtures/oracle/unicode_18_operator_suffixes/expected.sexpr"),
+        ),
+    ] {
+        for newline in ["\n", "\r\n"] {
+            let input = input.replace('\n', newline);
+            let output = parse(&input);
+            assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+            assert_eq!(reconstruct(&input), input);
+            assert_eq!(
+                normalize_sexpr(&to_juliasyntax_sexpr(&output.cst, &output.diagnostics)),
+                normalize_sexpr(expected),
+            );
+        }
+    }
+}
+
+#[test]
 fn return_context_keeps_newline_and_declaration_boundaries() {
     for input in [
         "[return end]",
