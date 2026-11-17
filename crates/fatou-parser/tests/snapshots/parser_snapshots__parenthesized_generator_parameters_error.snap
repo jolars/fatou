@@ -27,4 +27,4 @@ ROOT@0..18
     RPAREN@16..17 ")"
   NEWLINE@17..18 "\n"
 
-diagnostic [13..14]: generator parameters require a call or curly expression
+diagnostic [13..14]: expected a closing delimiter or separator

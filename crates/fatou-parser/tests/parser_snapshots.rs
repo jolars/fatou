@@ -170,6 +170,63 @@ fn macro_newline_operator_fixture_parses_cleanly() {
 }
 
 #[test]
+fn parenthesized_multiline_macro_arguments_parse_cleanly() {
+    let input = include_str!("fixtures/parser/parenthesized_multiline_macro/input.jl");
+    for input in [input.to_owned(), input.replace('\n', "\r\n")] {
+        let output = parse(&input);
+        assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+        assert_eq!(reconstruct(&input), input);
+    }
+}
+
+#[test]
+fn multiline_macro_arguments_belong_to_the_immediate_parenthesized_call() {
+    use fatou_parser::parser::to_juliasyntax_sexpr;
+
+    for gap in ["\n", "\r\n", " # comment\n", "\n # comment\n", "\n\n"] {
+        for (source, expected) in [
+            ("(@m a{gap} b)", "(macrocall (macro_name m) a b)"),
+            ("(A.@m a{gap} b)", "(macrocall (. A (macro_name m)) a b)"),
+            (
+                "(@m @n a{gap} b)",
+                "(macrocall (macro_name m) (macrocall (macro_name n) a) b)",
+            ),
+            (
+                "(@m (@n a{gap} b){gap} c)",
+                "(macrocall (macro_name m) (macrocall (macro_name n) a b) c)",
+            ),
+            (
+                "(@m a{gap} b, c)",
+                "(macrocall (macro_name m) a (tuple b c))",
+            ),
+            (
+                "(@m a{gap} b, c; d)",
+                "(block-p (macrocall (macro_name m) a (tuple b c)) d)",
+            ),
+            ("(@m a{gap}, b)", "(tuple-p (macrocall (macro_name m) a) b)"),
+            (
+                "(@m a{gap} for i in xs)",
+                "(generator (macrocall (macro_name m) a) (iteration (in i xs)))",
+            ),
+        ] {
+            let input = source.replace("{gap}", gap);
+            let output = parse(&input);
+            assert!(
+                output.diagnostics.is_empty(),
+                "{input:?}: {:?}",
+                output.diagnostics
+            );
+            assert_eq!(
+                to_juliasyntax_sexpr(&output.cst, &output.diagnostics),
+                format!("(toplevel {expected})"),
+                "{input:?}",
+            );
+            assert_eq!(reconstruct(&input), input);
+        }
+    }
+}
+
+#[test]
 fn declarations_continue_after_newlines() {
     let input = include_str!("fixtures/parser/declaration_newline_continuation/input.jl");
     assert!(parse(input).diagnostics.is_empty());

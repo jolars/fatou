@@ -2116,6 +2116,9 @@ fn run_block_inner(
         match tokens.get(i).map(|t| t.kind) {
             None => break,
             Some(k) if terminators.contains(&k) => break,
+            // A foreign bracket closer belongs to the enclosing expression.
+            // Leave it there so `expect_end` diagnoses only the missing `end`.
+            Some(k) if is_close_delimiter_tok(k) => break,
             // A statement glued to the previous one with no `;`/newline between
             // is trailing junk: JuliaSyntax (`parse_Nary`) ends the block here and
             // leaves the remainder for the closing recovery (`expect_end`), which

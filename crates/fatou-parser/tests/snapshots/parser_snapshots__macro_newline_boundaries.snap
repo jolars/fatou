@@ -1,0 +1,244 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..179
+  PAREN_EXPR@0..16
+    LPAREN@0..1 "("
+    ASSIGNMENT_EXPR@1..9
+      NAME@1..2
+        IDENT@1..2 "x"
+      WHITESPACE@2..3 " "
+      EQ@3..4 "="
+      WHITESPACE@4..5 " "
+      MACRO_CALL@5..9
+        MACRO_NAME@5..7
+          AT@5..6 "@"
+          IDENT@6..7 "m"
+        WHITESPACE@7..8 " "
+        NAME@8..9
+          IDENT@8..9 "a"
+    NEWLINE@9..10 "\n"
+    WHITESPACE@10..14 "    "
+    ERROR@14..15
+      IDENT@14..15 "b"
+    RPAREN@15..16 ")"
+  NEWLINE@16..17 "\n"
+  TUPLE_EXPR@17..32
+    LPAREN@17..18 "("
+    ARG@18..19
+      NAME@18..19
+        IDENT@18..19 "x"
+    COMMA@19..20 ","
+    WHITESPACE@20..21 " "
+    ARG@21..25
+      MACRO_CALL@21..25
+        MACRO_NAME@21..23
+          AT@21..22 "@"
+          IDENT@22..23 "m"
+        WHITESPACE@23..24 " "
+        NAME@24..25
+          IDENT@24..25 "a"
+    NEWLINE@25..26 "\n"
+    WHITESPACE@26..30 "    "
+    ERROR@30..31
+      IDENT@30..31 "b"
+    RPAREN@31..32 ")"
+  NEWLINE@32..33 "\n"
+  TUPLE_EXPR@33..47
+    LPAREN@33..34 "("
+    PARAMETERS@34..45
+      SEMICOLON@34..35 ";"
+      WHITESPACE@35..36 " "
+      ARG@36..40
+        MACRO_CALL@36..40
+          MACRO_NAME@36..38
+            AT@36..37 "@"
+            IDENT@37..38 "m"
+          WHITESPACE@38..39 " "
+          NAME@39..40
+            IDENT@39..40 "a"
+      NEWLINE@40..41 "\n"
+      WHITESPACE@41..45 "    "
+    ERROR@45..46
+      IDENT@45..46 "b"
+    RPAREN@46..47 ")"
+  NEWLINE@47..48 "\n"
+  PAREN_BLOCK@48..63
+    LPAREN@48..49 "("
+    ARG@49..50
+      NAME@49..50
+        IDENT@49..50 "x"
+    PARAMETERS@50..61
+      SEMICOLON@50..51 ";"
+      WHITESPACE@51..52 " "
+      ARG@52..56
+        MACRO_CALL@52..56
+          MACRO_NAME@52..54
+            AT@52..53 "@"
+            IDENT@53..54 "m"
+          WHITESPACE@54..55 " "
+          NAME@55..56
+            IDENT@55..56 "a"
+      NEWLINE@56..57 "\n"
+      WHITESPACE@57..61 "    "
+    ERROR@61..62
+      IDENT@61..62 "b"
+    RPAREN@62..63 ")"
+  NEWLINE@63..64 "\n"
+  PAREN_EXPR@64..84
+    LPAREN@64..65 "("
+    MACRO_CALL@65..83
+      MACRO_NAME@65..67
+        AT@65..66 "@"
+        IDENT@66..67 "m"
+      WHITESPACE@67..68 " "
+      TUPLE_EXPR@68..83
+        LPAREN@68..69 "("
+        ARG@69..70
+          NAME@69..70
+            IDENT@69..70 "x"
+        COMMA@70..71 ","
+        WHITESPACE@71..72 " "
+        ARG@72..76
+          MACRO_CALL@72..76
+            MACRO_NAME@72..74
+              AT@72..73 "@"
+              IDENT@73..74 "n"
+            WHITESPACE@74..75 " "
+            NAME@75..76
+              IDENT@75..76 "a"
+        NEWLINE@76..77 "\n"
+        WHITESPACE@77..81 "    "
+        ERROR@81..82
+          IDENT@81..82 "b"
+        RPAREN@82..83 ")"
+    RPAREN@83..84 ")"
+  NEWLINE@84..85 "\n"
+  PAREN_EXPR@85..105
+    LPAREN@85..86 "("
+    MACRO_CALL@86..104
+      MACRO_NAME@86..88
+        AT@86..87 "@"
+        IDENT@87..88 "m"
+      WHITESPACE@88..89 " "
+      VECT_EXPR@89..104
+        LBRACKET@89..90 "["
+        ARG@90..91
+          NAME@90..91
+            IDENT@90..91 "x"
+        COMMA@91..92 ","
+        WHITESPACE@92..93 " "
+        ARG@93..97
+          MACRO_CALL@93..97
+            MACRO_NAME@93..95
+              AT@93..94 "@"
+              IDENT@94..95 "n"
+            WHITESPACE@95..96 " "
+            NAME@96..97
+              IDENT@96..97 "a"
+        NEWLINE@97..98 "\n"
+        WHITESPACE@98..102 "    "
+        ERROR@102..103
+          IDENT@102..103 "b"
+        RBRACKET@103..104 "]"
+    RPAREN@104..105 ")"
+  NEWLINE@105..106 "\n"
+  CALL_EXPR@106..119
+    NAME@106..107
+      IDENT@106..107 "f"
+    ARG_LIST@107..119
+      LPAREN@107..108 "("
+      ARG@108..112
+        MACRO_CALL@108..112
+          MACRO_NAME@108..110
+            AT@108..109 "@"
+            IDENT@109..110 "m"
+          WHITESPACE@110..111 " "
+          NAME@111..112
+            IDENT@111..112 "a"
+      NEWLINE@112..113 "\n"
+      WHITESPACE@113..117 "    "
+      ERROR@117..118
+        IDENT@117..118 "b"
+      RPAREN@118..119 ")"
+  NEWLINE@119..120 "\n"
+  DOC@120..149
+    STRING_LITERAL@120..135
+      STRING_DELIM_OPEN@120..121 "\""
+      INTERPOLATION@121..134
+        DOLLAR@121..122 "$"
+        PAREN_EXPR@122..134
+          LPAREN@122..123 "("
+          MACRO_CALL@123..127
+            MACRO_NAME@123..125
+              AT@123..124 "@"
+              IDENT@124..125 "m"
+            WHITESPACE@125..126 " "
+            NAME@126..127
+              IDENT@126..127 "a"
+          NEWLINE@127..128 "\n"
+          WHITESPACE@128..132 "    "
+          ERROR@132..133
+            IDENT@132..133 "b"
+          RPAREN@133..134 ")"
+      STRING_DELIM_CLOSE@134..135 "\""
+    NEWLINE@135..136 "\n"
+    PAREN_EXPR@136..149
+      LPAREN@136..137 "("
+      JUXTAPOSE_EXPR@137..142
+        LITERAL@137..138
+          INTEGER@137..138 "2"
+        MACRO_CALL@138..142
+          MACRO_NAME@138..140
+            AT@138..139 "@"
+            IDENT@139..140 "m"
+          WHITESPACE@140..141 " "
+          NAME@141..142
+            IDENT@141..142 "x"
+      NEWLINE@142..143 "\n"
+      WHITESPACE@143..147 "    "
+      ERROR@147..148
+        IDENT@147..148 "y"
+      RPAREN@148..149 ")"
+  NEWLINE@149..150 "\n"
+  PAREN_EXPR@150..174
+    LPAREN@150..151 "("
+    GENERATOR@151..173
+      MACRO_CALL@151..156
+        MACRO_NAME@151..156
+          AT@151..152 "@"
+          IDENT@152..156 "time"
+      NEWLINE@156..157 "\n"
+      WHITESPACE@157..161 "    "
+      FOR_BINDING@161..173
+        FOR_KW@161..164 "for"
+        WHITESPACE@164..165 " "
+        NAME@165..166
+          IDENT@165..166 "i"
+        WHITESPACE@166..167 " "
+        IDENT@167..169 "in"
+        WHITESPACE@169..170 " "
+        BINARY_EXPR@170..173
+          LITERAL@170..171
+            INTEGER@170..171 "1"
+          COLON@171..172 ":"
+          LITERAL@172..173
+            INTEGER@172..173 "3"
+    WHITESPACE@173..174 " "
+  ERROR@174..178
+    END_KW@174..177 "end"
+    RPAREN@177..178 ")"
+  NEWLINE@178..179 "\n"
+
+diagnostic [14..15]: expected a closing delimiter or separator
+diagnostic [30..31]: expected a closing delimiter or separator
+diagnostic [45..46]: expected a closing delimiter or separator
+diagnostic [61..62]: expected a closing delimiter or separator
+diagnostic [81..82]: expected a closing delimiter or separator
+diagnostic [102..103]: expected a closing delimiter or separator
+diagnostic [117..118]: expected a closing delimiter or separator
+diagnostic [132..133]: expected a closing delimiter or separator
+diagnostic [147..148]: expected a closing delimiter or separator
+diagnostic [150..151]: unclosed `(`
+diagnostic [174..177]: trailing tokens after statement

@@ -2320,11 +2320,12 @@ fn project_macro_name(node: &SyntaxNode) -> String {
         .map(|c| format!("(var {})", raw_content(&c)));
 
     // Trailing form (`A.@x`, `A.B.@x`, `$A.@x`, `A.$B.@x`): the module path is a
-    // single leading node (`NAME`, `BINARY_EXPR`, or `INTERPOLATION`) that
-    // `project` already nests correctly, then `. @ name`.
+    // single leading expression that `project` already nests correctly, then
+    // `. @ name`. Calls and parenthesized expressions can qualify macros too.
     if let Some(module) = node
-        .children()
-        .find(|c| matches!(c.kind(), NAME | BINARY_EXPR | INTERPOLATION))
+        .children_with_tokens()
+        .find(|element| !is_trivia(element.kind()))
+        .and_then(NodeOrToken::into_node)
     {
         // Misplaced macro sigil (`A.@B.x`): the `@` names a non-final component
         // with a trailing `.ident` continuation (recorded as `MacroSigilTrailing`).
@@ -3478,6 +3479,15 @@ fn first_node(node: &SyntaxNode) -> Option<SyntaxNode> {
 
 fn project_paren(node: &SyntaxNode) -> String {
     let children: Vec<_> = node.children().collect();
+    if diag_count_from(
+        usize::from(node.text_range().start()),
+        DiagnosticKind::UnclosedParen,
+    ) > 0
+    {
+        let mut parts = project_each(children);
+        parts.push("(error-t)".to_string());
+        return sexp("parens", parts);
+    }
     // Julia keeps the parens when recovery leaves multiple children inside.
     if children.len() > 1 {
         return sexp("parens", children.iter().map(project).collect());

@@ -11,8 +11,7 @@ pub(super) fn parse_macro(
     ctx: &ParserCtx<'_>,
     at_idx: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
-    inside_brackets: bool,
-    generator_for_ends: bool,
+    flags: ExprFlags,
 ) -> ExprParse {
     let mut events = vec![Event::Start(SyntaxKind::MACRO_CALL)];
     events.push(Event::Start(SyntaxKind::MACRO_NAME));
@@ -20,14 +19,7 @@ pub(super) fn parse_macro(
     let name_end = parse_macro_name_body(ctx, &mut events, at_idx + 1, diagnostics);
     finish(&mut events, SyntaxKind::MACRO_NAME);
 
-    let end = parse_macro_args(
-        ctx,
-        &mut events,
-        name_end,
-        diagnostics,
-        inside_brackets,
-        generator_for_ends,
-    );
+    let end = parse_macro_args(ctx, &mut events, name_end, diagnostics, flags, at_idx);
     finish(&mut events, SyntaxKind::MACRO_CALL);
     ExprParse {
         start: at_idx,
@@ -44,8 +36,7 @@ pub(super) fn parse_qualified_macro(
     lhs: ExprParse,
     dot_idx: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
-    inside_brackets: bool,
-    generator_for_ends: bool,
+    flags: ExprFlags,
 ) -> ExprParse {
     let mut events = vec![Event::Start(SyntaxKind::MACRO_CALL)];
     events.push(Event::Start(SyntaxKind::MACRO_NAME));
@@ -75,14 +66,7 @@ pub(super) fn parse_qualified_macro(
     let name_end = parse_macro_name_body(ctx, &mut events, at_idx + 1, diagnostics);
     finish(&mut events, SyntaxKind::MACRO_NAME);
 
-    let end = parse_macro_args(
-        ctx,
-        &mut events,
-        name_end,
-        diagnostics,
-        inside_brackets,
-        generator_for_ends,
-    );
+    let end = parse_macro_args(ctx, &mut events, name_end, diagnostics, flags, lhs.start);
     finish(&mut events, SyntaxKind::MACRO_CALL);
     ExprParse {
         start: lhs.start,
@@ -264,18 +248,19 @@ fn is_macro_name_token(kind: TokKind) -> bool {
 /// Parse the arguments of a macro call after its name (which ends at `name_end`)
 /// into `events`, returning the index just past the last argument. Two forms: a
 /// `(` adjacent to the name opens a comma-separated `ARG_LIST` (call-like);
-/// otherwise the arguments are space-separated expressions consumed to the end
-/// of the line (or until a closing delimiter / separator inside brackets).
+/// otherwise the arguments are space-separated expressions. A macro starting
+/// the first expression in bare parentheses may continue onto following lines.
 fn parse_macro_args(
     ctx: &ParserCtx<'_>,
     events: &mut Vec<Event>,
     name_end: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
-    inside_brackets: bool,
-    // Whether a following `for` opens a generator in the enclosing expression.
-    // This remains true through nested macro arguments.
-    generator_for_ends: bool,
+    flags: ExprFlags,
+    macro_start: usize,
 ) -> usize {
+    let inside_brackets = flags.inside_brackets;
+    let generator_for_ends = flags.generator_for_ends;
+    let macro_newlines = flags.paren_content_start == Some(macro_start);
     // Paren form `@m(a, b)`: the `(` must be adjacent (no whitespace), otherwise
     // `@m (a, b)` is the space form with a single parenthesized argument.
     if ctx.token(name_end).map(|t| t.kind) == Some(TokKind::LParen) {
@@ -326,7 +311,30 @@ fn parse_macro_args(
     let mut pos = name_end;
     let mut n_args = 0;
     loop {
-        let next = ctx.skip_ws_and_block_comments(pos);
+        let mut next = ctx.skip_ws_and_block_comments(pos);
+        if macro_newlines
+            && matches!(
+                ctx.token(next).map(|t| t.kind),
+                Some(TokKind::Newline | TokKind::Comment)
+            )
+        {
+            let after = ctx.skip_trivia(next);
+            // Operators on a following line apply to the completed macrocall.
+            // A following `for` likewise belongs to an enclosing generator.
+            // Leave all separating trivia with that enclosing expression.
+            if ctx.token(after).is_none_or(|t| {
+                t.kind == TokKind::ForKw
+                    || is_operator(t.kind)
+                    || is_quotable_operator(t.kind)
+                    || is_value_operator(t.kind)
+                    || is_unary_prefix_op(t.kind, t.text)
+                    || t.kind == TokKind::DotDotDot
+                    || word_operator(ctx, after, false).is_some()
+            }) {
+                break;
+            }
+            next = after;
+        }
         match ctx.token(next).map(|t| t.kind) {
             None
             | Some(

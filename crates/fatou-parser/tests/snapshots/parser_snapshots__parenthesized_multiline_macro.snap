@@ -1,0 +1,867 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..830
+  PAREN_EXPR@0..33
+    LPAREN@0..1 "("
+    MACRO_CALL@1..32
+      MACRO_NAME@1..6
+        AT@1..2 "@"
+        IDENT@2..6 "info"
+      WHITESPACE@6..7 " "
+      STRING_LITERAL@7..16
+        STRING_DELIM_OPEN@7..8 "\""
+        STRING_CONTENT@8..15 "message"
+        STRING_DELIM_CLOSE@15..16 "\""
+      NEWLINE@16..17 "\n"
+      WHITESPACE@17..21 "    "
+      ASSIGNMENT_EXPR@21..24
+        NAME@21..22
+          IDENT@21..22 "x"
+        EQ@22..23 "="
+        LITERAL@23..24
+          INTEGER@23..24 "1"
+      NEWLINE@24..25 "\n"
+      WHITESPACE@25..29 "    "
+      ASSIGNMENT_EXPR@29..32
+        NAME@29..30
+          IDENT@29..30 "y"
+        EQ@30..31 "="
+        LITERAL@31..32
+          INTEGER@31..32 "2"
+    RPAREN@32..33 ")"
+  NEWLINE@33..34 "\n"
+  NEWLINE@34..35 "\n"
+  PAREN_EXPR@35..121
+    LPAREN@35..36 "("
+    NEWLINE@36..37 "\n"
+    WHITESPACE@37..41 "    "
+    COMMENT@41..58 "# leading comment"
+    NEWLINE@58..59 "\n"
+    WHITESPACE@59..63 "    "
+    MACRO_CALL@63..119
+      MACRO_NAME@63..73
+        NAME@63..67
+          IDENT@63..67 "Base"
+        DOT@67..68 "."
+        AT@68..69 "@"
+        IDENT@69..73 "info"
+      WHITESPACE@73..74 " "
+      STRING_LITERAL@74..83
+        STRING_DELIM_OPEN@74..75 "\""
+        STRING_CONTENT@75..82 "message"
+        STRING_DELIM_CLOSE@82..83 "\""
+      WHITESPACE@83..84 " "
+      COMMENT@84..102 "# argument comment"
+      NEWLINE@102..103 "\n"
+      WHITESPACE@103..107 "    "
+      ASSIGNMENT_EXPR@107..110
+        NAME@107..108
+          IDENT@107..108 "x"
+        EQ@108..109 "="
+        LITERAL@109..110
+          INTEGER@109..110 "1"
+      NEWLINE@110..111 "\n"
+      NEWLINE@111..112 "\n"
+      WHITESPACE@112..116 "    "
+      ASSIGNMENT_EXPR@116..119
+        NAME@116..117
+          IDENT@116..117 "y"
+        EQ@117..118 "="
+        LITERAL@118..119
+          INTEGER@118..119 "2"
+    NEWLINE@119..120 "\n"
+    RPAREN@120..121 ")"
+  NEWLINE@121..122 "\n"
+  NEWLINE@122..123 "\n"
+  PAREN_EXPR@123..139
+    LPAREN@123..124 "("
+    MACRO_CALL@124..138
+      MACRO_NAME@124..130
+        BINARY_EXPR@124..127
+          NAME@124..125
+            IDENT@124..125 "A"
+          DOT@125..126 "."
+          NAME@126..127
+            IDENT@126..127 "B"
+        DOT@127..128 "."
+        AT@128..129 "@"
+        IDENT@129..130 "m"
+      WHITESPACE@130..131 " "
+      NAME@131..132
+        IDENT@131..132 "a"
+      NEWLINE@132..133 "\n"
+      WHITESPACE@133..137 "    "
+      NAME@137..138
+        IDENT@137..138 "b"
+    RPAREN@138..139 ")"
+  NEWLINE@139..140 "\n"
+  PAREN_EXPR@140..156
+    LPAREN@140..141 "("
+    MACRO_CALL@141..155
+      MACRO_NAME@141..147
+        AT@141..142 "@"
+        IDENT@142..143 "A"
+        DOT@143..144 "."
+        IDENT@144..145 "B"
+        DOT@145..146 "."
+        IDENT@146..147 "m"
+      WHITESPACE@147..148 " "
+      NAME@148..149
+        IDENT@148..149 "a"
+      NEWLINE@149..150 "\n"
+      WHITESPACE@150..154 "    "
+      NAME@154..155
+        IDENT@154..155 "b"
+    RPAREN@155..156 ")"
+  NEWLINE@156..157 "\n"
+  PAREN_EXPR@157..174
+    LPAREN@157..158 "("
+    MACRO_CALL@158..173
+      MACRO_NAME@158..165
+        AT@158..159 "@"
+        NONSTANDARD_IDENTIFIER@159..165
+          STRING_PREFIX@159..162 "var"
+          STRING_DELIM_OPEN@162..163 "\""
+          STRING_CONTENT@163..164 "#"
+          STRING_DELIM_CLOSE@164..165 "\""
+      WHITESPACE@165..166 " "
+      NAME@166..167
+        IDENT@166..167 "a"
+      NEWLINE@167..168 "\n"
+      WHITESPACE@168..172 "    "
+      NAME@172..173
+        IDENT@172..173 "b"
+    RPAREN@173..174 ")"
+  NEWLINE@174..175 "\n"
+  PAREN_EXPR@175..189
+    LPAREN@175..176 "("
+    MACRO_CALL@176..188
+      MACRO_NAME@176..180
+        AT@176..177 "@"
+        LPAREN@177..178 "("
+        IDENT@178..179 "A"
+        RPAREN@179..180 ")"
+      WHITESPACE@180..181 " "
+      NAME@181..182
+        IDENT@181..182 "a"
+      NEWLINE@182..183 "\n"
+      WHITESPACE@183..187 "    "
+      NAME@187..188
+        IDENT@187..188 "b"
+    RPAREN@188..189 ")"
+  NEWLINE@189..190 "\n"
+  PAREN_EXPR@190..207
+    LPAREN@190..191 "("
+    MACRO_CALL@191..206
+      MACRO_NAME@191..198
+        CALL_EXPR@191..195
+          NAME@191..192
+            IDENT@191..192 "f"
+          ARG_LIST@192..195
+            LPAREN@192..193 "("
+            ARG@193..194
+              NAME@193..194
+                IDENT@193..194 "x"
+            RPAREN@194..195 ")"
+        DOT@195..196 "."
+        AT@196..197 "@"
+        IDENT@197..198 "m"
+      WHITESPACE@198..199 " "
+      NAME@199..200
+        IDENT@199..200 "a"
+      NEWLINE@200..201 "\n"
+      WHITESPACE@201..205 "    "
+      NAME@205..206
+        IDENT@205..206 "b"
+    RPAREN@206..207 ")"
+  NEWLINE@207..208 "\n"
+  PAREN_EXPR@208..223
+    LPAREN@208..209 "("
+    MACRO_CALL@209..222
+      MACRO_NAME@209..214
+        INTERPOLATION@209..211
+          DOLLAR@209..210 "$"
+          IDENT@210..211 "A"
+        DOT@211..212 "."
+        AT@212..213 "@"
+        IDENT@213..214 "m"
+      WHITESPACE@214..215 " "
+      NAME@215..216
+        IDENT@215..216 "a"
+      NEWLINE@216..217 "\n"
+      WHITESPACE@217..221 "    "
+      NAME@221..222
+        IDENT@221..222 "b"
+    RPAREN@222..223 ")"
+  NEWLINE@223..224 "\n"
+  PAREN_EXPR@224..242
+    LPAREN@224..225 "("
+    MACRO_CALL@225..241
+      MACRO_NAME@225..233
+        MACRO_CALL@225..230
+          MACRO_NAME@225..227
+            AT@225..226 "@"
+            IDENT@226..227 "m"
+          ARG_LIST@227..230
+            LPAREN@227..228 "("
+            ARG@228..229
+              NAME@228..229
+                IDENT@228..229 "a"
+            RPAREN@229..230 ")"
+        DOT@230..231 "."
+        AT@231..232 "@"
+        IDENT@232..233 "n"
+      WHITESPACE@233..234 " "
+      NAME@234..235
+        IDENT@234..235 "b"
+      NEWLINE@235..236 "\n"
+      WHITESPACE@236..240 "    "
+      NAME@240..241
+        IDENT@240..241 "c"
+    RPAREN@241..242 ")"
+  NEWLINE@242..243 "\n"
+  NEWLINE@243..244 "\n"
+  PAREN_EXPR@244..261
+    LPAREN@244..245 "("
+    MACRO_CALL@245..260
+      MACRO_NAME@245..247
+        AT@245..246 "@"
+        IDENT@246..247 "m"
+      WHITESPACE@247..248 " "
+      MACRO_CALL@248..254
+        MACRO_NAME@248..250
+          AT@248..249 "@"
+          IDENT@249..250 "n"
+        WHITESPACE@250..251 " "
+        NAME@251..252
+          IDENT@251..252 "x"
+        WHITESPACE@252..253 " "
+        NAME@253..254
+          IDENT@253..254 "y"
+      NEWLINE@254..255 "\n"
+      WHITESPACE@255..259 "    "
+      NAME@259..260
+        IDENT@259..260 "z"
+    RPAREN@260..261 ")"
+  NEWLINE@261..262 "\n"
+  PAREN_EXPR@262..289
+    LPAREN@262..263 "("
+    MACRO_CALL@263..288
+      MACRO_NAME@263..265
+        AT@263..264 "@"
+        IDENT@264..265 "m"
+      WHITESPACE@265..266 " "
+      PAREN_EXPR@266..282
+        LPAREN@266..267 "("
+        MACRO_CALL@267..281
+          MACRO_NAME@267..269
+            AT@267..268 "@"
+            IDENT@268..269 "n"
+          WHITESPACE@269..270 " "
+          NAME@270..271
+            IDENT@270..271 "x"
+          NEWLINE@271..272 "\n"
+          WHITESPACE@272..280 "        "
+          NAME@280..281
+            IDENT@280..281 "y"
+        RPAREN@281..282 ")"
+      NEWLINE@282..283 "\n"
+      WHITESPACE@283..287 "    "
+      NAME@287..288
+        IDENT@287..288 "z"
+    RPAREN@288..289 ")"
+  NEWLINE@289..290 "\n"
+  PAREN_EXPR@290..308
+    LPAREN@290..291 "("
+    MACRO_CALL@291..307
+      MACRO_NAME@291..293
+        AT@291..292 "@"
+        IDENT@292..293 "m"
+      WHITESPACE@293..294 " "
+      BARE_TUPLE_EXPR@294..301
+        NAME@294..295
+          IDENT@294..295 "x"
+        COMMA@295..296 ","
+        WHITESPACE@296..297 " "
+        MACRO_CALL@297..301
+          MACRO_NAME@297..299
+            AT@297..298 "@"
+            IDENT@298..299 "n"
+          WHITESPACE@299..300 " "
+          NAME@300..301
+            IDENT@300..301 "a"
+      NEWLINE@301..302 "\n"
+      WHITESPACE@302..306 "    "
+      NAME@306..307
+        IDENT@306..307 "b"
+    RPAREN@307..308 ")"
+  NEWLINE@308..309 "\n"
+  PAREN_EXPR@309..328
+    LPAREN@309..310 "("
+    MACRO_CALL@310..327
+      MACRO_NAME@310..312
+        AT@310..311 "@"
+        IDENT@311..312 "m"
+      WHITESPACE@312..313 " "
+      BINARY_EXPR@313..321
+        NAME@313..314
+          IDENT@313..314 "x"
+        WHITESPACE@314..315 " "
+        PLUS@315..316 "+"
+        WHITESPACE@316..317 " "
+        MACRO_CALL@317..321
+          MACRO_NAME@317..319
+            AT@317..318 "@"
+            IDENT@318..319 "n"
+          WHITESPACE@319..320 " "
+          NAME@320..321
+            IDENT@320..321 "a"
+      NEWLINE@321..322 "\n"
+      WHITESPACE@322..326 "    "
+      NAME@326..327
+        IDENT@326..327 "b"
+    RPAREN@327..328 ")"
+  NEWLINE@328..329 "\n"
+  NEWLINE@329..330 "\n"
+  PAREN_EXPR@330..365
+    LPAREN@330..331 "("
+    MACRO_CALL@331..364
+      MACRO_NAME@331..333
+        AT@331..332 "@"
+        IDENT@332..333 "m"
+      WHITESPACE@333..334 " "
+      BEGIN_EXPR@334..358
+        BEGIN_KW@334..339 "begin"
+        BLOCK@339..355
+          NEWLINE@339..340 "\n"
+          WHITESPACE@340..344 "    "
+          MACRO_CALL@344..348
+            MACRO_NAME@344..346
+              AT@344..345 "@"
+              IDENT@345..346 "n"
+            WHITESPACE@346..347 " "
+            NAME@347..348
+              IDENT@347..348 "x"
+          NEWLINE@348..349 "\n"
+          WHITESPACE@349..353 "    "
+          NAME@353..354
+            IDENT@353..354 "y"
+          NEWLINE@354..355 "\n"
+        END_KW@355..358 "end"
+      NEWLINE@358..359 "\n"
+      WHITESPACE@359..363 "    "
+      NAME@363..364
+        IDENT@363..364 "z"
+    RPAREN@364..365 ")"
+  NEWLINE@365..366 "\n"
+  PAREN_EXPR@366..408
+    LPAREN@366..367 "("
+    MACRO_CALL@367..407
+      MACRO_NAME@367..369
+        AT@367..368 "@"
+        IDENT@368..369 "m"
+      WHITESPACE@369..370 " "
+      FUNCTION_DEF@370..401
+        FUNCTION_KW@370..378 "function"
+        WHITESPACE@378..379 " "
+        SIGNATURE@379..382
+          CALL_EXPR@379..382
+            NAME@379..380
+              IDENT@379..380 "f"
+            ARG_LIST@380..382
+              LPAREN@380..381 "("
+              RPAREN@381..382 ")"
+        BLOCK@382..398
+          NEWLINE@382..383 "\n"
+          WHITESPACE@383..387 "    "
+          MACRO_CALL@387..391
+            MACRO_NAME@387..389
+              AT@387..388 "@"
+              IDENT@388..389 "n"
+            WHITESPACE@389..390 " "
+            NAME@390..391
+              IDENT@390..391 "x"
+          NEWLINE@391..392 "\n"
+          WHITESPACE@392..396 "    "
+          NAME@396..397
+            IDENT@396..397 "y"
+          NEWLINE@397..398 "\n"
+        END_KW@398..401 "end"
+      NEWLINE@401..402 "\n"
+      WHITESPACE@402..406 "    "
+      NAME@406..407
+        IDENT@406..407 "z"
+    RPAREN@407..408 ")"
+  NEWLINE@408..409 "\n"
+  PAREN_EXPR@409..456
+    LPAREN@409..410 "("
+    MACRO_CALL@410..455
+      MACRO_NAME@410..412
+        AT@410..411 "@"
+        IDENT@411..412 "m"
+      WHITESPACE@412..413 " "
+      NAME@413..414
+        IDENT@413..414 "x"
+      NEWLINE@414..415 "\n"
+      WHITESPACE@415..419 "    "
+      BEGIN_EXPR@419..455
+        BEGIN_KW@419..424 "begin"
+        BLOCK@424..452
+          NEWLINE@424..425 "\n"
+          WHITESPACE@425..433 "        "
+          MACRO_CALL@433..437
+            MACRO_NAME@433..435
+              AT@433..434 "@"
+              IDENT@434..435 "n"
+            WHITESPACE@435..436 " "
+            NAME@436..437
+              IDENT@436..437 "a"
+          NEWLINE@437..438 "\n"
+          WHITESPACE@438..446 "        "
+          NAME@446..447
+            IDENT@446..447 "b"
+          NEWLINE@447..448 "\n"
+          WHITESPACE@448..452 "    "
+        END_KW@452..455 "end"
+    RPAREN@455..456 ")"
+  NEWLINE@456..457 "\n"
+  NEWLINE@457..458 "\n"
+  PAREN_EXPR@458..497
+    LPAREN@458..459 "("
+    MACRO_CALL@459..496
+      MACRO_NAME@459..461
+        AT@459..460 "@"
+        IDENT@460..461 "m"
+      WHITESPACE@461..462 " "
+      NAME@462..463
+        IDENT@462..463 "x"
+      NEWLINE@463..464 "\n"
+      WHITESPACE@464..468 "    "
+      VECT_EXPR@468..471
+        LBRACKET@468..469 "["
+        ARG@469..470
+          LITERAL@469..470
+            INTEGER@469..470 "1"
+        RBRACKET@470..471 "]"
+      NEWLINE@471..472 "\n"
+      WHITESPACE@472..476 "    "
+      STRING_LITERAL@476..479
+        STRING_DELIM_OPEN@476..477 "\""
+        STRING_CONTENT@477..478 "s"
+        STRING_DELIM_CLOSE@478..479 "\""
+      NEWLINE@479..480 "\n"
+      WHITESPACE@480..484 "    "
+      LITERAL@484..487
+        CHAR@484..487 "'c'"
+      NEWLINE@487..488 "\n"
+      WHITESPACE@488..492 "    "
+      MACRO_CALL@492..496
+        MACRO_NAME@492..494
+          AT@492..493 "@"
+          IDENT@493..494 "n"
+        WHITESPACE@494..495 " "
+        NAME@495..496
+          IDENT@495..496 "y"
+    RPAREN@496..497 ")"
+  NEWLINE@497..498 "\n"
+  PAREN_EXPR@498..510
+    LPAREN@498..499 "("
+    MACRO_CALL@499..509
+      MACRO_NAME@499..501
+        AT@499..500 "@"
+        IDENT@500..501 "m"
+      WHITESPACE@501..502 " "
+      OPERATOR_ATOM@502..503
+        PLUS@502..503 "+"
+      NEWLINE@503..504 "\n"
+      WHITESPACE@504..508 "    "
+      NAME@508..509
+        IDENT@508..509 "x"
+    RPAREN@509..510 ")"
+  NEWLINE@510..511 "\n"
+  PAREN_EXPR@511..526
+    LPAREN@511..512 "("
+    MACRO_CALL@512..525
+      MACRO_NAME@512..514
+        AT@512..513 "@"
+        IDENT@513..514 "m"
+      WHITESPACE@514..515 " "
+      NAME@515..516
+        IDENT@515..516 "x"
+      NEWLINE@516..517 "\n"
+      WHITESPACE@517..521 "    "
+      BARE_TUPLE_EXPR@521..525
+        NAME@521..522
+          IDENT@521..522 "y"
+        COMMA@522..523 ","
+        WHITESPACE@523..524 " "
+        NAME@524..525
+          IDENT@524..525 "z"
+    RPAREN@525..526 ")"
+  NEWLINE@526..527 "\n"
+  PAREN_BLOCK@527..542
+    LPAREN@527..528 "("
+    ARG@528..538
+      MACRO_CALL@528..538
+        MACRO_NAME@528..530
+          AT@528..529 "@"
+          IDENT@529..530 "m"
+        WHITESPACE@530..531 " "
+        NAME@531..532
+          IDENT@531..532 "x"
+        NEWLINE@532..533 "\n"
+        WHITESPACE@533..537 "    "
+        NAME@537..538
+          IDENT@537..538 "y"
+    PARAMETERS@538..541
+      SEMICOLON@538..539 ";"
+      WHITESPACE@539..540 " "
+      ARG@540..541
+        NAME@540..541
+          IDENT@540..541 "z"
+    RPAREN@541..542 ")"
+  NEWLINE@542..543 "\n"
+  TUPLE_EXPR@543..557
+    LPAREN@543..544 "("
+    ARG@544..548
+      MACRO_CALL@544..548
+        MACRO_NAME@544..546
+          AT@544..545 "@"
+          IDENT@545..546 "m"
+        WHITESPACE@546..547 " "
+        NAME@547..548
+          IDENT@547..548 "a"
+    NEWLINE@548..549 "\n"
+    WHITESPACE@549..553 "    "
+    COMMA@553..554 ","
+    WHITESPACE@554..555 " "
+    ARG@555..556
+      NAME@555..556
+        IDENT@555..556 "b"
+    RPAREN@556..557 ")"
+  NEWLINE@557..558 "\n"
+  TUPLE_EXPR@558..575
+    LPAREN@558..559 "("
+    ARG@559..571
+      PAREN_EXPR@559..571
+        LPAREN@559..560 "("
+        MACRO_CALL@560..570
+          MACRO_NAME@560..562
+            AT@560..561 "@"
+            IDENT@561..562 "m"
+          WHITESPACE@562..563 " "
+          NAME@563..564
+            IDENT@563..564 "x"
+          NEWLINE@564..565 "\n"
+          WHITESPACE@565..569 "    "
+          NAME@569..570
+            IDENT@569..570 "y"
+        RPAREN@570..571 ")"
+    COMMA@571..572 ","
+    WHITESPACE@572..573 " "
+    ARG@573..574
+      NAME@573..574
+        IDENT@573..574 "z"
+    RPAREN@574..575 ")"
+  NEWLINE@575..576 "\n"
+  CALL_EXPR@576..591
+    NAME@576..577
+      IDENT@576..577 "f"
+    ARG_LIST@577..591
+      LPAREN@577..578 "("
+      ARG@578..590
+        PAREN_EXPR@578..590
+          LPAREN@578..579 "("
+          MACRO_CALL@579..589
+            MACRO_NAME@579..581
+              AT@579..580 "@"
+              IDENT@580..581 "m"
+            WHITESPACE@581..582 " "
+            NAME@582..583
+              IDENT@582..583 "x"
+            NEWLINE@583..584 "\n"
+            WHITESPACE@584..588 "    "
+            NAME@588..589
+              IDENT@588..589 "y"
+          RPAREN@589..590 ")"
+      RPAREN@590..591 ")"
+  NEWLINE@591..592 "\n"
+  VECT_EXPR@592..606
+    LBRACKET@592..593 "["
+    ARG@593..605
+      PAREN_EXPR@593..605
+        LPAREN@593..594 "("
+        MACRO_CALL@594..604
+          MACRO_NAME@594..596
+            AT@594..595 "@"
+            IDENT@595..596 "m"
+          WHITESPACE@596..597 " "
+          NAME@597..598
+            IDENT@597..598 "x"
+          NEWLINE@598..599 "\n"
+          WHITESPACE@599..603 "    "
+          NAME@603..604
+            IDENT@603..604 "y"
+        RPAREN@604..605 ")"
+    RBRACKET@605..606 "]"
+  NEWLINE@606..607 "\n"
+  GENERATOR@607..631
+    LPAREN@607..608 "("
+    MACRO_CALL@608..614
+      MACRO_NAME@608..610
+        AT@608..609 "@"
+        IDENT@609..610 "m"
+      WHITESPACE@610..611 " "
+      NAME@611..612
+        IDENT@611..612 "x"
+      WHITESPACE@612..613 " "
+      NAME@613..614
+        IDENT@613..614 "y"
+    NEWLINE@614..615 "\n"
+    WHITESPACE@615..619 "    "
+    FOR_BINDING@619..630
+      FOR_KW@619..622 "for"
+      WHITESPACE@622..623 " "
+      NAME@623..624
+        IDENT@623..624 "y"
+      WHITESPACE@624..625 " "
+      IDENT@625..627 "in"
+      WHITESPACE@627..628 " "
+      NAME@628..630
+        IDENT@628..630 "ys"
+    RPAREN@630..631 ")"
+  NEWLINE@631..632 "\n"
+  GENERATOR@632..652
+    LPAREN@632..633 "("
+    MACRO_CALL@633..635
+      MACRO_NAME@633..635
+        AT@633..634 "@"
+        IDENT@634..635 "m"
+    NEWLINE@635..636 "\n"
+    WHITESPACE@636..640 "    "
+    FOR_BINDING@640..651
+      FOR_KW@640..643 "for"
+      WHITESPACE@643..644 " "
+      NAME@644..645
+        IDENT@644..645 "i"
+      WHITESPACE@645..646 " "
+      IDENT@646..648 "in"
+      WHITESPACE@648..649 " "
+      NAME@649..651
+        IDENT@649..651 "xs"
+    RPAREN@651..652 ")"
+  NEWLINE@652..653 "\n"
+  PAREN_EXPR@653..673
+    LPAREN@653..654 "("
+    MACRO_CALL@654..672
+      MACRO_NAME@654..656
+        AT@654..655 "@"
+        IDENT@655..656 "m"
+      WHITESPACE@656..657 " "
+      FOR_EXPR@657..672
+        FOR_KW@657..660 "for"
+        WHITESPACE@660..661 " "
+        FOR_BINDING@661..668
+          NAME@661..662
+            IDENT@661..662 "i"
+          WHITESPACE@662..663 " "
+          IDENT@663..665 "in"
+          WHITESPACE@665..666 " "
+          NAME@666..668
+            IDENT@666..668 "xs"
+        BLOCK@668..669
+          WHITESPACE@668..669 " "
+        END_KW@669..672 "end"
+    RPAREN@672..673 ")"
+  NEWLINE@673..674 "\n"
+  NEWLINE@674..675 "\n"
+  QUOTE_SYM@675..688
+    COLON@675..676 ":"
+    PAREN_EXPR@676..688
+      LPAREN@676..677 "("
+      MACRO_CALL@677..687
+        MACRO_NAME@677..679
+          AT@677..678 "@"
+          IDENT@678..679 "m"
+        WHITESPACE@679..680 " "
+        NAME@680..681
+          IDENT@680..681 "x"
+        NEWLINE@681..682 "\n"
+        WHITESPACE@682..686 "    "
+        NAME@686..687
+          IDENT@686..687 "y"
+      RPAREN@687..688 ")"
+  NEWLINE@688..689 "\n"
+  INTERPOLATION@689..702
+    DOLLAR@689..690 "$"
+    PAREN_EXPR@690..702
+      LPAREN@690..691 "("
+      MACRO_CALL@691..701
+        MACRO_NAME@691..693
+          AT@691..692 "@"
+          IDENT@692..693 "m"
+        WHITESPACE@693..694 " "
+        NAME@694..695
+          IDENT@694..695 "x"
+        NEWLINE@695..696 "\n"
+        WHITESPACE@696..700 "    "
+        NAME@700..701
+          IDENT@700..701 "y"
+      RPAREN@701..702 ")"
+  NEWLINE@702..703 "\n"
+  DOC@703..736
+    STRING_LITERAL@703..720
+      STRING_DELIM_OPEN@703..704 "\""
+      INTERPOLATION@704..719
+        DOLLAR@704..705 "$"
+        PAREN_EXPR@705..719
+          LPAREN@705..706 "("
+          PAREN_EXPR@706..718
+            LPAREN@706..707 "("
+            MACRO_CALL@707..717
+              MACRO_NAME@707..709
+                AT@707..708 "@"
+                IDENT@708..709 "m"
+              WHITESPACE@709..710 " "
+              NAME@710..711
+                IDENT@710..711 "x"
+              NEWLINE@711..712 "\n"
+              WHITESPACE@712..716 "    "
+              NAME@716..717
+                IDENT@716..717 "y"
+            RPAREN@717..718 ")"
+          RPAREN@718..719 ")"
+      STRING_DELIM_CLOSE@719..720 "\""
+    NEWLINE@720..721 "\n"
+    PAREN_EXPR@721..736
+      LPAREN@721..722 "("
+      MACRO_CALL@722..735
+        MACRO_NAME@722..726
+          AT@722..723 "@"
+          IDENT@723..726 "doc"
+        WHITESPACE@726..727 " "
+        NAME@727..728
+          IDENT@727..728 "x"
+        NEWLINE@728..729 "\n"
+        NEWLINE@729..730 "\n"
+        WHITESPACE@730..734 "    "
+        NAME@734..735
+          IDENT@734..735 "y"
+      RPAREN@735..736 ")"
+  NEWLINE@736..737 "\n"
+  NEWLINE@737..738 "\n"
+  PAREN_EXPR@738..752
+    LPAREN@738..739 "("
+    BINARY_EXPR@739..751
+      MACRO_CALL@739..743
+        MACRO_NAME@739..741
+          AT@739..740 "@"
+          IDENT@740..741 "m"
+        WHITESPACE@741..742 " "
+        NAME@742..743
+          IDENT@742..743 "x"
+      NEWLINE@743..744 "\n"
+      WHITESPACE@744..748 "    "
+      MINUS@748..749 "-"
+      WHITESPACE@749..750 " "
+      NAME@750..751
+        IDENT@750..751 "y"
+    RPAREN@751..752 ")"
+  NEWLINE@752..753 "\n"
+  PAREN_EXPR@753..771
+    LPAREN@753..754 "("
+    WHERE_EXPR@754..770
+      MACRO_CALL@754..758
+        MACRO_NAME@754..756
+          AT@754..755 "@"
+          IDENT@755..756 "m"
+        WHITESPACE@756..757 " "
+        NAME@757..758
+          IDENT@757..758 "x"
+      NEWLINE@758..759 "\n"
+      WHITESPACE@759..763 "    "
+      WHERE_KW@763..768 "where"
+      WHITESPACE@768..769 " "
+      NAME@769..770
+        IDENT@769..770 "T"
+    RPAREN@770..771 ")"
+  NEWLINE@771..772 "\n"
+  PAREN_EXPR@772..786
+    LPAREN@772..773 "("
+    TYPE_ANNOTATION@773..785
+      MACRO_CALL@773..777
+        MACRO_NAME@773..775
+          AT@773..774 "@"
+          IDENT@774..775 "m"
+        WHITESPACE@775..776 " "
+        NAME@776..777
+          IDENT@776..777 "x"
+      NEWLINE@777..778 "\n"
+      WHITESPACE@778..782 "    "
+      COLON_COLON@782..784 "::"
+      NAME@784..785
+        IDENT@784..785 "T"
+    RPAREN@785..786 ")"
+  NEWLINE@786..787 "\n"
+  NEWLINE@787..788 "\n"
+  PAREN_EXPR@788..804
+    LPAREN@788..789 "("
+    MACRO_CALL@789..803
+      MACRO_NAME@789..795
+        PAREN_EXPR@789..792
+          LPAREN@789..790 "("
+          NAME@790..791
+            IDENT@790..791 "A"
+          RPAREN@791..792 ")"
+        DOT@792..793 "."
+        AT@793..794 "@"
+        IDENT@794..795 "m"
+      WHITESPACE@795..796 " "
+      NAME@796..797
+        IDENT@796..797 "x"
+      NEWLINE@797..798 "\n"
+      WHITESPACE@798..802 "    "
+      NAME@802..803
+        IDENT@802..803 "y"
+    RPAREN@803..804 ")"
+  NEWLINE@804..805 "\n"
+  PAREN_BLOCK@805..823
+    LPAREN@805..806 "("
+    ARG@806..819
+      MACRO_CALL@806..819
+        MACRO_NAME@806..808
+          AT@806..807 "@"
+          IDENT@807..808 "m"
+        WHITESPACE@808..809 " "
+        NAME@809..810
+          IDENT@809..810 "x"
+        NEWLINE@810..811 "\n"
+        WHITESPACE@811..815 "    "
+        BARE_TUPLE_EXPR@815..819
+          NAME@815..816
+            IDENT@815..816 "y"
+          COMMA@816..817 ","
+          WHITESPACE@817..818 " "
+          NAME@818..819
+            IDENT@818..819 "z"
+    PARAMETERS@819..822
+      SEMICOLON@819..820 ";"
+      WHITESPACE@820..821 " "
+      ARG@821..822
+        NAME@821..822
+          IDENT@821..822 "w"
+    RPAREN@822..823 ")"
+  NEWLINE@823..824 "\n"
+  JUXTAPOSE_EXPR@824..829
+    LITERAL@824..825
+      INTEGER@824..825 "2"
+    MACRO_CALL@825..829
+      MACRO_NAME@825..827
+        AT@825..826 "@"
+        IDENT@826..827 "m"
+      WHITESPACE@827..828 " "
+      NAME@828..829
+        IDENT@828..829 "x"
+  NEWLINE@829..830 "\n"

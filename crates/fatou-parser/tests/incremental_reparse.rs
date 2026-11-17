@@ -222,7 +222,53 @@ const HAZARD_SNIPPETS: &[&str] = &[
     include_str!("fixtures/parser/dotted_wrapping_arithmetic_operators/input.jl"),
     include_str!("fixtures/parser/labeled_keyword_recovery/input.jl"),
     include_str!("fixtures/parser/macro_newline_operator/input.jl"),
+    include_str!("fixtures/parser/parenthesized_multiline_macro/input.jl"),
+    include_str!("fixtures/parser/macro_newline_boundaries/input.jl"),
+    "(x, @m a\n b)\n",
+    "\"$(@m a\n b)\"\n",
 ];
+
+#[test]
+fn multiline_macro_edits_preserve_parenthesis_context() {
+    for (source, before, after, clean) in [
+        ("(@m @n x\n y)", "x\n ", "x ", true),
+        ("(@m @n x y)", "x ", "x\n ", true),
+        ("(@m x\n y)", "@m", "a + @m", false),
+        ("(a + @m x\n y)", "a + @m", "@m", true),
+        ("f(@m x\n y)", "@m x\n y", "(@m x\n y)", true),
+        ("f((@m x\n y))", "(@m x\n y)", "@m x\n y", false),
+    ] {
+        for newline in ["\n", "\r\n"] {
+            let source = source.replace('\n', newline);
+            let before = before.replace('\n', newline);
+            let after = after.replace('\n', newline);
+            let input = format!("function f()\n before()\n {source}\n after()\nend\n");
+            let old = parse(&input);
+            let start = input.find(&before).unwrap();
+            let edit = Edit {
+                range: start..start + before.len(),
+                insert: after,
+            };
+            let edited = edit.apply(&input);
+            let full = parse(&edited);
+            assert_eq!(full.diagnostics.is_empty(), clean, "{edited:?}");
+            if let Some(reparsed) = reparse(
+                &input,
+                &old.cst.green().to_owned(),
+                &old.diagnostics,
+                &edit,
+                &edited,
+            ) {
+                assert_eq!(
+                    fingerprint(&SyntaxNode::new_root(reparsed.green)),
+                    fingerprint(&full.cst),
+                    "{edit:?} on {input:?}",
+                );
+                assert_eq!(reparsed.diagnostics, full.diagnostics);
+            }
+        }
+    }
+}
 
 #[test]
 fn macro_newline_edits_change_operator_owner() {

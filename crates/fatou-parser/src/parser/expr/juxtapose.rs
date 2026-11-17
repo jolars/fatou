@@ -336,16 +336,16 @@ pub(super) fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8)
         return matches!(next.text, "√" | "∛" | "∜" | ".√" | ".∛" | ".∜")
             && lhs_allows_radical(ctx, lhs);
     }
-    // It must start a value: not an operator, closing delimiter, keyword, or
-    // macro `@`. Splat `...` is kept out of `is_operator` (the operator loop's
+    // Only a numeric coefficient may juxtapose with a macro (`2@m x`). A
+    // general closed value (`f(x)@m`) leaves the sigil for error recovery.
+    if k == TokKind::At {
+        return lhs_is_number(ctx, lhs);
+    }
+    // It must start a value: not an operator, closing delimiter, or keyword.
+    // Splat `...` is kept out of `is_operator` (the operator loop's
     // splat arm owns it) but
     // cannot start a value either (`g(x)...` splats the call result).
-    if is_operator(k)
-        || k == TokKind::DotDotDot
-        || is_juxtapose_closing(k)
-        || k.is_keyword()
-        || k == TokKind::At
-    {
+    if is_operator(k) || k == TokKind::DotDotDot || is_juxtapose_closing(k) || k.is_keyword() {
         return false;
     }
     // A glued `in`/`isa` is a word operator, not a juxtaposed value — see

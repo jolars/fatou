@@ -65,6 +65,10 @@ struct ExprFlags {
     /// macro arguments and type specs, where the same space sensitivity does not
     /// imply a generator boundary. Nested macros inherit the enclosing boundary.
     generator_for_ends: bool,
+    /// Token where the first expression in bare parentheses starts. Only a
+    /// macro call beginning there may consume newline-separated arguments.
+    /// Qualified callees keep the start of their whole module expression.
+    paren_content_start: Option<usize>,
     /// A bare `end` is the index-end marker (an `END_MARKER` atom) rather than a
     /// block terminator. Enabled only inside square brackets (`a[end]`, `[end]`);
     /// parens and braces leave it off, matching Julia's `end`-symbol scope.
@@ -313,10 +317,11 @@ fn parse_expr_in(
     // `end_marker` is consumed by `parse_prefix` (via `flags`); the rest steer the
     // operator loop directly.
     let ExprFlags {
-        inside_brackets,
+        inside_brackets: _,
         no_range,
         array_mode,
-        generator_for_ends,
+        generator_for_ends: _,
+        paren_content_start: _,
         end_marker: _,
         begin_marker,
         public_context,
@@ -713,14 +718,7 @@ fn parse_expr_in(
         if op_kind == TokKind::Dot
             && ctx.token(ctx.skip_trivia(op_idx + 1)).map(|t| t.kind) == Some(TokKind::At)
         {
-            lhs = parse_qualified_macro(
-                &ctx,
-                lhs,
-                op_idx,
-                diagnostics,
-                inside_brackets,
-                generator_for_ends,
-            );
+            lhs = parse_qualified_macro(&ctx, lhs, op_idx, diagnostics, flags);
             continue;
         }
 
@@ -1734,13 +1732,7 @@ fn parse_prefix(
         // not at parse time — so the field-access right-hand side (`f.$x`) and
         // quoted contexts (`:($x)`) reuse the same node.
         TokKind::Dollar => Some(parse_prefix_interpolation(ctx, start, diagnostics)),
-        TokKind::At => Some(parse_macro(
-            ctx,
-            start,
-            diagnostics,
-            flags.inside_brackets,
-            flags.generator_for_ends,
-        )),
+        TokKind::At => Some(parse_macro(ctx, start, diagnostics, flags)),
         TokKind::LParen => parse_paren(
             ctx,
             start,
@@ -2167,7 +2159,16 @@ pub(super) fn parse_quote_sym(
         // name. Base writes the argument-less form to attach a docstring to a
         // macro (`"""…"""\n:@MethodTable`).
         TokKind::At => {
-            let mac = parse_macro(ctx, next, diagnostics, inside_brackets, generator_for_ends);
+            let mac = parse_macro(
+                ctx,
+                next,
+                diagnostics,
+                ExprFlags {
+                    inside_brackets,
+                    generator_for_ends,
+                    ..ExprFlags::default()
+                },
+            );
             let end = mac.end;
             events.extend(mac.events);
             finish(&mut events, SyntaxKind::QUOTE_SYM);
@@ -2484,7 +2485,8 @@ fn parse_interpolation(
             // (`GENERATOR`), and the empty `$()` (`TUPLE_EXPR`) are what
             // JuliaSyntax rejects as a `(error …)` interpolation — but only
             // inside a string, where the value has to be stringified.
-            let Some(inner) = parse_paren(ctx, next, false, true, diagnostics) else {
+            let Some(inner) = parse_paren_in(ctx, next, false, true, !in_string, diagnostics)
+            else {
                 events.push(Event::Finish);
                 return next + 1;
             };
@@ -2542,6 +2544,25 @@ pub(crate) fn parse_paren(
     // Parentheses inherit generator context: `(@m for … end)` takes a loop,
     // while `f((@m for i in xs))` keeps the call argument's generator boundary.
     generator_for_ends: bool,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    parse_paren_in(
+        ctx,
+        start,
+        end_marker,
+        generator_for_ends,
+        true,
+        diagnostics,
+    )
+}
+
+fn parse_paren_in(
+    ctx: &ParserCtx<'_>,
+    start: usize,
+    end_marker: bool,
+    generator_for_ends: bool,
+    // String interpolation uses its own delimiters, not bare parentheses.
+    macro_newlines: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
     let inner_start = ctx.skip_trivia(start + 1);
@@ -2611,6 +2632,7 @@ pub(crate) fn parse_paren(
     let flags = ExprFlags {
         inside_brackets: true,
         generator_for_ends,
+        paren_content_start: macro_newlines.then_some(inner_start),
         end_marker,
         begin_marker: end_marker,
         ..ExprFlags::default()
@@ -2642,7 +2664,7 @@ pub(crate) fn parse_paren(
         let mut scratch = Vec::new();
         let mut scratch_diags = Vec::new();
         let clauses_end = parse_generator_clauses(ctx, inner.end, &mut scratch, &mut scratch_diags);
-        if ctx.token(ctx.skip_trivia(clauses_end)).map(|t| t.kind) == Some(TokKind::Semicolon) {
+        if ctx.token(ctx.skip_trivia(clauses_end)).map(|t| t.kind) != Some(TokKind::RParen) {
             return Some(parse_parenthesized_generator_junk(
                 ctx,
                 start,
@@ -2687,9 +2709,9 @@ pub(crate) fn parse_paren(
     push_range(&mut events, start, inner.start);
     events.extend(inner.events);
 
-    let close = ctx.skip_trivia(inner.end);
+    let close = recover_delimited_suffix(ctx, inner.end, &mut events, diagnostics);
     if ctx.token(close).map(|t| t.kind) == Some(TokKind::RParen) {
-        push_range(&mut events, inner.end, close + 1);
+        events.push(Event::Tok(close));
         events.push(Event::Finish);
         Some(ExprParse {
             start,
@@ -2705,7 +2727,6 @@ pub(crate) fn parse_paren(
             open.start,
             open.end,
         );
-        push_range(&mut events, inner.end, close);
         events.push(Event::Finish);
         Some(ExprParse {
             start,
@@ -2713,6 +2734,39 @@ pub(crate) fn parse_paren(
             events,
         })
     }
+}
+
+/// Keep unexpected suffix tokens inside their enclosing delimiters. Stop before
+/// any bracket or block closer so recovery cannot swallow the enclosing body.
+fn recover_delimited_suffix(
+    ctx: &ParserCtx<'_>,
+    from: usize,
+    events: &mut Vec<Event>,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    let start = ctx.skip_trivia(from);
+    push_range(events, from, start);
+    let mut end = start;
+    while ctx.token(end).is_some_and(|t| {
+        !matches!(
+            t.kind,
+            TokKind::RParen | TokKind::RBracket | TokKind::RBrace
+        ) && !is_closing_block_keyword(t.kind)
+    }) {
+        end += 1;
+    }
+    if end > start {
+        events.extend(error_expr_with_range(start, end).events);
+        let token = &ctx.tokens()[start];
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::TrailingJunk,
+            "expected a closing delimiter or separator",
+            token.start,
+            token.end,
+        );
+    }
+    end
 }
 
 /// Recover a parenthesized payload beginning with a comma as one flat junk run.
@@ -2766,26 +2820,6 @@ fn parse_parenthesized_leading_comma(
     }
 }
 
-/// Scan from `start` to the `)` that closes the enclosing paren, skipping over
-/// balanced nested brackets so an inner `)` does not close it. Returns the index
-/// of that `)`, or the end of input when there is none.
-fn scan_to_close_paren(ctx: &ParserCtx<'_>, start: usize) -> usize {
-    let mut close = start;
-    let mut depth = 0usize;
-    while let Some(kind) = ctx.token(close).map(|t| t.kind) {
-        match kind {
-            TokKind::RParen if depth == 0 => break,
-            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
-            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
-                depth = depth.saturating_sub(1);
-            }
-            _ => {}
-        }
-        close += 1;
-    }
-    close
-}
-
 /// Parse `(body for clauses; junk)` as a parenthesized generator followed by a
 /// recovered suffix. Unlike call and curly argument lists, plain parens cannot
 /// attach keyword parameters to a generator.
@@ -2804,20 +2838,7 @@ fn parse_parenthesized_generator_junk(
     pos = parse_generator_clauses(ctx, pos, &mut events, diagnostics);
     finish(&mut events, SyntaxKind::GENERATOR);
 
-    let junk_start = ctx.skip_trivia(pos);
-    push_range(&mut events, pos, junk_start);
-    let close = scan_to_close_paren(ctx, junk_start);
-
-    events.push(Event::Start(SyntaxKind::ERROR));
-    push_range(&mut events, junk_start, close);
-    finish(&mut events, SyntaxKind::ERROR);
-    push_diagnostic(
-        diagnostics,
-        DiagnosticKind::TrailingJunk,
-        "generator parameters require a call or curly expression",
-        tokens[junk_start].start,
-        tokens[junk_start].end,
-    );
+    let close = recover_delimited_suffix(ctx, pos, &mut events, diagnostics);
 
     let end = if ctx.token(close).map(|t| t.kind) == Some(TokKind::RParen) {
         events.push(Event::Tok(close));
@@ -3301,6 +3322,21 @@ fn parse_arg_list(
         inherited_end_marker || (close == TokKind::RBracket && list_kind == SyntaxKind::ARG_LIST);
     // `begin` and `end` share one index-marker context.
     let begin_marker = end_marker;
+    let first = ctx.skip_trivia(open_idx + 1);
+    let flags = ExprFlags {
+        inside_brackets: true,
+        generator_for_ends,
+        end_marker,
+        begin_marker,
+        paren_content_start: (matches!(
+            list_kind,
+            SyntaxKind::TUPLE_EXPR | SyntaxKind::PAREN_BLOCK
+        ) && ctx
+            .token(first)
+            .is_some_and(|t| t.kind != TokKind::Semicolon))
+        .then_some(first),
+        ..ExprFlags::default()
+    };
     let mut events = vec![Event::Start(list_kind), Event::Tok(open_idx)];
     let mut i = open_idx + 1;
     let mut in_params = false;
@@ -3310,6 +3346,9 @@ fn parse_arg_list(
     // been seen yet.
     let mut slot_empty = true;
     let mut parsed_element = false;
+    let mut had_commas = false;
+    let mut had_splat = false;
+    let mut num_semis = 0;
 
     loop {
         // Interior trivia belongs to the current container (the list, or the
@@ -3348,6 +3387,7 @@ fn parse_arg_list(
                 break;
             }
             Some(TokKind::Comma) => {
+                had_commas = true;
                 // An empty element slot after an element—or at the front of a
                 // call—is invalid: JuliaSyntax bails, bumping the offending comma
                 // and everything after it up to the closer as one flat
@@ -3407,6 +3447,7 @@ fn parse_arg_list(
             // `a (parameters b) (parameters c d)`. Close the open group before
             // opening the next so the groups stay siblings.
             Some(TokKind::Semicolon) => {
+                num_semis += 1;
                 if in_params {
                     finish(&mut events, SyntaxKind::PARAMETERS);
                 }
@@ -3440,16 +3481,36 @@ fn parse_arg_list(
                 );
                 break;
             }
+            Some(_) if !slot_empty => {
+                if in_params {
+                    finish(&mut events, SyntaxKind::PARAMETERS);
+                    in_params = false;
+                }
+                i = recover_delimited_suffix(ctx, i, &mut events, diagnostics);
+                if ctx.token(i).map(|t| t.kind) == Some(close) {
+                    events.push(Event::Tok(i));
+                    i += 1;
+                } else {
+                    let opener = &tokens[open_idx];
+                    push_diagnostic(
+                        diagnostics,
+                        DiagnosticKind::UnterminatedArgList,
+                        "unterminated argument list",
+                        opener.start,
+                        opener.start,
+                    );
+                }
+                break;
+            }
             Some(_) => {
-                i = parse_one_arg(
-                    ctx,
-                    &mut events,
-                    i,
-                    end_marker,
-                    begin_marker,
-                    generator_for_ends,
-                    diagnostics,
-                );
+                let mark = events.len();
+                i = parse_one_arg(ctx, &mut events, i, flags, diagnostics);
+                if !parsed_element {
+                    had_splat = matches!(
+                        events.get(mark + 1),
+                        Some(Event::Start(SyntaxKind::SPLAT_EXPR))
+                    );
+                }
                 slot_empty = false;
                 parsed_element = true;
             }
@@ -3460,6 +3521,21 @@ fn parse_arg_list(
         finish(&mut events, SyntaxKind::PARAMETERS);
     }
     finish(&mut events, list_kind);
+    if matches!(list_kind, SyntaxKind::TUPLE_EXPR | SyntaxKind::PAREN_BLOCK) {
+        // Count separators consumed by this container, not commas or semicolons
+        // inside a macro argument. Raw token scanning cannot distinguish them.
+        let initial_semi = ctx
+            .token(first)
+            .is_some_and(|t| t.kind == TokKind::Semicolon);
+        let is_tuple = had_commas
+            || (had_splat && num_semis > 0)
+            || (initial_semi && (num_semis == 1 || parsed_element));
+        events[0] = Event::Start(if is_tuple {
+            SyntaxKind::TUPLE_EXPR
+        } else {
+            SyntaxKind::PAREN_BLOCK
+        });
+    }
     (events, i)
 }
 
@@ -3470,19 +3546,10 @@ fn parse_one_arg(
     ctx: &ParserCtx<'_>,
     events: &mut Vec<Event>,
     i: usize,
-    end_marker: bool,
-    begin_marker: bool,
-    generator_for_ends: bool,
+    flags: ExprFlags,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
     let tokens = ctx.tokens();
-    let flags = ExprFlags {
-        inside_brackets: true,
-        generator_for_ends,
-        end_marker,
-        begin_marker,
-        ..ExprFlags::default()
-    };
     let parse_arg_expr = |tokens: &[Token], start, diagnostics: &mut Vec<ParseDiagnostic>| {
         parse_expr_in(tokens, start, 0, diagnostics, flags)
     };

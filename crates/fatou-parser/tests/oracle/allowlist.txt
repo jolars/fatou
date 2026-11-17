@@ -148,6 +148,7 @@ macro_definition
 macro_directive_names
 macro_keyword_name
 macro_name_brackets
+macro_newline_boundaries
 macro_newline_operator
 macro_operator_names
 macro_sigil_trailing
@@ -187,6 +188,7 @@ paren_macro_name
 paren_operator
 parenthesized_leading_comma
 parenthesized_macro_loop_argument
+parenthesized_multiline_macro
 plus_plus_operator
 postfix_space_error
 prefix_operator_error
