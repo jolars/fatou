@@ -300,6 +300,7 @@ fn workspace_member_maps_files_to_host_modules() {
     write(&tmp.path().join("src/s.jl"), "s() = 1\n");
     let index = harvest_package_named(tmp.path(), "Pkg");
     let lib = HarvestedLibrary {
+        syntax: Default::default(),
         packages: BTreeMap::from([("Pkg".to_string(), Arc::new(index))]),
         roots: BTreeMap::from([("Pkg".to_string(), tmp.path().to_path_buf())]),
         workspaces: vec!["Pkg".to_string()],

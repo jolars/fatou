@@ -38,7 +38,9 @@ use smol_str::SmolStr;
 use super::result_id::content_hash;
 use crate::incremental::Analysis;
 use crate::index::{ModuleIndex, PackageIndex};
+#[cfg(test)]
 use crate::parser::parse;
+use crate::parser::parse_with_options;
 use crate::resolve::{
     ModulePath, Namespace, PackageSource, Resolution, Resolver, module_at, resolve_module,
 };
@@ -89,7 +91,7 @@ pub fn compute_semantic_tokens<P: PackageSource>(
     encoding: PositionEncoding,
     packages: &P,
 ) -> SemanticTokens {
-    let root = parse(text).cst;
+    let root = parse_with_options(text, packages.syntax_options()).cst;
     let model = SemanticModel::build(&root);
     // The pure path has no file path to key workspace membership on; the live
     // server passes the workspace module through `semantic_tokens_via_db`.
@@ -168,7 +170,7 @@ fn tokens_for<P: PackageSource + ?Sized>(
             let Some(code) = decoded.as_str().get(start..end) else {
                 continue;
             };
-            let parsed = parse(code);
+            let parsed = parse_with_options(code, packages.syntax_options());
             let embedded_model = SemanticModel::build(&parsed.cst);
             let mut embedded = syntax_spans(&parsed.cst);
             embedded.extend(resolved_spans(

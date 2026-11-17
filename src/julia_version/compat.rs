@@ -54,15 +54,15 @@ impl<'a> CompatSpec<'a> {
             .any(|clause| contains(clause.interval, version))
     }
 
-    pub(crate) fn envelope(&self) -> VersionRange {
+    pub(crate) fn envelope(&self) -> Option<VersionRange> {
         self.clauses
             .iter()
             .map(|clause| clause.interval)
+            .filter(|range| contains(*range, range.min))
             .reduce(|a, b| VersionRange {
                 min: a.min.min(b.min),
                 max: a.max.zip(b.max).map(|(a, b)| a.max(b)),
             })
-            .expect("a parsed spec has at least one clause")
     }
 
     /// Mirror precision-preserving dependency edits, while keeping Julia union

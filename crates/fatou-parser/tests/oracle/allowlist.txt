@@ -17,6 +17,7 @@ arrow_precedence
 augmented_assignment
 bare_function_keyword
 bare_operator
+bare_return_tuple
 bare_tuple
 bare_tuple_newline
 based_int_display
@@ -253,6 +254,8 @@ tuples
 type_annotations
 type_operator_call
 typed_concat
+typegroup_glued_docstring_113
+typegroup_glued_docstring_114
 unary_operator_call
 unclosed_delimiter
 unicode_17_identifiers
@@ -274,3 +277,19 @@ version_string
 where_as_identifier
 where_precedence
 word_operators
+
+edition_113_identifiers
+edition_113_labeled_break
+edition_113_loop_exit_delimiters
+edition_113_loop_ternary
+edition_113_macro_newline
+edition_113_return_begin_comma
+edition_113_return_index
+edition_113_return_ternary
+edition_113_typegroup_arguments
+edition_113_typegroup_recovery
+edition_113_wrapping
+edition_114_grammar
+edition_114_typegroup_arguments
+edition_114_typegroup_names
+edition_115_grammar

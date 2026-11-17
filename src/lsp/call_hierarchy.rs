@@ -42,7 +42,7 @@ use rowan::{TextRange, TextSize};
 
 use crate::incremental::{Analysis, SourceFile};
 use crate::index::model::Span;
-use crate::parser::parse;
+use crate::parser::{ParseOptions, parse_with_options};
 use crate::resolve::{Namespace, OccurrenceKey, PackageSource, Resolution, Resolver};
 use crate::semantic::{BindingKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode};
@@ -302,7 +302,23 @@ pub fn compute_prepare_call_hierarchy(
     position: Position,
     encoding: PositionEncoding,
 ) -> Option<Vec<CallHierarchyItem>> {
-    let root = parse(text).cst;
+    compute_prepare_call_hierarchy_with_options(
+        uri,
+        text,
+        position,
+        encoding,
+        ParseOptions::default(),
+    )
+}
+
+pub fn compute_prepare_call_hierarchy_with_options(
+    uri: &Uri,
+    text: &str,
+    position: Position,
+    encoding: PositionEncoding,
+    options: ParseOptions,
+) -> Option<Vec<CallHierarchyItem>> {
+    let root = parse_with_options(text, options).cst;
     let model = SemanticModel::build(&root);
     let line_index = LineIndex::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
@@ -372,7 +388,13 @@ pub(crate) fn prepare_call_hierarchy_via_db(
     }));
     match cached {
         Ok(Some(items)) => items,
-        Ok(None) | Err(_) => compute_prepare_call_hierarchy(uri, text, position, encoding),
+        Ok(None) | Err(_) => compute_prepare_call_hierarchy_with_options(
+            uri,
+            text,
+            position,
+            encoding,
+            snapshot.options_for_path(path),
+        ),
     }
 }
 
@@ -616,12 +638,26 @@ pub(crate) fn outgoing_calls_via_db(
                 }
                 Resolution::System { module, name } => snapshot.package(&module).and_then(|pkg| {
                     library_def_site(snapshot, &pkg, &pkg.root, &name).and_then(|(abs, span)| {
-                        library_item(&abs, span, &name, encoding, &mut parsed_files)
+                        library_item(
+                            &abs,
+                            span,
+                            &name,
+                            encoding,
+                            &mut parsed_files,
+                            snapshot.options_for_path(&abs),
+                        )
                     })
                 }),
                 Resolution::Using { module, name } => using_def_site(snapshot, &module, &name)
                     .and_then(|(abs, span)| {
-                        library_item(&abs, span, &name, encoding, &mut parsed_files)
+                        library_item(
+                            &abs,
+                            span,
+                            &name,
+                            encoding,
+                            &mut parsed_files,
+                            snapshot.options_for_path(&abs),
+                        )
                     }),
                 // A sibling file's module-level import: def site not recorded.
                 Resolution::Script { .. }
@@ -695,10 +731,11 @@ fn library_item(
     name: &str,
     encoding: PositionEncoding,
     parsed_files: &mut HashMap<PathBuf, Option<(String, SyntaxNode)>>,
+    options: ParseOptions,
 ) -> Option<CallHierarchyItem> {
     let entry = parsed_files.entry(abs.to_path_buf()).or_insert_with(|| {
         std::fs::read_to_string(abs).ok().map(|text| {
-            let root = parse(&text).cst;
+            let root = parse_with_options(&text, options).cst;
             (text, root)
         })
     });

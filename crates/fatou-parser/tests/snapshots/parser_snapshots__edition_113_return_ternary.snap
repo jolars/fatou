@@ -1,0 +1,24 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+assertion_line: 49
+expression: rendered
+---
+ROOT@0..15
+  TERNARY_EXPR@0..14
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    QUESTION@2..3 "?"
+    WHITESPACE@3..4 " "
+    RETURN_EXPR@4..14
+      RETURN_KW@4..10 "return"
+      WHITESPACE@10..11 " "
+      QUOTE_SYM@11..14
+        COLON@11..12 ":"
+        WHITESPACE@12..13 " "
+        NAME@13..14
+          IDENT@13..14 "y"
+  NEWLINE@14..15 "\n"
+
+diagnostic [12..12]: whitespace after `:`
+diagnostic [2..3]: expected `:` in ternary expression

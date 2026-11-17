@@ -22,7 +22,9 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fatou_parser::parser::{normalize_sexpr, parse, to_juliasyntax_sexpr};
+use fatou_parser::parser::{
+    ParseOptions, normalize_sexpr, parse_with_options, to_juliasyntax_sexpr_with_options,
+};
 
 const CORPUS_REL: &str = "tests/fixtures/oracle";
 const ALLOWLIST_REL: &str = "tests/oracle/allowlist.txt";
@@ -39,6 +41,7 @@ const JS_BLOCKED_REL: &str = "tests/oracle/juliasyntax-blocked.txt";
 const JS_REPORT_REL: &str = "tests/oracle/juliasyntax-report.txt";
 
 struct Case {
+    options: ParseOptions,
     slug: String,
     input: String,
     expected: String,
@@ -63,6 +66,11 @@ fn read_corpus() -> Vec<Case> {
             continue;
         }
         cases.push(Case {
+            options: fs::read_to_string(entry.path().join("edition.txt"))
+                .map(|v| ParseOptions {
+                    syntax_edition: v.trim().parse().expect("supported fixture edition"),
+                })
+                .unwrap_or_default(),
             slug,
             input: fs::read_to_string(&input_path).expect("read input.jl"),
             expected: fs::read_to_string(&expected_path).expect("read expected.sexpr"),
@@ -84,6 +92,7 @@ fn read_js_corpus() -> Vec<Case> {
             let v: serde_json::Value =
                 serde_json::from_str(line).expect("parse juliasyntax.jsonl line");
             Case {
+                options: ParseOptions::default(),
                 slug: v["slug"].as_str().expect("slug").to_string(),
                 input: v["input"].as_str().expect("input").to_string(),
                 expected: v["expected"].as_str().expect("expected").to_string(),
@@ -118,8 +127,8 @@ fn outcome(case: &Case) -> Outcome {
 /// (`(error)`/`(error-t)`), passed alongside the CST, so they are compared like
 /// any other case rather than skipping.
 fn render(case: &Case) -> Option<String> {
-    let output = parse(&case.input);
-    let raw = to_juliasyntax_sexpr(&output.cst, &output.diagnostics);
+    let output = parse_with_options(&case.input, case.options);
+    let raw = to_juliasyntax_sexpr_with_options(&output.cst, &output.diagnostics, case.options);
     if raw.contains("(unsupported ") {
         return None;
     }
@@ -134,8 +143,8 @@ fn matches(case: &Case) -> bool {
 }
 
 fn divergence_detail(case: &Case) -> String {
-    let output = parse(&case.input);
-    let actual = to_juliasyntax_sexpr(&output.cst, &output.diagnostics);
+    let output = parse_with_options(&case.input, case.options);
+    let actual = to_juliasyntax_sexpr_with_options(&output.cst, &output.diagnostics, case.options);
     format!(
         "\n  input: {:?}\n  expected: {}\n  actual:   {}\n  diagnostics: {:?}",
         case.input,

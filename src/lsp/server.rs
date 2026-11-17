@@ -1,7 +1,7 @@
 //! Server entry points: the initialize handshake, advertised capabilities, and
 //! the main event loop that wires the channels, pools, and threads together.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::error::Error;
 use std::path::PathBuf;
 
@@ -24,14 +24,10 @@ use std::sync::Arc;
 
 use crate::environment::EnvContext;
 use crate::incremental::normalize_path;
-use crate::index::{
-    IndexCache, PackageIndex, dev_packages, harvest_libraries_parallel, harvest_workspace,
-};
+use crate::index::{IndexCache, harvest_libraries_parallel};
 use crate::text::PositionEncoding;
 
-use super::analysis_thread::{
-    AnalysisRequest, LibraryMessage, SyncMessage, guard, spawn_analysis_thread,
-};
+use super::analysis_thread::{LibraryMessage, SyncMessage, guard, spawn_analysis_thread};
 use super::environment_diagnostics::{
     EnvironmentFindings, environment_diagnostics, resolve_failure_diagnostics,
 };
@@ -73,6 +69,13 @@ pub fn serve(connection: &Connection) -> Result<(), DynError> {
     let pull_diagnostics = supports_pull_diagnostics(&params.capabilities);
     let diagnostic_refresh = supports_diagnostic_refresh(&params.capabilities);
     let inlay_hint_refresh = supports_inlay_hint_refresh(&params.capabilities);
+    let semantic_tokens_refresh = params
+        .capabilities
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.semantic_tokens.as_ref())
+        .and_then(|tokens| tokens.refresh_support)
+        .unwrap_or(false);
     let work_done_progress = supports_work_done_progress(&params.capabilities);
     let result =
         serde_json::json!({ "capabilities": capabilities_json(encoding, pull_diagnostics) });
@@ -86,6 +89,7 @@ pub fn serve(connection: &Connection) -> Result<(), DynError> {
         diagnostic_refresh,
         inlay_hint_refresh,
         work_done_progress,
+        semantic_tokens_refresh,
         params.initialization_options,
     )
 }
@@ -353,21 +357,16 @@ fn main_loop(
     diagnostic_refresh: bool,
     inlay_hint_refresh: bool,
     work_done_progress: bool,
+    semantic_tokens_refresh: bool,
     initialization_options: Option<serde_json::Value>,
 ) -> Result<(), DynError> {
     let (out_tx, out_rx) = crossbeam_channel::unbounded::<Outbound>();
-    let (analysis_tx, analysis_rx) = crossbeam_channel::unbounded::<AnalysisRequest>();
     let (read_tx, read_rx) = crossbeam_channel::unbounded::<ReadJob>();
     let (library_tx, library_rx) = crossbeam_channel::unbounded::<LibraryMessage>();
-    // Harvest signals from the main loop to the workspace harvester: a changed
-    // source file's path (saves and watched events; the harvester ignores paths
-    // outside every workspace package) or an environment-file change.
     let (harvest_tx, harvest_rx) = crossbeam_channel::unbounded::<HarvestSignal>();
-    // Disk-sync signals from the main loop to the analysis thread: a file's
-    // path, whose tracked input is reverted to on-disk text (a closed
-    // document's discarded buffer, or a watched file changed outside any open
-    // buffer).
     let (sync_tx, sync_rx) = crossbeam_channel::unbounded::<SyncMessage>();
+    let has_workspace = !workspace_roots.is_empty();
+    let membership_generation = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
     // Resolve the environment and harvest its packages off the event loop: it
     // walks the filesystem and parses all of Base, so it must not block the
@@ -396,7 +395,6 @@ fn main_loop(
     // thread; the drop order at the end of this function guarantees that.
     let read_pool = TaskPool::new("fatou-lsp-read", read_pool_size());
     let analysis_handle = spawn_analysis_thread(
-        analysis_rx,
         read_rx,
         library_rx,
         sync_rx,
@@ -407,14 +405,16 @@ fn main_loop(
         encoding,
         // The per-edit push is the fallback for a client that cannot pull.
         !pull_diagnostics,
+        harvest_tx,
+        has_workspace,
+        Arc::clone(&membership_generation),
     );
 
     let mut state = GlobalState::new(
         connection.sender.clone(),
         out_tx,
-        analysis_tx,
         read_tx,
-        harvest_tx,
+        membership_generation,
         sync_tx,
         encoding,
         pull_diagnostics,
@@ -422,6 +422,8 @@ fn main_loop(
         inlay_hint_refresh,
         initialization_options,
     );
+
+    state.semantic_tokens_refresh = semantic_tokens_refresh;
 
     // `initialize_finish` has already consumed the client's `initialized`
     // notification (lsp-server handles it inside the handshake), so the
@@ -480,7 +482,7 @@ fn main_loop(
         }
     }
 
-    // Dropping `state` drops `analysis_tx`/`read_tx` → the analysis thread's
+    // Dropping `state` drops `sync_tx`/`read_tx` → the analysis thread's
     // recv disconnects → it exits and drops the db. The library loader is
     // detached; it ends on its own (or when its send fails after teardown).
     drop(state);
@@ -488,24 +490,19 @@ fn main_loop(
     Ok(())
 }
 
-/// A signal from the main loop to the workspace harvester thread.
-#[derive(Debug, PartialEq, Eq)]
+/// Work the analysis thread sends to the harvester. Source re-indexing uses
+/// editions selected from the analysis database's live metadata.
 pub(crate) enum HarvestSignal {
-    /// A source file changed on disk (a save, or a watched create, change, or
-    /// delete): re-harvest the workspace package owning it, if any.
-    Source(PathBuf),
-    /// An environment file (a `Project.toml` or `Manifest.toml` flavor)
-    /// changed: re-resolve every workspace environment and re-harvest from
-    /// scratch.
-    Environment,
+    Environment(u64),
+    Syntax {
+        work: Vec<(String, PathBuf, crate::parser::ParseOptions)>,
+        generation: u64,
+    },
 }
 
-/// Resolve the Julia environment of every workspace root, harvest the merged
-/// library on a detached background thread, then stay alive serving harvest
-/// signals: a source signal re-harvests the workspace package owning the file,
-/// and an environment signal starts the resolve-and-harvest cycle over (a
-/// `Pkg.add`, or a created or deleted `Project.toml`, must reshape the whole
-/// library).
+/// Resolve the Julia environment of every workspace root and harvest the
+/// library on a detached thread. Keep serving full resolves and variant work
+/// as long as the analysis thread is listening.
 ///
 /// Only runs when the client provided at least one workspace root: without one
 /// there is no project to resolve against (a single loose file), and resolving
@@ -558,6 +555,7 @@ fn spawn_workspace_harvester(
             // the loop: one pass in, one full replacement of the published set
             // out.
             let mut published_env_files: HashSet<Uri> = HashSet::new();
+            let mut generation = 0;
             'resolve: loop {
                 // Report the full pass (initial resolve, and every re-resolve a
                 // `continue 'resolve` restarts) as one begin/report/end cycle.
@@ -568,6 +566,7 @@ fn spawn_workspace_harvester(
                 let mut envs = Vec::new();
                 let mut projects = std::collections::HashSet::new();
                 let mut findings = EnvironmentFindings::new();
+                let mut failed_manifests = BTreeSet::new();
                 for root in &workspace_roots {
                     let ctx = EnvContext::from_process(root.clone());
                     let env = match crate::environment::resolve(&ctx) {
@@ -582,6 +581,9 @@ fn spawn_workspace_harvester(
                             let (path, diags) = resolve_failure_diagnostics(&err, encoding, |p| {
                                 std::fs::read_to_string(p).ok()
                             });
+                            if crate::environment::is_manifest_file(&path) {
+                                failed_manifests.insert(normalize_path(&path));
+                            }
                             findings.entry(path).or_insert(diags);
                             continue;
                         }
@@ -597,75 +599,57 @@ fn spawn_workspace_harvester(
                 // An empty resolve still sends: a deleted `Project.toml` must clear
                 // the previously harvested library (and the first send with nothing
                 // resolved is a cheap no-op harvest).
-                let devs = dev_packages(&envs);
                 progress.report("Indexing Base and packages");
                 let library = harvest_libraries_parallel(&envs, cache.as_ref(), &index_pool);
                 let indexed = library.packages.len();
-                if library_tx.send(LibraryMessage::Full(library)).is_err() {
+                if library_tx
+                    .send(LibraryMessage::Full {
+                        generation,
+                        library: Box::new(library),
+                        failed_manifests,
+                    })
+                    .is_err()
+                {
                     return; // The analysis thread is gone; stop harvesting.
                 }
                 progress.end(&format!("Indexed {indexed} packages"));
 
-                // With packages under development, re-harvest the one whose files a
-                // source signal touches (a `src/` prefix check, longest prefix
-                // winning for nested folders — the same rule as
-                // `workspace_package_for`). Signals elsewhere, and every source
-                // signal when no folder is a package, are ignored.
-                let prefixes: Vec<(crate::environment::DevPackage, PathBuf)> = devs
-                    .into_iter()
-                    .map(|dev| {
-                        let src = normalize_path(&dev.root.join("src"));
-                        (dev, src)
-                    })
-                    .collect();
-                // The last index sent per package, so an unchanged re-harvest is
-                // skipped. A save touching a `src/` file re-harvests, but body-only
-                // and formatting-only edits leave the public API identical;
-                // resending then would force a `set_package_index` db write that
-                // needlessly cancels in-flight diagnostics (the write races the
-                // very format-on-save that triggered the save). Only send on a real
-                // change.
-                let mut last: std::collections::HashMap<String, Arc<PackageIndex>> =
-                    std::collections::HashMap::new();
                 while let Ok(signal) = signal_rx.recv() {
-                    let changed = match signal {
-                        HarvestSignal::Environment => {
-                            // Coalesce the burst (`Pkg.add` rewrites the project and
-                            // manifest together; an editor save and its watched
-                            // event double-fire): drain everything queued — the
-                            // full re-resolve subsumes any drained source signal.
-                            while signal_rx.try_recv().is_ok() {}
+                    match signal {
+                        HarvestSignal::Environment(current) => {
+                            generation = current;
+                            // A full resolve supersedes older variant requests.
+                            while let Ok(queued) = signal_rx.try_recv() {
+                                if let HarvestSignal::Environment(newer) = queued {
+                                    generation = newer;
+                                }
+                            }
                             continue 'resolve;
                         }
-                        HarvestSignal::Source(path) => normalize_path(&path),
-                    };
-                    let Some((dev, _)) = prefixes
-                        .iter()
-                        .filter(|(_, src)| changed.starts_with(src))
-                        .max_by_key(|(_, src)| src.components().count())
-                    else {
-                        continue;
-                    };
-                    // A matched source signal re-harvests one package: a short
-                    // cycle so the editor shows the same spinner as a full pass.
-                    progress.begin(
-                        "Indexing Julia environment",
-                        &format!("Re-indexing {}", dev.name),
-                    );
-                    let index = Arc::new(harvest_workspace(dev));
-                    progress.end(&format!("Re-indexed {}", dev.name));
-                    if last.get(&dev.name) == Some(&index) {
-                        continue;
-                    }
-                    last.insert(dev.name.clone(), Arc::clone(&index));
-                    if library_tx
-                        .send(LibraryMessage::Package {
-                            name: dev.name.clone(),
-                            index,
-                        })
-                        .is_err()
-                    {
-                        return; // The analysis thread is gone; stop harvesting.
+                        HarvestSignal::Syntax { work, generation } => {
+                            progress
+                                .begin("Indexing Julia environment", "Re-indexing package sources");
+                            let variants = work
+                                .into_iter()
+                                .map(|(name, root, options)| {
+                                    let index =
+                                        Arc::new(crate::index::harvest_package_with_options(
+                                            &root, &name, options,
+                                        ));
+                                    (name, options, index)
+                                })
+                                .collect();
+                            if library_tx
+                                .send(LibraryMessage::Syntax {
+                                    generation,
+                                    variants,
+                                })
+                                .is_err()
+                            {
+                                return;
+                            }
+                            progress.end("Re-indexed package sources");
+                        }
                     }
                 }
                 return; // The main loop is gone; stop harvesting.

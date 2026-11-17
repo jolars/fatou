@@ -7,20 +7,34 @@ use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range, TextEdit};
 use rowan::TextRange;
 use similar::DiffTag;
 
-use crate::formatter::{FormatStyle, RangeFormatted, format_node, format_range, format_with_style};
+#[cfg(test)]
+use crate::formatter::format_with_style;
+use crate::formatter::{
+    FormatOptions, FormatStyle, RangeFormatted, format_node_with_options, format_range_with_options,
+};
 use crate::incremental::Analysis;
-use crate::parser::{ParseDiagnostic, parse};
+use crate::parser::{ParseDiagnostic, ParseOptions, parse_with_options};
 use crate::text::line_diff::bounded_line_diff;
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
-use fatou_formatter::verify::{VerificationError, verify_format};
+use fatou_formatter::verify::{VerificationError, verify_format_with_options};
 
 /// Verify the complete document a client would produce from these edits.
 /// Checking the spliced document also covers syntax and comments outside a
 /// range selection and the boundaries where the replacement meets its context.
+#[cfg(test)]
 pub(crate) fn verify_format_edits(
     text: &TextBuffer,
     edits: &[TextEdit],
     encoding: PositionEncoding,
+) -> Result<(), VerificationError> {
+    verify_format_edits_with_options(text, edits, encoding, ParseOptions::default())
+}
+
+pub(crate) fn verify_format_edits_with_options(
+    text: &TextBuffer,
+    edits: &[TextEdit],
+    encoding: PositionEncoding,
+    options: ParseOptions,
 ) -> Result<(), VerificationError> {
     let index = text.line_index();
     let mut formatted = String::with_capacity(text.len());
@@ -32,7 +46,7 @@ pub(crate) fn verify_format_edits(
         end = index.position_to_byte(edit.range.end, encoding);
     }
     formatted.push_str(&text[end..]);
-    verify_format(text, &formatted)
+    verify_format_with_options(text, &formatted, options)
 }
 
 /// Format `text` off the snapshot's cached parse when the db's tracked buffer
@@ -40,7 +54,7 @@ pub(crate) fn verify_format_edits(
 /// trips `salsa::Cancelled`, which also falls back to a fresh parse.
 ///
 /// This computes best-effort edits. Safe requests verify them with
-/// [`verify_format_edits`] before returning a response.
+/// [`verify_format_edits_with_options`] before returning a response.
 pub(crate) fn format_edits_via_db(
     snapshot: &Analysis,
     path: &Path,
@@ -55,13 +69,25 @@ pub(crate) fn format_edits_via_db(
             return None;
         }
         let root = snapshot.parsed_tree(file);
-        let formatted = format_node(&root, style).ok();
+        let formatted = format_node_with_options(
+            &root,
+            FormatOptions {
+                style,
+                parse_options: snapshot.options_for_path(path),
+            },
+        )
+        .ok();
         Some(formatted.map(|formatted| edits_for_formatted(text, formatted, encoding)))
     }));
     match cached {
         Ok(Some(edits)) => edits,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_format_edits(text, style, encoding),
+        Ok(None) | Err(_) => compute_format_edits_with_options(
+            text,
+            style,
+            encoding,
+            snapshot.options_for_path(path),
+        ),
     }
 }
 
@@ -74,7 +100,23 @@ pub fn compute_format_edits(
     style: FormatStyle,
     encoding: PositionEncoding,
 ) -> Option<Vec<TextEdit>> {
-    let formatted = format_with_style(text, style).ok()?;
+    compute_format_edits_with_options(text, style, encoding, ParseOptions::default())
+}
+
+pub fn compute_format_edits_with_options(
+    text: &str,
+    style: FormatStyle,
+    encoding: PositionEncoding,
+    options: ParseOptions,
+) -> Option<Vec<TextEdit>> {
+    let formatted = crate::formatter::format_with_options(
+        text,
+        crate::formatter::FormatOptions {
+            style,
+            parse_options: options,
+        },
+    )
+    .ok()?;
     Some(edits_for_formatted(text, formatted, encoding))
 }
 
@@ -219,18 +261,33 @@ pub(crate) fn format_range_edits_via_db(
         }
         let root = snapshot.parsed_tree(file);
         let text_range = lsp_range_to_text_range(text, range, encoding);
-        Some(match format_range(&root, text_range, style) {
-            Ok(Some(formatted)) => Some(edits_for_range_formatted(text, formatted, encoding)),
-            // The selection touches no statement, or an unmodeled container
-            // shape: nothing to do rather than an error.
-            Ok(None) => Some(Vec::new()),
-            Err(_) => None,
-        })
+        Some(
+            match format_range_with_options(
+                &root,
+                text_range,
+                FormatOptions {
+                    style,
+                    parse_options: snapshot.options_for_path(path),
+                },
+            ) {
+                Ok(Some(formatted)) => Some(edits_for_range_formatted(text, formatted, encoding)),
+                // The selection touches no statement, or an unmodeled container
+                // shape: nothing to do rather than an error.
+                Ok(None) => Some(Vec::new()),
+                Err(_) => None,
+            },
+        )
     }));
     match cached {
         Ok(Some(edits)) => edits,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_format_range_edits(text, range, style, encoding),
+        Ok(None) | Err(_) => compute_format_range_edits_with_options(
+            text,
+            range,
+            style,
+            encoding,
+            snapshot.options_for_path(path),
+        ),
     }
 }
 
@@ -246,9 +303,28 @@ pub fn compute_format_range_edits(
     style: FormatStyle,
     encoding: PositionEncoding,
 ) -> Option<Vec<TextEdit>> {
-    let root = parse(text).cst;
+    compute_format_range_edits_with_options(text, range, style, encoding, ParseOptions::default())
+}
+
+pub fn compute_format_range_edits_with_options(
+    text: &str,
+    range: Range,
+    style: FormatStyle,
+    encoding: PositionEncoding,
+    options: ParseOptions,
+) -> Option<Vec<TextEdit>> {
+    let root = parse_with_options(text, options).cst;
     let text_range = lsp_range_to_text_range(text, range, encoding);
-    match format_range(&root, text_range, style).ok()? {
+    match format_range_with_options(
+        &root,
+        text_range,
+        FormatOptions {
+            style,
+            parse_options: options,
+        },
+    )
+    .ok()?
+    {
         Some(formatted) => Some(edits_for_range_formatted(text, formatted, encoding)),
         None => Some(Vec::new()),
     }

@@ -25,7 +25,9 @@ use smol_str::SmolStr;
 
 use crate::incremental::Analysis;
 use crate::index::{FunctionGroup, ModuleIndex, PackageIndex};
+#[cfg(test)]
 use crate::parser::parse;
+use crate::parser::parse_with_options;
 use crate::resolve::{
     ModulePath, Namespace, PackageSource, Resolution, Resolver, module_at, resolve_module,
     resolve_submodule,
@@ -47,7 +49,7 @@ pub fn compute_hover<P: PackageSource>(
     encoding: PositionEncoding,
     packages: &P,
 ) -> Option<Hover> {
-    let model = SemanticModel::build(&parse(text).cst);
+    let model = SemanticModel::build(&parse_with_options(text, packages.syntax_options()).cst);
     let line_index = LineIndex::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     // The pure path has no file path to key workspace membership on; the live
@@ -115,7 +117,7 @@ fn hover_for<P: PackageSource>(
                 .map(|embedded| (embedded, semantic_offset))
         })
         .and_then(|(embedded, semantic_offset)| {
-            let parsed = parse(embedded.text);
+            let parsed = parse_with_options(embedded.text, packages.syntax_options());
             let embedded_model = SemanticModel::build(&parsed.cst);
             let nested = hover_content(
                 &embedded_model,

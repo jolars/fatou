@@ -1,0 +1,26 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..36
+  TYPEGROUP_DEF@0..35
+    IDENT@0..9 "typegroup"
+    BLOCK@9..32
+      DOC@9..31
+        STRING_LITERAL@9..18
+          STRING_DELIM_OPEN@9..12 "\"\"\""
+          STRING_CONTENT@12..15 "doc"
+          STRING_DELIM_CLOSE@15..18 "\"\"\""
+        NEWLINE@18..19 "\n"
+        STRUCT_DEF@19..31
+          STRUCT_KW@19..25 "struct"
+          WHITESPACE@25..26 " "
+          SIGNATURE@26..27
+            NAME@26..27
+              IDENT@26..27 "T"
+          BLOCK@27..28
+            WHITESPACE@27..28 " "
+          END_KW@28..31 "end"
+      NEWLINE@31..32 "\n"
+    END_KW@32..35 "end"
+  NEWLINE@35..36 "\n"

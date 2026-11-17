@@ -18,7 +18,7 @@ use rowan::ast::AstNode as _;
 
 use crate::ast::{DocAttachment, DocText};
 use crate::incremental::Analysis;
-use crate::parser::parse;
+use crate::parser::{ParseOptions, parse_with_options};
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 use fatou_parser::documentation::ast::Heading;
@@ -30,7 +30,15 @@ use fatou_parser::documentation::ast::Heading;
 /// useful, and a definition whose name cannot be recovered contributes no
 /// symbol of its own but its body is still walked.
 pub fn compute_document_symbols(text: &str, encoding: PositionEncoding) -> Vec<DocumentSymbol> {
-    let root = parse(text).cst;
+    compute_document_symbols_with_options(text, encoding, ParseOptions::default())
+}
+
+pub fn compute_document_symbols_with_options(
+    text: &str,
+    encoding: PositionEncoding,
+    options: ParseOptions,
+) -> Vec<DocumentSymbol> {
+    let root = parse_with_options(text, options).cst;
     symbols_for_tree(&root, text, encoding)
 }
 
@@ -56,7 +64,9 @@ pub(crate) fn document_symbols_via_db(
     match cached {
         Ok(Some(symbols)) => symbols,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_document_symbols(text, encoding),
+        Ok(None) | Err(_) => {
+            compute_document_symbols_with_options(text, encoding, snapshot.options_for_path(path))
+        }
     }
 }
 

@@ -31,7 +31,7 @@ use rowan::{TextSize, TokenAtOffset};
 use crate::ast::{AstNode, AstToken, CallExpr, Expr, HasArgList, KeywordArg};
 use crate::incremental::Analysis;
 use crate::index::{FunctionGroup, Method, ModuleIndex, Param};
-use crate::parser::parse;
+use crate::parser::parse_with_options;
 use crate::resolve::{
     Namespace, PackageSource, Resolution, Resolver, resolve_module, resolve_submodule,
 };
@@ -54,7 +54,7 @@ pub fn compute_signature_help<P: PackageSource>(
     encoding: PositionEncoding,
     packages: &P,
 ) -> Option<SignatureHelp> {
-    let parsed = parse(text);
+    let parsed = parse_with_options(text, packages.syntax_options());
     let model = SemanticModel::build(&parsed.cst);
     let offset = TextSize::new(LineIndex::new(text).position_to_byte(position, encoding) as u32);
     signature_help_for(&model, packages, &parsed.cst, offset)
@@ -108,7 +108,7 @@ fn signature_help_for<P: PackageSource>(
         })
     {
         let (embedded, semantic_offset) = embedded;
-        let parsed = parse(embedded.text);
+        let parsed = parse_with_options(embedded.text, packages.syntax_options());
         let embedded_model = SemanticModel::build(&parsed.cst);
         let call = enclosing_call(&parsed.cst, embedded.offset)?;
         let arg_list = call.arg_list()?;

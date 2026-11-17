@@ -195,6 +195,62 @@ dependencies can limit undefined-name checking. See the [project
 reference](../reference/configuration.md#project) for analysis limits,
 `analysis-incomplete` notices, and missing-include errors.
 
+## Choosing a syntax edition
+
+Julia's syntax edition controls which grammar Fatou parses. Its supported
+runtime range controls compatibility linting. Declare both independently in
+`Project.toml`:
+
+```toml
+[compat]
+julia = "1.6"
+
+[syntax]
+julia_version = "1.14"
+```
+
+Fatou supports editions **1.13, 1.14, and 1.15**. It selects an edition in this
+order:
+
+1. The project's `[syntax].julia_version`.
+2. The minimum version allowed by `[compat].julia`.
+3. Edition 1.13 for package sources, or the latest supported edition for
+   scripts.
+
+Versions below 1.13 select 1.13. Other versions select the greatest supported
+edition no newer than that version, capped at 1.15. Patch versions do not change
+the edition. Package sources use their owning project. Scripts use the active
+Julia project discovered through `JULIA_PROJECT` or project discovery.
+Standalone files without a project, and stdin, use the latest supported edition.
+
+A manifest dependency uses its own `syntax.julia_version` field, defaulting to
+1.13 when absent. The manifest's top-level `julia_version` describes the runtime
+and never selects a syntax edition. Fatou reads this metadata statically.
+
+Use `--syntax-edition` for a command-local override:
+
+```sh
+fatou format --safe --syntax-edition 1.13 src/Example.jl
+fatou lint --syntax-edition 1.14 src/Example.jl
+fatou parse --syntax-edition 1.14 --to sexpr src/Example.jl
+fatou debug format --syntax-edition 1.14 src/Example.jl
+```
+
+This flag accepts only supported editions. It does not change `--julia-version`
+or `[julia].version`, which set the runtime range for compatibility checks.
+Syntax editions have no `fatou.toml` or editor setting.
+
+Includes inherit the loading program's edition, even across project boundaries.
+When several programs include the same file, Fatou analyzes every context and
+combines diagnostics. Formatting and fixes require agreement across those
+contexts and valid output in every edition.
+
+The language server honors unsaved project and manifest edits immediately.
+Malformed metadata selects the role's default edition for analysis and reports
+an error. Fatou withholds source rewrites until the metadata is valid or a CLI
+override supplies a certain edition. Tokens, folding, and the document outline
+use the owning package's context first, then configured entry-point order.
+
 ## Excluding files
 
 Keep vendored code out of directory scans:

@@ -15,6 +15,7 @@ mod edit;
 mod events;
 mod expr;
 mod lexer;
+mod options;
 mod recovery;
 mod reparse;
 mod sexpr;
@@ -24,19 +25,23 @@ mod unescape;
 mod unicode_ident;
 mod unicode_ops;
 
-pub use core::{ParseDiagnostic, ParseOutput, parse, reconstruct};
+pub use core::{ParseDiagnostic, ParseOutput, parse, parse_with_options, reconstruct};
+pub use options::{InvalidSyntaxEdition, ParseOptions, SyntaxEdition};
 // Semver-loose: exposed for the fatou CLI's completion and semantic layers,
 // not a stable part of this crate's API.
 pub use lexer::{KEYWORDS, is_ident_continue, is_ident_start};
 pub use reparse::{
-    Edit, ReparseTier, Reparsed, apply_edits, diff_edit, reparse, reparse_edits, try_apply_edits,
+    Edit, ReparseBase, ReparseTier, Reparsed, apply_edits, diff_edit, reparse, reparse_edits,
+    reparse_edits_with_options, reparse_with_options, try_apply_edits,
 };
 // Test support, not API: the in-crate Tenet-4 assert and the
 // `tests/incremental_reparse.rs` oracle harness share this one definition so
 // they can never diverge, which is the only reason it is `pub` at all.
 #[doc(hidden)]
 pub use reparse::fingerprint;
-pub use sexpr::{normalize_sexpr, sexpr_tokens, to_juliasyntax_sexpr};
+pub use sexpr::{
+    normalize_sexpr, sexpr_tokens, to_juliasyntax_sexpr, to_juliasyntax_sexpr_with_options,
+};
 // The `lex` bench's entry point. Gated on `bench` so tokenizing on its own —
 // which no consumer has a reason to do — never becomes part of the API.
 #[cfg(feature = "bench")]

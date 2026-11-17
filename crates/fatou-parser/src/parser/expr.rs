@@ -160,7 +160,7 @@ fn newline_stops_operand(ctx: &ParserCtx<'_>, op_idx: usize, flags: ExprFlags) -
 /// Parse one expression at statement scope (a newline after a complete operand
 /// terminates it).
 pub(crate) fn parse_expr(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     start: usize,
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -171,7 +171,7 @@ pub(crate) fn parse_expr(
 /// Parse one statement at toplevel or module-block scope, where the contextual
 /// keyword `public` opens a `PUBLIC_STMT`. Identical to [`parse_expr`] otherwise.
 pub(crate) fn parse_stmt(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -183,7 +183,7 @@ pub(crate) fn parse_stmt(
 /// toplevel/module scope (where `public` opens a `PUBLIC_STMT`), false in inner
 /// blocks (where `public` stays an ordinary identifier).
 pub(crate) fn parse_block_stmt(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     start: usize,
     public_context: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -201,7 +201,7 @@ pub(crate) fn parse_block_stmt(
 /// `context` propagates the enclosing index, ternary, and generator boundaries.
 /// Other flags reset to statement scope, including newline and space sensitivity.
 pub(crate) fn parse_kw_stmt_operand(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     start: usize,
     context: KwOperandContext,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -220,7 +220,7 @@ pub(crate) fn parse_kw_stmt_operand(
 /// A labeled `break` takes a statement-level value, but an enclosing ternary's
 /// colon still ends it instead of becoming a range operator.
 pub(crate) fn parse_break_value(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     start: usize,
     colon_ends: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -238,7 +238,7 @@ pub(crate) fn parse_break_value(
 /// *not* enable the `end` index marker — that is specific to square brackets and
 /// is threaded separately (see [`ExprFlags::end_marker`]).
 pub(crate) fn parse_expr_in_brackets(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     start: usize,
     min_bp: u8,
     // Inherited index-marker context for the bracketed expression.
@@ -261,7 +261,7 @@ pub(crate) fn parse_expr_in_brackets(
 /// (`function f()::S where T end` ⇒ `(where (::-i (call f) S) T)`), matching
 /// JuliaSyntax's `parse_function_signature`.
 pub(crate) fn parse_signature_expr(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -282,12 +282,13 @@ pub(crate) fn parse_signature_expr(
 /// of chaining — so the spec borrows it. A *glued* `(` still chains, matching
 /// JuliaSyntax.
 pub(crate) fn parse_type_spec_expr(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
     let flags = ExprFlags {
         array_mode: true,
+        name_context: true,
         ..ExprFlags::default()
     };
     parse_expr_in(tokens, start, 0, diagnostics, flags)
@@ -298,7 +299,7 @@ pub(crate) fn parse_type_spec_expr(
 /// `(struct (error try) …)`) rather than dispatched to its block form. See
 /// [`ExprFlags::name_context`].
 pub(crate) fn parse_name_signature_expr(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     start: usize,
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -311,7 +312,7 @@ pub(crate) fn parse_name_signature_expr(
 }
 
 fn parse_expr_in(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     start: usize,
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -347,14 +348,14 @@ fn parse_expr_in(
         for_ends: !stmt_comma || kw_generator_body,
         ..KwOperandContext::default()
     };
-    let ctx = ParserCtx::new(tokens);
+    let ctx = tokens;
 
     // The contextual keyword `public` (a plain identifier elsewhere) opens a
     // `PUBLIC_STMT` at toplevel/module-block statement position, *unless* the next
     // significant token is `(`, `=`, or `[` — those keep `public` an identifier
     // (a call `public(x)`, an assignment `public = 1`, an index `public[i]`),
     // matching JuliaSyntax's `parse_public` compatibility shim.
-    if public_context && is_public_keyword(&ctx, start) {
+    if public_context && is_public_keyword(ctx, start) {
         return parse_name_list_stmt(tokens, start, SyntaxKind::PUBLIC_STMT, diagnostics);
     }
 
@@ -378,9 +379,10 @@ fn parse_expr_in(
     // `(function (call (error begin)) …)`). Build the `(error <kw>)` atom and let
     // the operator/postfix loop apply any glued call (`begin()` ⇒ a `CALL_EXPR`).
     let name_error_atom = (name_context
-        && ctx
+        && (ctx
             .token(start)
-            .is_some_and(|t| is_name_error_keyword(t.kind)))
+            .is_some_and(|t| is_name_error_keyword(t.kind))
+            || is_reserved_typegroup(ctx, start)))
     .then(|| {
         let pos = ctx.token(start).map_or(start, |t| t.start);
         push_diagnostic(
@@ -395,12 +397,12 @@ fn parse_expr_in(
 
     let mut block_form = if name_error_atom.is_some() {
         None
-    } else if let Some(decl_word) = type_decl_keyword(&ctx, start) {
+    } else if let Some(decl_word) = type_decl_keyword(ctx, start) {
         Some(match decl_word {
             TypeDecl::Abstract => parse_abstract_type(tokens, start, diagnostics),
             TypeDecl::Primitive => parse_primitive_type(tokens, start, diagnostics),
         })
-    } else if is_typegroup_keyword(&ctx, start) {
+    } else if opens_typegroup(ctx, start) {
         Some(parse_typegroup_expr(tokens, start, diagnostics))
     } else {
         match ctx.token(start).map(|t| t.kind) {
@@ -431,21 +433,40 @@ fn parse_expr_in(
     if block_form.is_none() {
         match ctx.token(start).map(|t| t.kind) {
             Some(TokKind::ReturnKw) => {
-                return parse_keyword_stmt(
+                let parsed = parse_keyword_stmt(
                     tokens,
                     start,
                     SyntaxKind::RETURN_EXPR,
                     KwStmt::ExprTuple {
                         optional_value: true,
                         context: KwOperandContext {
-                            end_marker: flags.end_marker,
-                            begin_marker,
-                            colon_ends: no_range,
+                            end_marker: flags.end_marker
+                                && ctx.options.syntax_edition
+                                    >= crate::parser::SyntaxEdition::Julia114,
+                            begin_marker: begin_marker
+                                && ctx.options.syntax_edition
+                                    >= crate::parser::SyntaxEdition::Julia114,
+                            colon_ends: no_range
+                                && ctx.options.syntax_edition
+                                    >= crate::parser::SyntaxEdition::Julia114,
                             ..kw_context
                         },
                     },
                     diagnostics,
-                );
+                )?;
+                // A comma after a bare return belongs to the enclosing tuple
+                // at statement scope. In argument lists the caller owns it.
+                if name_error_atom.is_none()
+                    && stmt_comma
+                    && min_bp <= COMMA_BP
+                    && ctx
+                        .token(ctx.skip_ws_and_block_comments(parsed.end))
+                        .is_some_and(|token| token.kind == TokKind::Comma)
+                {
+                    block_form = Some(Some(parsed));
+                } else {
+                    return Some(parsed);
+                }
             }
             Some(kind @ (TokKind::BreakKw | TokKind::ContinueKw)) => {
                 let is_break = kind == TokKind::BreakKw;
@@ -463,14 +484,15 @@ fn parse_expr_in(
                     },
                     diagnostics,
                 )?;
-                // A comma after the completed keyword must reach the expression
-                // loop so tuples and assignments retain their usual precedence.
-                if name_error_atom.is_some()
-                    || ctx
-                        .token(ctx.skip_ws_and_block_comments(parsed.end))
-                        .map(|t| t.kind)
-                        != Some(TokKind::Comma)
-                {
+                // Let the expression loop handle commas and edition 1.13's
+                // range colon with their normal precedence.
+                let following = ctx
+                    .token(ctx.skip_ws_and_block_comments(parsed.end))
+                    .map(|t| t.kind);
+                let range = following == Some(TokKind::Colon)
+                    && ctx.options.syntax_edition == crate::parser::SyntaxEdition::Julia113
+                    && !no_range;
+                if name_error_atom.is_some() || !(range || following == Some(TokKind::Comma)) {
                     return Some(parsed);
                 }
                 block_form = Some(Some(parsed));
@@ -534,7 +556,32 @@ fn parse_expr_in(
         // (`begin()`) still attaches via the postfix chain.
         (Some(atom), _) => (atom, false),
         (None, Some(parsed)) => (parsed?, true),
-        (None, None) => (parse_prefix(&ctx, start, diagnostics, flags)?, false),
+        (None, None)
+            if stmt_comma
+                && min_bp <= COMMA_BP
+                && ctx
+                    .token(start)
+                    .is_some_and(|token| token.kind == TokKind::Comma) =>
+        {
+            let comma = &tokens[start];
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::EmptyListSlot,
+                "unexpected `,` at the start of a statement",
+                comma.start,
+                comma.start,
+            );
+            let missing = ExprParse {
+                start,
+                end: start,
+                events: Vec::new(),
+            };
+            (
+                parse_comma_tuple(tokens, ctx, missing, diagnostics, flags),
+                false,
+            )
+        }
+        (None, None) => (parse_prefix(ctx, start, diagnostics, flags)?, false),
     };
 
     // A glued colon operator (`a :< b`) consumes exactly one colon-tier operation
@@ -545,7 +592,7 @@ fn parse_expr_in(
 
     loop {
         if !lhs_is_block_keyword {
-            lhs = parse_postfix_chain(&ctx, lhs, array_mode, flags.end_marker, diagnostics);
+            lhs = parse_postfix_chain(ctx, lhs, array_mode, flags.end_marker, diagnostics);
         }
 
         // Invalid string juxtaposition (`"a"x`, `"a""b"`, `2"a"`): a string
@@ -555,7 +602,7 @@ fn parse_expr_in(
         // right operand is parsed identically (at `JUXTAPOSE_R`).
         if !lhs_is_block_keyword
             && !no_juxtapose
-            && should_juxtapose_string_error(&ctx, &lhs, min_bp)
+            && should_juxtapose_string_error(ctx, &lhs, min_bp)
             && let Some(rhs) = parse_expr_in(tokens, lhs.end, JUXTAPOSE_R, diagnostics, flags)
         {
             let pos = tokens[lhs.end - 1].end;
@@ -578,7 +625,7 @@ fn parse_expr_in(
         // (`2x*y` ⇒ `(2x)*y`) attaches outside.
         if !lhs_is_block_keyword
             && !no_juxtapose
-            && should_juxtapose(&ctx, &lhs, min_bp)
+            && should_juxtapose(ctx, &lhs, min_bp)
             && let Some(rhs) = parse_expr_in(
                 tokens,
                 lhs.end,
@@ -650,9 +697,9 @@ fn parse_expr_in(
         if !no_where
             && WHERE_BP >= min_bp
             && let Some((where_idx, TokKind::WhereKw)) =
-                next_operator(&ctx, lhs.end, flags.operator_newlines())
+                next_operator(ctx, lhs.end, flags.operator_newlines())
         {
-            lhs = parse_where_chain(tokens, &ctx, lhs, where_idx, diagnostics, flags);
+            lhs = parse_where_chain(tokens, ctx, lhs, where_idx, diagnostics, flags);
             continue;
         }
 
@@ -669,7 +716,7 @@ fn parse_expr_in(
                 .map(|t| t.kind)
                 == Some(TokKind::Comma)
         {
-            lhs = parse_comma_tuple(tokens, &ctx, lhs, diagnostics, flags);
+            lhs = parse_comma_tuple(tokens, ctx, lhs, diagnostics, flags);
             continue;
         }
 
@@ -681,7 +728,7 @@ fn parse_expr_in(
         // for-spec separator. Checked after juxtaposition (so an adjacent `2in`
         // still juxtaposes) and before the symbolic operators.
         if !for_spec_var
-            && let Some(op_idx) = word_operator(&ctx, lhs.end, flags.operator_newlines())
+            && let Some(op_idx) = word_operator(ctx, lhs.end, flags.operator_newlines())
         {
             if WORD_OP_L < min_bp {
                 break;
@@ -703,8 +750,7 @@ fn parse_expr_in(
             continue;
         }
 
-        let Some((op_idx, op_kind)) = next_operator(&ctx, lhs.end, flags.operator_newlines())
-        else {
+        let Some((op_idx, op_kind)) = next_operator(ctx, lhs.end, flags.operator_newlines()) else {
             break;
         };
 
@@ -719,7 +765,7 @@ fn parse_expr_in(
         // Inside an array literal, an operator glued to the start of the next
         // operand (space before, none after) is that operand's prefix, marking a
         // new element rather than an infix operator. End this element here.
-        if array_mode && array_element_boundary(&ctx, lhs.end, op_idx) {
+        if array_mode && array_element_boundary(ctx, lhs.end, op_idx) {
             break;
         }
 
@@ -729,7 +775,7 @@ fn parse_expr_in(
         if op_kind == TokKind::Dot
             && ctx.token(ctx.skip_trivia(op_idx + 1)).map(|t| t.kind) == Some(TokKind::At)
         {
-            lhs = parse_qualified_macro(&ctx, lhs, op_idx, diagnostics, flags);
+            lhs = parse_qualified_macro(ctx, lhs, op_idx, diagnostics, flags);
             continue;
         }
 
@@ -798,7 +844,7 @@ fn parse_expr_in(
             if l_bp < min_bp {
                 break;
             }
-            lhs = parse_colon_range(tokens, &ctx, lhs, op_idx, diagnostics, flags);
+            lhs = parse_colon_range(tokens, ctx, lhs, op_idx, diagnostics, flags);
             continue;
         }
 
@@ -813,7 +859,7 @@ fn parse_expr_in(
                 break;
             }
             lhs = parse_operator_chain(
-                &ctx,
+                ctx,
                 lhs,
                 op_idx,
                 diagnostics,
@@ -839,7 +885,7 @@ fn parse_expr_in(
                 break;
             }
             lhs = parse_operator_chain(
-                &ctx,
+                ctx,
                 lhs,
                 op_idx,
                 diagnostics,
@@ -860,7 +906,7 @@ fn parse_expr_in(
             if TERNARY_L < min_bp {
                 break;
             }
-            lhs = match parse_ternary(&ctx, lhs, op_idx, diagnostics, flags) {
+            lhs = match parse_ternary(ctx, lhs, op_idx, diagnostics, flags) {
                 Ok(node) => node,
                 Err(done) => return Some(done),
             };
@@ -893,7 +939,7 @@ fn parse_expr_in(
         // operators parse a full right operand at their binding power.
         let rhs_result = if op_kind == TokKind::Dot {
             parse_prefix(
-                &ctx,
+                ctx,
                 rhs_operand,
                 diagnostics,
                 ExprFlags {
@@ -941,9 +987,9 @@ fn parse_expr_in(
             && !no_where
             && !no_decl_where
             && let Some((where_idx, TokKind::WhereKw)) =
-                next_operator(&ctx, rhs.end, flags.operator_newlines())
+                next_operator(ctx, rhs.end, flags.operator_newlines())
         {
-            rhs = parse_where_chain(tokens, &ctx, rhs, where_idx, diagnostics, flags);
+            rhs = parse_where_chain(tokens, ctx, rhs, where_idx, diagnostics, flags);
         }
 
         let node = operator_node_kind(op_kind);
@@ -976,7 +1022,7 @@ fn parse_expr_in(
 /// Mirrors JuliaSyntax's `parse_where_chain` (`while peek == where`, the bound
 /// parsed by `parse_comparison` with `where_enabled=false`).
 fn parse_where_chain(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     ctx: &ParserCtx<'_>,
     mut lhs: ExprParse,
     mut where_idx: usize,
@@ -1034,27 +1080,30 @@ fn type_decl_keyword(ctx: &ParserCtx<'_>, start: usize) -> Option<TypeDecl> {
     (next.kind == TokKind::Ident && next.text == "type").then_some(word)
 }
 
-/// Whether the identifier `typegroup` at `start` opens Julia 1.14's grouped type
-/// definition. Julia 1.14 reserves the word outright, but keeping it contextual
-/// here leaves it usable as an ordinary identifier in pre-1.14 code, so it only
-/// opens the block form when the next significant token — across newlines, since
-/// the body normally starts on the following line — can begin a type definition:
-/// `struct`, `mutable`, `abstract`, `primitive`, a macro call, or a docstring.
-/// Mirrors the set JuliaSyntax recovers on when parsing below 1.14.
-fn is_typegroup_keyword(ctx: &ParserCtx<'_>, start: usize) -> bool {
-    match ctx.token(start) {
-        Some(t) if t.kind == TokKind::Ident && t.text == "typegroup" => {}
-        _ => return false,
+fn is_typegroup(ctx: &ParserCtx<'_>, start: usize) -> bool {
+    ctx.token(start)
+        .is_some_and(|t| t.kind == TokKind::Ident && t.text == "typegroup")
+}
+
+fn is_reserved_typegroup(ctx: &ParserCtx<'_>, start: usize) -> bool {
+    ctx.options.syntax_edition >= crate::parser::SyntaxEdition::Julia114 && is_typegroup(ctx, start)
+}
+
+/// In 1.13, recover a block when an opener on the same line makes an ordinary
+/// identifier interpretation invalid.
+fn opens_typegroup(ctx: &ParserCtx<'_>, start: usize) -> bool {
+    if !is_typegroup(ctx, start) {
+        return false;
     }
-    let next = ctx.skip_trivia(start + 1);
-    match ctx.token(next) {
-        Some(t) => match t.kind {
+    if ctx.options.syntax_edition >= crate::parser::SyntaxEdition::Julia114 {
+        return true;
+    }
+    ctx.token(ctx.skip_ws_and_block_comments(start + 1))
+        .is_some_and(|token| match token.kind {
             TokKind::StructKw | TokKind::MutableKw | TokKind::At | TokKind::StringDelimOpen => true,
-            TokKind::Ident => matches!(t.text, "abstract" | "primitive"),
+            TokKind::Ident => matches!(token.text, "abstract" | "primitive"),
             _ => false,
-        },
-        None => false,
-    }
+        })
 }
 
 /// Whether the identifier `public` at `start` opens a `PUBLIC_STMT`. True when
@@ -1159,7 +1208,7 @@ fn build_binary_missing_rhs(kind: SyntaxKind, lhs: ExprParse, gap_end: usize) ->
 /// `(tuple x)`, `x, y, = a`) leaves a tuple with the operands gathered so far,
 /// mirroring JuliaSyntax's `parse_comma`.
 fn parse_comma_tuple(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     ctx: &ParserCtx<'_>,
     first: ExprParse,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -1197,7 +1246,25 @@ fn parse_comma_tuple(
         {
             break;
         }
-        match parse_expr_in(tokens, item_start, COMMA_ITEM_BP, diagnostics, flags) {
+        // After a leading comma, recover a closing keyword as an invalid
+        // tuple element. An index `end` marker still parses as an operand.
+        let item = if comma_idx == start
+            && let Some(token) = ctx.token(item_start)
+            && is_closing_block_keyword(token.kind)
+            && !(flags.end_marker && token.kind == TokKind::EndKw)
+        {
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::StrayKeyword,
+                "unexpected block keyword",
+                token.start,
+                token.end,
+            );
+            Some(error_expr_with_range(item_start, item_start + 1))
+        } else {
+            parse_expr_in(tokens, item_start, COMMA_ITEM_BP, diagnostics, flags)
+        };
+        match item {
             Some(item) => {
                 push_range(&mut events, end, item.start);
                 events.extend(item.events);
@@ -1219,7 +1286,7 @@ fn parse_comma_tuple(
 /// the left operand of the next chain (`(a:b:c):d:e`). An odd trailing colon
 /// (`a:b:c:d`) leaves an ordinary two-operand `BINARY_EXPR`.
 fn parse_colon_range(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     ctx: &ParserCtx<'_>,
     lhs: ExprParse,
     first_colon: usize,
@@ -3561,7 +3628,7 @@ fn parse_one_arg(
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
     let tokens = ctx.tokens();
-    let parse_arg_expr = |tokens: &[Token], start, diagnostics: &mut Vec<ParseDiagnostic>| {
+    let parse_arg_expr = |tokens: &ParserCtx<'_>, start, diagnostics: &mut Vec<ParseDiagnostic>| {
         parse_expr_in(tokens, start, 0, diagnostics, flags)
     };
     if let Some(eq_idx) = kwarg_eq(ctx, i) {
@@ -3625,7 +3692,7 @@ fn parse_one_arg(
 /// identifier followed on the same line by a single `=`, not `==`), return the
 /// `=` token's index.
 fn kwarg_eq(ctx: &ParserCtx<'_>, i: usize) -> Option<usize> {
-    if ctx.token(i).map(|t| t.kind) != Some(TokKind::Ident) {
+    if ctx.token(i).map(|t| t.kind) != Some(TokKind::Ident) || is_reserved_typegroup(ctx, i) {
         return None;
     }
     let eq = ctx.skip_ws(i + 1);

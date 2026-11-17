@@ -40,7 +40,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::incremental::{Analysis, SourceFile};
 use crate::index::{ModuleIndex, PackageIndex};
-use crate::parser::{KEYWORDS, parse};
+#[cfg(test)]
+use crate::parser::parse;
+use crate::parser::{KEYWORDS, parse_with_options};
 use crate::resolve::{
     Candidate, ModulePath, Namespace, PackageSource, Resolver, Source, resolve_submodule,
 };
@@ -72,7 +74,7 @@ pub fn compute_completions<P: PackageSource>(
     packages: &P,
 ) -> Vec<CompletionItem> {
     let offset = LineIndex::new(text).position_to_byte(position, encoding);
-    let root = parse(text).cst;
+    let root = parse_with_options(text, packages.syntax_options()).cst;
     let model = SemanticModel::build(&root);
     // The pure path has no file path to key workspace membership on; the live
     // server passes the workspace module through `completion_via_db`.
@@ -120,11 +122,20 @@ pub(crate) fn completion_via_db(
             Some((snapshot, file)),
         ))
     }));
-    match cached {
+    let mut items = match cached {
         Ok(Some(items)) => items,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
         Ok(None) | Err(_) => compute_completions(text, position, encoding, snapshot),
+    };
+    for item in &mut items {
+        if let Some(serde_json::Value::Object(data)) = &mut item.data {
+            data.insert(
+                "fatouSourcePath".into(),
+                serde_json::to_value(path).expect("path serializes"),
+            );
+        }
     }
+    items
 }
 
 /// Fill an item's `documentation` (and, for a function, its `detail` signature)
@@ -152,7 +163,7 @@ fn completions_for<P: PackageSource>(
     let offset_bytes: usize = offset.into();
     if let Some(context) = super::documentation::DocumentationContext::at(model, offset) {
         if let Some(embedded) = context.embedded_julia() {
-            let parsed = parse(embedded.text);
+            let parsed = parse_with_options(embedded.text, packages.syntax_options());
             let embedded_model = SemanticModel::build(&parsed.cst);
             let mut items = completions_for(
                 &embedded_model,

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use fatou::environment::{EnvSource, Environment, Package, PackageKind, Uuid};
-use fatou::index::{IndexCache, harvest_libraries, harvest_libraries_parallel};
+use fatou::index::{CacheKey, IndexCache, harvest_libraries, harvest_libraries_parallel};
 
 fn nil_uuid() -> Uuid {
     "00000000-0000-0000-0000-000000000000".parse().unwrap()
@@ -36,11 +36,13 @@ fn make_package(parent: &Path, name: &str) -> PathBuf {
 /// A registered manifest package rooted at `source` with content id `sha`.
 fn registered(name: &str, sha: &str, source: PathBuf) -> Package {
     Package {
+        syntax_edition: fatou_parser::parser::SyntaxEdition::OLDEST,
         name: name.to_string(),
         uuid: nil_uuid(),
         version: Some("1.0.0".to_string()),
         tree_sha1: Some(sha.to_string()),
         deps: Vec::new(),
+        extensions: Vec::new(),
         kind: PackageKind::Registered,
         source: Some(source),
     }
@@ -90,6 +92,93 @@ fn parallel_harvest_equals_sequential() {
 }
 
 #[test]
+fn a_manifest_uses_the_installed_stdlib_or_its_pinned_replacement() {
+    use fatou::environment::JuliaInstall;
+    use fatou::parser::{ParseOptions, SyntaxEdition};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base");
+    let stdlib = tmp.path().join("stdlib");
+    std::fs::create_dir(&base).unwrap();
+    std::fs::create_dir(&stdlib).unwrap();
+    std::fs::write(base.join("Base.jl"), "module Base\nend\n").unwrap();
+    let installed = make_package(&stdlib, "Statistics");
+    std::fs::write(
+        installed.join("Project.toml"),
+        "[syntax]\njulia_version = '1.14'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        installed.join("src/Statistics.jl"),
+        "module Statistics\nexport installed_only\ninstalled_only() = 2 +% 1\nend\n",
+    )
+    .unwrap();
+    let pinned = make_package(tmp.path(), "Statistics");
+    let install = JuliaInstall {
+        prefix: tmp.path().to_path_buf(),
+        share: tmp.path().to_path_buf(),
+        base_dir: base,
+        stdlib_dir: stdlib,
+        version: "1.14".into(),
+    };
+    let manifest = tmp.path().join("Manifest.toml");
+    let header = format!("[[deps.Statistics]]\nuuid = '{}'\n", nil_uuid());
+    let options = ParseOptions {
+        syntax_edition: SyntaxEdition::Julia114,
+    };
+    let pool = pool(2);
+    for (source, kind, edition, export, pin) in [
+        (
+            &installed,
+            PackageKind::Stdlib,
+            SyntaxEdition::Julia113,
+            "installed_only",
+            "",
+        ),
+        (
+            &pinned,
+            PackageKind::Dev,
+            SyntaxEdition::Julia114,
+            "greet",
+            "path = 'Statistics'\nsyntax.julia_version = '1.14'\n",
+        ),
+    ] {
+        std::fs::write(&manifest, format!("{header}{pin}")).unwrap();
+        let mut env = env_with(vec![Package {
+            kind,
+            syntax_edition: edition,
+            ..registered("Statistics", "unused", source.clone())
+        }]);
+        env.install = Some(install.clone());
+        env.manifest_file = Some(manifest.clone());
+        let envs = &[env];
+        for lib in [
+            harvest_libraries(envs),
+            harvest_libraries_parallel(envs, None, &pool),
+        ] {
+            assert_eq!(&lib.roots["Statistics"], source);
+            for index in [
+                &lib.packages["Statistics"],
+                &lib.syntax.variants[&("Statistics".into(), options)],
+            ] {
+                assert!(index.diagnostics.is_empty(), "{:?}", index.diagnostics);
+                let names: Vec<_> = index
+                    .root
+                    .exports
+                    .iter()
+                    .map(|name| name.name.as_str())
+                    .collect();
+                assert_eq!(names, [export, "Statistics"]);
+            }
+            let entry = source.join("src/Statistics.jl");
+            let contexts = &lib.syntax.files[&entry];
+            assert_eq!(contexts.len(), 1, "{contexts:?}");
+            assert_eq!(contexts[0].selection(&Default::default()).options, options);
+        }
+    }
+}
+
+#[test]
 fn cold_harvest_populates_cache_then_warm_harvest_reads_it() {
     let tmp = tempfile::tempdir().unwrap();
     let cache_dir = tempfile::tempdir().unwrap();
@@ -102,7 +191,9 @@ fn cold_harvest_populates_cache_then_warm_harvest_reads_it() {
     let cold = harvest_libraries_parallel(std::slice::from_ref(&env), Some(&cache), &pool(2));
     let cold_foo = cold.packages.get("Foo").expect("Foo harvested").clone();
     assert!(
-        cache.load("Foo", "sha-foo").is_some(),
+        cache
+            .load("Foo", &CacheKey::for_package(&env.packages[0]).unwrap())
+            .is_some(),
         "the cold harvest should have written Foo to the cache"
     );
 
@@ -136,7 +227,7 @@ fn uncacheable_packages_are_never_written() {
         "still harvested live"
     );
     assert!(
-        cache.load("Foo", "unused").is_none(),
+        !cache_dir.path().join("index").exists(),
         "a package with no content key must not be cached"
     );
 }

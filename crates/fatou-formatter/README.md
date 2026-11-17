@@ -48,3 +48,11 @@ independently of the `fatou` CLI.
 
 - [API documentation](https://docs.rs/fatou-formatter)
 - [fatou](https://fatou.dev), the project this crate is extracted from
+
+### Syntax editions
+
+Use `FormatOptions { style, parse_options }` with `format_with_options` or
+`format_verified_with_options` to select a Julia syntax edition independently of
+layout. CST and range APIs also have `_with_options` variants; pass the options
+used to parse their input tree. Existing APIs use the latest edition.
+`verify_format_with_options` compares both texts under the same edition.

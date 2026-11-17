@@ -11,12 +11,13 @@ use fatou::cli::{
 use fatou::config::{Config, ConfigSource};
 use fatou::debug::{
     CheckKind, DebugArtifacts, DebugFailure, build_debug_report, checks_label,
-    run_debug_checks_for_file, sanitize_path_for_filename, write_debug_artifacts,
+    run_debug_checks_with_options, sanitize_path_for_filename, write_debug_artifacts,
 };
 use fatou::file_discovery::ExcludeFilter;
 use fatou::formatter::{self, FormatStyle};
 use fatou::linter::{self, LintStatus, OutputMode, RenderOptions};
-use fatou::parser::{parse, reconstruct, to_juliasyntax_sexpr};
+use fatou::parse_context::{ContextCatalog, EditionSelection, EditionSource, SourceContext};
+use fatou::parser::{SyntaxEdition, parse_with_options, to_juliasyntax_sexpr_with_options};
 
 fn main() -> ExitCode {
     env_logger::init();
@@ -33,9 +34,23 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<ExitCode, String> {
     match cli.command {
-        Commands::Parse { file, verify, to } => run_parse(file, cli.quiet, verify, to),
+        Commands::Parse {
+            file,
+            verify,
+            to,
+            syntax_edition,
+        } => run_parse(
+            file,
+            cli.quiet,
+            verify,
+            to,
+            syntax_edition.map(Into::into),
+            &cli.config,
+            cli.no_config,
+        ),
         Commands::Format {
             paths,
+            syntax_edition,
             check,
             safe,
             line_width,
@@ -46,6 +61,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             let (config, source) = load_config(&cli.config, cli.no_config)?;
             let style = style_with_overrides(&config, line_width, indent_width);
             let filter = resolve_exclude_filter(&config, &source, &exclude, force_exclude)?;
+            let entries = resolved_entries(&config, &source, &paths)?;
             run_format(
                 paths,
                 check,
@@ -53,10 +69,13 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                 style,
                 &filter,
                 cli.quiet,
+                syntax_edition.map(Into::into),
+                &entries,
             )
         }
         Commands::Lint {
             paths,
+            syntax_edition,
             fix,
             unsafe_fixes,
             exclude,
@@ -83,8 +102,8 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                         .map_err(|err| err.to_string())?,
                 );
             }
-            entries.sort();
-            entries.dedup();
+            let mut seen = std::collections::BTreeSet::new();
+            entries.retain(|entry| seen.insert(entry.clone()));
             run_lint(
                 paths,
                 output,
@@ -95,6 +114,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                 &entries,
                 &filter,
                 julia_target,
+                syntax_edition.map(Into::into),
             )
         }
         Commands::Lsp => fatou::lsp::run()
@@ -103,6 +123,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
         Commands::Debug { command } => match command {
             DebugCommand::Format {
                 paths,
+                syntax_edition,
                 checks,
                 report,
                 dump_dir,
@@ -113,6 +134,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                 let (config, source) = load_config(&cli.config, cli.no_config)?;
                 let style = style_with_overrides(&config, None, None);
                 let filter = resolve_exclude_filter(&config, &source, &exclude, force_exclude)?;
+                let entries = resolved_entries(&config, &source, &paths)?;
                 run_debug_format(
                     &paths,
                     checks,
@@ -121,6 +143,8 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                     dump_passes,
                     style,
                     &filter,
+                    syntax_edition.map(Into::into),
+                    &entries,
                 )
             }
         },
@@ -130,6 +154,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
 /// `fatou debug format`: check invariants over the discovered files, writing
 /// nothing back. Exit 0 when everything passes, 1 on any failure or unreadable
 /// file (config and discovery errors keep their usual codes upstream).
+#[allow(clippy::too_many_arguments)]
 fn run_debug_format(
     paths: &[PathBuf],
     checks: DebugChecksArg,
@@ -138,6 +163,8 @@ fn run_debug_format(
     dump_passes: bool,
     style: FormatStyle,
     exclude: &ExcludeFilter,
+    syntax_edition: Option<SyntaxEdition>,
+    entry_points: &[PathBuf],
 ) -> Result<ExitCode, String> {
     if paths.is_empty() {
         eprintln!("fatou: debug format requires at least one file or directory");
@@ -152,6 +179,8 @@ fn run_debug_format(
         return Err("no .jl files found under the provided input paths".to_string());
     }
 
+    let catalog =
+        ContextCatalog::discover(&files, entry_points, &Default::default(), syntax_edition);
     // Checks are pure functions of the file content, so they parallelize like
     // `run_format`; the order-preserving collect keeps output and report
     // numbering deterministic.
@@ -160,7 +189,44 @@ fn run_debug_format(
         .map(|path| {
             let label = path.display().to_string();
             let outcome = match std::fs::read_to_string(path) {
-                Ok(content) => Ok(run_debug_checks_for_file(&content, style, checks)),
+                Ok(content) => {
+                    let mut artifacts = DebugArtifacts::default();
+                    for (_, selection) in catalog.selections(path) {
+                        if let Err(error) = selection.require_certain() {
+                            artifacts.failures.push(DebugFailure {
+                                kind: CheckKind::FormatError,
+                                left: error,
+                                right: String::new(),
+                            });
+                        }
+                    }
+                    for options in catalog.options(path) {
+                        let mut view = run_debug_checks_with_options(
+                            &content,
+                            formatter::FormatOptions {
+                                style,
+                                parse_options: options,
+                            },
+                            checks,
+                        );
+                        if artifacts.losslessness.is_none() {
+                            artifacts.losslessness = view.losslessness.take();
+                        }
+                        if artifacts.idempotency.is_none() {
+                            artifacts.idempotency = view.idempotency.take();
+                        }
+                        for mut failure in view.failures {
+                            if failure.kind == CheckKind::FormatError {
+                                failure.left = format!(
+                                    "syntax edition {}: {}",
+                                    options.syntax_edition, failure.left
+                                );
+                            }
+                            artifacts.failures.push(failure);
+                        }
+                    }
+                    Ok(artifacts)
+                }
                 Err(err) => Err(format!("fatou: cannot read {label}: {err}")),
             };
             (label, outcome)
@@ -317,6 +383,9 @@ fn run_parse(
     quiet: bool,
     verify: bool,
     to: ParseFormat,
+    syntax_edition: Option<SyntaxEdition>,
+    config_path: &Option<PathBuf>,
+    no_config: bool,
 ) -> Result<ExitCode, String> {
     // Clap caps `parse` at one positional, so the slice holds at most one path.
     let file = match inputs_or_exit(file.as_slice(), "parse", PARSE_MISSING_INPUT) {
@@ -324,13 +393,45 @@ fn run_parse(
         Inputs::Paths(paths) => Some(paths[0].as_path()),
     };
     let text = read_source(file)?;
-    let output = parse(&text);
+    let selections = if let Some(path) = file.filter(|_| syntax_edition.is_none()) {
+        let (config, source) = load_config(config_path, no_config)?;
+        let entries = resolved_entries(&config, &source, &[path.to_path_buf()])?;
+        let path = fatou::incremental::normalize_path(path);
+        let buffers =
+            std::collections::BTreeMap::from([(path.clone(), std::sync::Arc::from(text.as_str()))]);
+        let catalog = ContextCatalog::discover(
+            std::slice::from_ref(&path),
+            &entries,
+            &buffers,
+            syntax_edition,
+        );
+        catalog.selections(&path).to_vec()
+    } else {
+        standalone_selections(syntax_edition)
+    };
+    let options = selections
+        .first()
+        .map(|(_, selection)| selection.options)
+        .unwrap_or_default();
+    let output = parse_with_options(&text, options);
 
     if !quiet {
+        for (_, selection) in &selections {
+            if let Some(issue) = &selection.issue {
+                eprintln!(
+                    "syntax edition: {}: {}",
+                    issue.path.display(),
+                    issue.message
+                );
+            }
+        }
         match to {
             ParseFormat::Cst => print!("{:#?}", output.cst),
             ParseFormat::Sexpr => {
-                println!("{}", to_juliasyntax_sexpr(&output.cst, &output.diagnostics))
+                println!(
+                    "{}",
+                    to_juliasyntax_sexpr_with_options(&output.cst, &output.diagnostics, options)
+                )
             }
         }
         for diag in &output.diagnostics {
@@ -342,7 +443,7 @@ fn run_parse(
     }
 
     if verify {
-        let reconstructed = reconstruct(&text);
+        let reconstructed = output.cst.text().to_string();
         if reconstructed == text {
             eprintln!("losslessness OK");
         } else {
@@ -354,6 +455,7 @@ fn run_parse(
     Ok(ExitCode::SUCCESS)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_format(
     paths: Vec<PathBuf>,
     check: bool,
@@ -361,6 +463,8 @@ fn run_format(
     style: FormatStyle,
     exclude: &ExcludeFilter,
     quiet: bool,
+    syntax_edition: Option<SyntaxEdition>,
+    entry_points: &[PathBuf],
 ) -> Result<ExitCode, String> {
     // `--check` reports on files it leaves on disk, so stdin is not an input
     // here: a diff has nowhere to point and there is nothing to reformat later.
@@ -376,24 +480,30 @@ fn run_format(
     let paths = match inputs_or_exit(&paths, "format", FORMAT_MISSING_INPUT) {
         Inputs::Stdin => {
             let text = read_source(None)?;
-            let formatted = if safe {
-                formatter::format_verified_with_style(&text, style).map_err(|e| e.to_string())?
-            } else {
-                formatter::format_with_style(&text, style).map_err(|e| e.to_string())?
-            };
+            let formatted = fatou::parse_context::format_source(
+                &text,
+                style,
+                safe,
+                &standalone_selections(syntax_edition),
+            )?;
             print!("{formatted}");
             return Ok(ExitCode::SUCCESS);
         }
         Inputs::Paths(paths) => paths,
     };
 
+    let context_files = fatou::file_discovery::collect_julia_files(paths, exclude)
+        .map_err(|error| error.to_string())?;
+    let catalog = ContextCatalog::discover(
+        &context_files,
+        entry_points,
+        &Default::default(),
+        syntax_edition,
+    );
     if check {
-        let result = if safe {
-            formatter::check_paths_verified(paths, style, exclude)
-        } else {
-            formatter::check_paths(paths, style, exclude)
-        }
-        .map_err(|e| e.to_string())?;
+        let result =
+            formatter::check::check_paths_in_contexts(paths, style, exclude, safe, &catalog)
+                .map_err(|e| e.to_string())?;
         let changed_count = result.changed.len();
         if quiet {
             for changed in &result.changed {
@@ -433,8 +543,13 @@ fn run_format(
             .map(|path| {
                 let original = std::fs::read_to_string(path)
                     .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-                let formatted = formatter::format_verified_with_style(&original, style)
-                    .map_err(|e| format!("failed to format {}: {e}", path.display()))?;
+                let formatted = fatou::parse_context::format_source(
+                    &original,
+                    style,
+                    true,
+                    catalog.selections(path),
+                )
+                .map_err(|e| format!("failed to format {}: {e}", path.display()))?;
                 Ok::<_, String>((path.clone(), (formatted != original).then_some(formatted)))
             })
             .collect();
@@ -452,7 +567,8 @@ fn run_format(
     files.par_iter().try_for_each(|path| {
         let original = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         let formatted =
-            formatter::format_with_style(&original, style).map_err(|e| e.to_string())?;
+            fatou::parse_context::format_source(&original, style, false, catalog.selections(path))
+                .map_err(|e| e.to_string())?;
         if formatted != original {
             std::fs::write(path, formatted).map_err(|e| e.to_string())?;
         }
@@ -472,6 +588,7 @@ fn run_lint(
     entry_points: &[PathBuf],
     exclude: &ExcludeFilter,
     julia_target: Option<fatou::julia_version::VersionRange>,
+    syntax_edition: Option<SyntaxEdition>,
 ) -> Result<ExitCode, String> {
     // `lint` has no stdin pipeline (findings are reported against a path), so
     // `-` is rejected by name rather than walked into "path does not exist".
@@ -489,7 +606,10 @@ fn run_lint(
     let scripts = if entry_points.is_empty() {
         None
     } else {
-        Some(fatou::script_loading::analyze(entry_points)?)
+        Some(fatou::script_loading::analyze_with_edition(
+            entry_points,
+            syntax_edition,
+        )?)
     };
 
     let mode = match output {
@@ -505,7 +625,7 @@ fn run_lint(
     // globals, and documentation targets resolve exactly as in the language
     // server.
     let library = if wants_project_resolution(&config.lint) {
-        harvest_project(&paths)
+        harvest_project(&paths, syntax_edition)
     } else {
         None
     };
@@ -520,6 +640,7 @@ fn run_lint(
             entry_points,
             library.as_ref(),
             julia_target,
+            syntax_edition,
         );
     }
     let project = match (&scripts, &library) {
@@ -531,9 +652,15 @@ fn run_lint(
         (None, None) => linter::ProjectContext::SystemOnly,
     };
 
-    let result =
-        linter::check_paths_with_config(&paths, &config.lint, exclude, julia_target, project)
-            .map_err(|e| e.to_string())?;
+    let result = linter::check_paths_with_edition(
+        &paths,
+        &config.lint,
+        exclude,
+        julia_target,
+        project,
+        syntax_edition,
+    )
+    .map_err(|e| e.to_string())?;
     warn_unknown_rules(&result.unknown_rules);
 
     let diagnostics: Vec<_> = result
@@ -582,7 +709,10 @@ fn wants_project_resolution(config: &fatou::config::LintConfig) -> bool {
 /// manifest dependencies plus the workspace package — cached and in parallel,
 /// exactly as the language server does. `None` when no environment resolves (a
 /// loose file outside any project), which leaves the lint in single-file mode.
-fn harvest_project(paths: &[PathBuf]) -> Option<fatou::index::HarvestedLibrary> {
+fn harvest_project(
+    paths: &[PathBuf],
+    syntax_edition: Option<SyntaxEdition>,
+) -> Option<fatou::index::HarvestedLibrary> {
     use fatou::environment::{self, EnvContext};
     let anchor = lint_anchor(paths);
     let env = environment::resolve(&EnvContext::from_process(anchor.clone()))
@@ -607,6 +737,28 @@ fn harvest_project(paths: &[PathBuf]) -> Option<fatou::index::HarvestedLibrary> 
             .find(|path| path.canonicalize().is_ok_and(|path| path == identity))
         {
             *root = alias.to_path_buf();
+        }
+    }
+    if let Some(edition) = syntax_edition {
+        let options = fatou::parser::ParseOptions {
+            syntax_edition: edition,
+        };
+        for (name, package) in &library.syntax.packages {
+            if !library.workspaces.contains(name) {
+                continue;
+            }
+            let index = std::sync::Arc::new(fatou::index::harvest_package_with_options(
+                &package.root,
+                name,
+                options,
+            ));
+            library
+                .packages
+                .insert(name.clone(), std::sync::Arc::clone(&index));
+            library
+                .syntax
+                .variants
+                .insert((name.clone(), options), index);
         }
     }
     Some(library)
@@ -638,102 +790,99 @@ fn run_lint_fix(
     entry_points: &[PathBuf],
     library: Option<&fatou::index::HarvestedLibrary>,
     julia_target: Option<fatou::julia_version::VersionRange>,
+    syntax_edition: Option<SyntaxEdition>,
 ) -> Result<ExitCode, String> {
     let use_color = color_enabled(color, std::io::stderr().is_terminal());
-    let (_, unknown_rules) = linter::ResolvedRules::resolve(&config.lint);
-    warn_unknown_rules(&unknown_rules);
     let files =
         fatou::file_discovery::collect_julia_files(&paths, exclude).map_err(|e| e.to_string())?;
-    let script_sources = fatou::script_loading::load_sources(entry_points, &Default::default());
-    let (rules, _) = linter::ResolvedRules::resolve(&config.lint);
-    let rules = rules.with_julia_target(julia_target);
-    let (workspace_rules, _) = linter::ResolvedRules::resolve_for_workspace(&config.lint);
-    let workspace_rules = workspace_rules.with_julia_target(julia_target);
-    let (script_rules, _) = linter::ResolvedRules::resolve_for_scripts(&config.lint);
-    let script_rules = script_rules.with_julia_target(julia_target);
+    let script_context = (!entry_points.is_empty()).then(|| {
+        let catalog =
+            fatou::script_loading::load_contexts(entry_points, &Default::default(), syntax_edition);
+        let scripts = fatou::project::scripts::ScriptAnalysis::from_catalog(entry_points, &catalog);
+        (catalog, scripts)
+    });
+    let (batch, unknown_rules) = linter::check::LintBatch::new(
+        &files,
+        entry_points,
+        library,
+        &config.lint,
+        julia_target,
+        syntax_edition,
+    );
+    warn_unknown_rules(&unknown_rules);
 
-    // Fix files in parallel; each writes back to its own path. Per-file results
-    // are reduced afterward so counts and the `remaining` list stay stable.
+    // Analyze all candidates against the same batch before writing any of them.
     let outcomes = files
         .par_iter()
         .map(|path| {
-            let original = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-            let rules = if library.and_then(|lib| lib.workspace_member(path)).is_some() {
-                &workspace_rules
-            } else {
-                &rules
-            };
-            let outcome = if entry_points.is_empty() && library.is_none() {
-                linter::fix_source(Some(path), &original, &config.lint, unsafe_fixes)
-            } else if entry_points.is_empty() {
-                linter::fix::fix_with(&original, unsafe_fixes, |text| {
-                    linter::check::check_text(
-                        Some(path),
-                        text,
-                        rules,
-                        linter::ProjectContext::Harvested(library.expect("library is present")),
-                    )
-                })
-            } else {
-                let mut sources = script_sources.clone();
-                linter::fix::fix_with(&original, unsafe_fixes, |text| {
-                    sources.insert(
-                        fatou::incremental::normalize_path(path),
-                        Ok(std::sync::Arc::from(text)),
-                    );
-                    let scripts = fatou::project::scripts::ScriptAnalysis::from_sources(
-                        entry_points,
-                        &sources,
-                    );
-                    let rules = if scripts.applies(path) {
-                        &script_rules
+            let original = batch.source(path).map_err(|error| error.to_string())?;
+            let outcome = linter::fix::fix_with(original, unsafe_fixes, |text| {
+                if let Some((script_catalog, scripts)) = &script_context {
+                    let updated;
+                    let scripts = if text == original {
+                        scripts
                     } else {
-                        rules
+                        let mut catalog = script_catalog.clone();
+                        catalog.sources.insert(
+                            fatou::incremental::normalize_path(path),
+                            Ok(std::sync::Arc::from(text)),
+                        );
+                        updated = fatou::project::scripts::ScriptAnalysis::from_catalog(
+                            entry_points,
+                            &catalog,
+                        );
+                        &updated
                     };
-                    linter::check::check_text(
-                        Some(path),
+                    batch.check(
+                        path,
                         text,
-                        rules,
-                        linter::ProjectContext::Scripts {
-                            library,
-                            scripts: &scripts,
-                        },
+                        linter::ProjectContext::Scripts { library, scripts },
                     )
-                })
-            };
-            let changed = outcome.output != original;
-            if changed {
-                std::fs::write(path, &outcome.output).map_err(|e| e.to_string())?;
-            }
-            Ok::<_, String>((outcome.applied, changed, outcome.remaining))
+                } else {
+                    let project = library.map_or(
+                        linter::ProjectContext::SystemOnly,
+                        linter::ProjectContext::Harvested,
+                    );
+                    batch.check(path, text, project)
+                }
+            });
+            let output = (outcome.output != original).then_some(outcome.output);
+            Ok::<_, String>((output, outcome.applied, outcome.remaining))
         })
         .collect::<Result<Vec<_>, String>>()?;
 
     let mut applied = 0usize;
     let mut changed_files = 0usize;
     let mut remaining = Vec::new();
-    for (file_applied, changed, file_remaining) in outcomes {
+    for (path, (output, file_applied, file_remaining)) in files.iter().zip(outcomes) {
         applied += file_applied;
-        if changed {
+        if let Some(output) = output {
+            std::fs::write(path, output).map_err(|error| error.to_string())?;
             changed_files += 1;
         }
         remaining.extend(file_remaining);
     }
     if !entry_points.is_empty() || library.is_some() {
         let scripts = (!entry_points.is_empty())
-            .then(|| fatou::script_loading::analyze(entry_points))
+            .then(|| fatou::script_loading::analyze_with_edition(entry_points, syntax_edition))
             .transpose()?;
         let project = match &scripts {
             Some(scripts) => linter::ProjectContext::Scripts { library, scripts },
             None => linter::ProjectContext::Harvested(library.expect("library is present")),
         };
-        remaining =
-            linter::check_paths_with_config(&paths, &config.lint, exclude, julia_target, project)
-                .map_err(|error| error.to_string())?
-                .reports
-                .into_iter()
-                .flat_map(|report| report.diagnostics)
-                .collect();
+        remaining = linter::check_paths_with_edition(
+            &paths,
+            &config.lint,
+            exclude,
+            julia_target,
+            project,
+            syntax_edition,
+        )
+        .map_err(|error| error.to_string())?
+        .reports
+        .into_iter()
+        .flat_map(|report| report.diagnostics)
+        .collect();
     }
 
     let rendered =
@@ -864,6 +1013,43 @@ fn read_source(path: Option<&Path>) -> Result<String, String> {
             Ok(buffer)
         }
     }
+}
+
+fn standalone_selections(edition: Option<SyntaxEdition>) -> Vec<(SourceContext, EditionSelection)> {
+    let edition = edition.unwrap_or_default();
+    vec![(
+        SourceContext {
+            entry: PathBuf::new(),
+            source: EditionSource::Fixed(edition),
+        },
+        EditionSelection::known(edition),
+    )]
+}
+
+fn resolved_entries(
+    config: &Config,
+    source: &ConfigSource,
+    paths: &[PathBuf],
+) -> Result<Vec<PathBuf>, String> {
+    let anchor = std::env::current_dir().map_err(|error| error.to_string())?;
+    let mut entries = Vec::new();
+    for path in paths {
+        let path = anchor.join(path);
+        let directory = if path.is_dir() {
+            path.as_path()
+        } else {
+            path.parent().unwrap_or(&anchor)
+        };
+        entries.extend(
+            config
+                .project
+                .resolved_entry_points(source, directory)
+                .map_err(|error| error.to_string())?,
+        );
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    entries.retain(|entry| seen.insert(entry.clone()));
+    Ok(entries)
 }
 
 #[cfg(test)]

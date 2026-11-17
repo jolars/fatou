@@ -52,6 +52,17 @@ pub enum ColorChoice {
     Never,
 }
 
+/// Host-side spelling of supported editions, also available to build.rs.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SyntaxEditionArg {
+    #[value(name = "1.13")]
+    Julia113,
+    #[value(name = "1.14")]
+    Julia114,
+    #[value(name = "1.15")]
+    Julia115,
+}
+
 #[derive(Subcommand)]
 pub enum Commands {
     /// Parse and display the CST for debugging.
@@ -59,6 +70,11 @@ pub enum Commands {
         /// Input file. Pass `-` for stdin, also read when the path is omitted
         /// and stdin is not a terminal.
         file: Option<PathBuf>,
+
+        /// Select Julia syntax edition 1.13, 1.14, or 1.15; overrides source
+        /// project metadata independently of the supported runtime range.
+        #[arg(long, value_name = "EDITION")]
+        syntax_edition: Option<SyntaxEditionArg>,
 
         /// Verify parser losslessness (`reconstruct(text) == text`).
         #[arg(long)]
@@ -75,6 +91,11 @@ pub enum Commands {
         /// paths are omitted and stdin is not a terminal.
         #[arg(value_name = "PATH")]
         paths: Vec<PathBuf>,
+
+        /// Select Julia syntax edition 1.13, 1.14, or 1.15; overrides source
+        /// project metadata independently of the supported runtime range.
+        #[arg(long, value_name = "EDITION")]
+        syntax_edition: Option<SyntaxEditionArg>,
 
         /// Check formatting without writing; prints a diff and exits non-zero if
         /// any file would change. Requires path arguments: there is no file on
@@ -112,6 +133,11 @@ pub enum Commands {
         /// Input file(s) or path(s).
         #[arg(value_name = "PATH")]
         paths: Vec<PathBuf>,
+
+        /// Select Julia syntax edition 1.13, 1.14, or 1.15; overrides source
+        /// project metadata independently of the supported runtime range.
+        #[arg(long, value_name = "EDITION")]
+        syntax_edition: Option<SyntaxEditionArg>,
 
         /// Apply safe fixes to the source and write the files back.
         #[arg(long)]
@@ -168,6 +194,10 @@ pub enum DebugCommand {
         /// Files, directories, or globs to check.
         #[arg(value_name = "PATH")]
         paths: Vec<PathBuf>,
+
+        /// Override the discovered Julia syntax edition (1.13, 1.14, or 1.15).
+        #[arg(long, value_name = "EDITION")]
+        syntax_edition: Option<SyntaxEditionArg>,
 
         /// Which invariant checks to run.
         #[arg(long, value_enum, default_value_t = DebugChecksArg::All)]

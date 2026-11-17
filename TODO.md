@@ -10,6 +10,20 @@
 
 ## Parser
 
+- [x] Parse a bare `return` as a statement-level tuple element and apply
+  edition rules to docstrings glued to `typegroup`. Pin both against JuliaSyntax.
+
+- [x] Recover unsupported 1.13 `typegroup` blocks and leading commas in
+  return blocks. Reject reserved `typegroup` declaration names from 1.14.
+  Cover losslessness and error recovery in the pinned oracle.
+
+- [x] Preserve 1.13 ternary separators after `break` and `continue`. Cover
+  wrapping-operator edition diagnostics in the oracle for infix and value
+  positions, as well as updating assignments.
+
+- [x] Diagnose 1.13 loop-exit delimiters and reserve `typegroup` in argument
+  names from 1.14 onward. Cover both in the pinned oracle.
+
 - [x] **Macro newline safety:** keep operators on following lines outside macro
   arguments. `(@m x\n - y)` parses as `(@m x) - y`, and formatting protects
   the macro call with parentheses. Regression coverage includes comments,
@@ -103,12 +117,13 @@
 
 ## Project files (`Project.toml`/`Manifest.toml`)
 
-- [ ] Honor Julia syntax editions. Read `Project.toml`'s
+- [x] Honor Julia syntax editions. Read `Project.toml`'s
   `[syntax] julia_version`, falling back to the minimum `[compat].julia`
   version and Julia's defaults for packages and scripts. Track dependency
   editions recorded in manifests and propagate the selected edition through
   CLI and LSP parsing, including unsaved project edits. Model the edition
   separately from the supported runtime range, and keep discovery static.
+  Honor the selected filename when a package directory has both project files.
 
 - [ ] Completion of dependency names, the expensive one. On a default depot the
   registry is a `General.tar.gz`, so the full version needs gzip and tar to

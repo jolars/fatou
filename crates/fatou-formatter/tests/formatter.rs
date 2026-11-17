@@ -20,9 +20,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fatou_formatter::verify::{ast_shape, verify_format};
-use fatou_formatter::{FormatStyle, format, format_with_style};
-use fatou_parser::parser::parse;
+use fatou_formatter::verify::{
+    ast_shape, ast_shape_with_options, verify_format, verify_format_with_options,
+};
+use fatou_formatter::{FormatOptions, FormatStyle, format, format_with_options, format_with_style};
+use fatou_parser::parser::{ParseOptions, parse_with_options};
 
 /// Fixtures whose shape the formatter is known to move, each with the reason.
 ///
@@ -56,6 +58,17 @@ const KNOWN_DRIFT: &[(&str, &str)] = &[
          this fixture's own `expected.jl` asserts",
     ),
 ];
+
+fn fixture_options(case: &Path) -> FormatOptions {
+    FormatOptions {
+        style: FormatStyle::default(),
+        parse_options: fs::read_to_string(case.join("edition.txt"))
+            .map(|v| ParseOptions {
+                syntax_edition: v.trim().parse().unwrap(),
+            })
+            .unwrap_or_default(),
+    }
+}
 
 fn fixture_dirs() -> Vec<PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/formatter");
@@ -250,7 +263,7 @@ fn formatter_fixtures_match_expected() {
         let input = fs::read_to_string(case.join("input.jl")).expect("read input.jl");
         let expected = fs::read_to_string(&expected_path).expect("read expected.jl");
 
-        match format(&input) {
+        match format_with_options(&input, fixture_options(&case)) {
             Ok(formatted) if formatted == expected => {}
             Ok(_) => failures.push(name),
             Err(_) => failures.push(format!("{name} (format error)")),
@@ -270,11 +283,11 @@ fn formatter_is_idempotent_and_stable() {
         let name = slug(&case);
         let input = fs::read_to_string(case.join("input.jl")).expect("read input.jl");
 
-        let once = format(&input).expect("format input");
-        let twice = format(&once).expect("format formatted");
+        let once = format_with_options(&input, fixture_options(&case)).expect("format input");
+        let twice = format_with_options(&once, fixture_options(&case)).expect("format formatted");
         assert_eq!(twice, once, "format is not idempotent for `{name}`");
 
-        let reparsed = parse(&once);
+        let reparsed = parse_with_options(&once, fixture_options(&case).parse_options);
         assert!(
             reparsed.diagnostics.is_empty(),
             "formatted output of `{name}` does not parse cleanly: {:?}",
@@ -308,7 +321,8 @@ fn formatter_preserves_ast_shape() {
         let input = fs::read_to_string(case.join("input.jl")).expect("read input.jl");
         let known = KNOWN_DRIFT.iter().find(|(s, _)| *s == name);
 
-        let Some(before) = ast_shape(&input) else {
+        let Some(before) = ast_shape_with_options(&input, fixture_options(&case).parse_options)
+        else {
             assert!(
                 known.is_none(),
                 "`{name}` is listed in KNOWN_DRIFT but has no comparable shape"
@@ -316,21 +330,24 @@ fn formatter_preserves_ast_shape() {
             continue; // out of domain: does not parse cleanly, or projects a sentinel
         };
         exercised.push(name.clone());
-        let formatted = format(&input).expect("format input");
-        verify_format(&input, &formatted)
+        let formatted = format_with_options(&input, fixture_options(&case)).expect("format input");
+        verify_format_with_options(&input, &formatted, fixture_options(&case).parse_options)
             .unwrap_or_else(|error| panic!("safe formatting rejected `{name}`: {error}"));
         // The input projected, so a formatted text with no shape is the
         // formatter's doing — but `ast_shape` folds a failed parse and a
         // projector sentinel into `None`, and they point at different code.
-        let after = ast_shape(&formatted).unwrap_or_else(|| {
-            let diagnostics = parse(&formatted).diagnostics;
-            assert!(
-                !diagnostics.is_empty(),
-                "formatted output of `{name}` parses but no longer projects — the \
+        let after = ast_shape_with_options(&formatted, fixture_options(&case).parse_options)
+            .unwrap_or_else(|| {
+                let diagnostics =
+                    parse_with_options(&formatted, fixture_options(&case).parse_options)
+                        .diagnostics;
+                assert!(
+                    !diagnostics.is_empty(),
+                    "formatted output of `{name}` parses but no longer projects — the \
                  formatter produced a construct the projector cannot render"
-            );
-            panic!("formatted output of `{name}` no longer parses cleanly: {diagnostics:?}")
-        });
+                );
+                panic!("formatted output of `{name}` no longer parses cleanly: {diagnostics:?}")
+            });
 
         match (before == after, known) {
             (false, None) => drifted.push(format!(

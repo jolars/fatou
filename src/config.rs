@@ -5,7 +5,7 @@
 //! then falls back to [`$FATOU_CONFIG`](CONFIG_ENV_VAR) and the
 //! [global user config](global_config_path).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -103,9 +103,10 @@ impl ProjectConfig {
             .filter(|entry| entry.is_file())
             .map(|entry| crate::incremental::normalize_path(&entry))
             .collect();
-        entries.extend(self.entry_points(source)?);
         entries.sort();
-        entries.dedup();
+        entries.extend(self.entry_points(source)?);
+        let mut seen = BTreeSet::new();
+        entries.retain(|path| seen.insert(path.clone()));
         Ok(entries)
     }
 
@@ -125,14 +126,16 @@ impl ProjectConfig {
             .chain(&self.extend_entry_points)
         {
             let path = base.join(path);
+            let mut expanded = crate::file_discovery::expand_entry_point_glob(&path)?;
+            expanded.sort();
             entries.extend(
-                crate::file_discovery::expand_entry_point_glob(&path)?
-                    .into_iter()
-                    .map(|path| crate::incremental::normalize_path(&path)),
+                expanded
+                    .iter()
+                    .map(|path| crate::incremental::normalize_path(path)),
             );
         }
-        entries.sort();
-        entries.dedup();
+        let mut seen = BTreeSet::new();
+        entries.retain(|path| seen.insert(path.clone()));
         Ok(entries)
     }
 }
@@ -1072,10 +1075,8 @@ mod tests {
         std::fs::write(&leaf,
             "extend = 'shared/base.toml'\n[project]\nextend-entry-points = ['scripts/**/*.jl', 'scripts/child.jl']\n").unwrap();
         let (config, source, _) = Config::resolve(Some(&leaf), false, dir.path()).unwrap();
-        let mut expected = ["shared/scripts/base.jl", "scripts/child.jl"]
-            .map(|entry| crate::incremental::normalize_path(&dir.path().join(entry)))
-            .to_vec();
-        expected.sort();
+        let expected = ["shared/scripts/base.jl", "scripts/child.jl"]
+            .map(|entry| crate::incremental::normalize_path(&dir.path().join(entry)));
         assert_eq!(
             config
                 .project
@@ -1083,6 +1084,28 @@ mod tests {
                 .unwrap(),
             expected
         );
+    }
+
+    #[test]
+    fn explicit_entry_points_keep_declared_order_and_first_occurrence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fatou.toml");
+        for entries in [["z.jl", "a.jl"], ["a.jl", "z.jl"]] {
+            std::fs::write(&path, format!(
+                "[project]\nentry-points = ['{}', '{}']\nextend-entry-points = ['{}', 'extra.jl']\n",
+                entries[0], entries[1], entries[0],
+            )).unwrap();
+            let (config, source, _) = Config::resolve(Some(&path), false, dir.path()).unwrap();
+            let expected = [entries[0], entries[1], "extra.jl"]
+                .map(|entry| crate::incremental::normalize_path(&dir.path().join(entry)));
+            assert_eq!(
+                config
+                    .project
+                    .resolved_entry_points(&source, dir.path())
+                    .unwrap(),
+                expected
+            );
+        }
     }
 
     #[test]

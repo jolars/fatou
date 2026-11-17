@@ -31,7 +31,7 @@ use super::model::PackageIndex;
 /// a [`PackageIndex`] field change, or corrected harvesting semantics). Recorded
 /// in every entry header and baked into the cache path, so mismatched entries
 /// are ignored rather than mis-decoded.
-const CACHE_FORMAT: u32 = 9;
+const CACHE_FORMAT: u32 = 10;
 
 /// The build identity stamped into every entry: `fatou@<version>`. Two builds at
 /// the same [`CACHE_FORMAT`] can still harvest different shapes (the harvester
@@ -83,7 +83,10 @@ impl CacheKey {
     /// packages are keyed through [`for_system`](Self::for_system) instead.
     pub fn for_package(package: &Package) -> Option<String> {
         match package.kind {
-            PackageKind::Registered => package.tree_sha1.clone(),
+            PackageKind::Registered => package
+                .tree_sha1
+                .as_ref()
+                .map(|sha| format!("{}-{sha}-syntax-{}", package.uuid, package.syntax_edition)),
             PackageKind::Dev | PackageKind::Stdlib => None,
         }
     }
@@ -93,7 +96,26 @@ impl CacheKey {
     /// its own `<name>/` directory), and a Julia upgrade changes it, retiring the
     /// old install's entries wholesale.
     pub fn for_system(install: &JuliaInstall) -> String {
-        format!("stdlib-{}", install.version)
+        Self::for_system_with_options(install, system_parse_options(install))
+    }
+    pub fn for_system_with_options(
+        install: &JuliaInstall,
+        options: crate::parser::ParseOptions,
+    ) -> String {
+        format!(
+            "stdlib-{}-syntax-{}",
+            install.version, options.syntax_edition
+        )
+    }
+}
+
+pub(super) fn system_parse_options(install: &JuliaInstall) -> crate::parser::ParseOptions {
+    crate::parser::ParseOptions {
+        syntax_edition: install
+            .version
+            .parse::<crate::julia_version::Version>()
+            .map(|version| crate::parser::SyntaxEdition::normalized(version.major, version.minor))
+            .unwrap_or_default(),
     }
 }
 
@@ -374,28 +396,32 @@ mod tests {
     #[test]
     fn cache_key_for_registered_uses_tree_sha1() {
         let package = Package {
+            syntax_edition: fatou_parser::parser::SyntaxEdition::OLDEST,
             name: "Foo".to_string(),
             uuid: nil_uuid(),
             version: Some("1.2.3".to_string()),
             tree_sha1: Some("deadbeef".to_string()),
             deps: Vec::new(),
+            extensions: Vec::new(),
             kind: PackageKind::Registered,
             source: None,
         };
         assert_eq!(
             CacheKey::for_package(&package),
-            Some("deadbeef".to_string())
+            Some(format!("{}-deadbeef-syntax-1.13", package.uuid))
         );
     }
 
     #[test]
     fn cache_key_for_dev_and_stdlib_is_none() {
         let mut package = Package {
+            syntax_edition: fatou_parser::parser::SyntaxEdition::OLDEST,
             name: "Foo".to_string(),
             uuid: nil_uuid(),
             version: None,
             tree_sha1: None,
             deps: Vec::new(),
+            extensions: Vec::new(),
             kind: PackageKind::Dev,
             source: None,
         };

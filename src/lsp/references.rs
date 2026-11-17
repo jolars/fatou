@@ -26,7 +26,7 @@ use lsp_types::{DocumentHighlight, DocumentHighlightKind, Location, Position, Ra
 use rowan::{TextRange, TextSize};
 
 use crate::incremental::Analysis;
-use crate::parser::parse;
+use crate::parser::{ParseOptions, parse_with_options};
 use crate::semantic::{Access, BindingId, SemanticModel};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
@@ -42,7 +42,25 @@ pub fn compute_references(
     encoding: PositionEncoding,
     include_declaration: bool,
 ) -> Option<Vec<Location>> {
-    let model = SemanticModel::build(&parse(text).cst);
+    compute_references_with_options(
+        uri,
+        text,
+        position,
+        encoding,
+        include_declaration,
+        ParseOptions::default(),
+    )
+}
+
+pub fn compute_references_with_options(
+    uri: &Uri,
+    text: &str,
+    position: Position,
+    encoding: PositionEncoding,
+    include_declaration: bool,
+    options: ParseOptions,
+) -> Option<Vec<Location>> {
+    let model = SemanticModel::build(&parse_with_options(text, options).cst);
     let line_index = LineIndex::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     references_for(
@@ -62,7 +80,16 @@ pub fn compute_document_highlights(
     position: Position,
     encoding: PositionEncoding,
 ) -> Option<Vec<DocumentHighlight>> {
-    let model = SemanticModel::build(&parse(text).cst);
+    compute_document_highlights_with_options(text, position, encoding, ParseOptions::default())
+}
+
+pub fn compute_document_highlights_with_options(
+    text: &str,
+    position: Position,
+    encoding: PositionEncoding,
+    options: ParseOptions,
+) -> Option<Vec<DocumentHighlight>> {
+    let model = SemanticModel::build(&parse_with_options(text, options).cst);
     let line_index = LineIndex::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     highlights_for(&model, &line_index, offset, encoding)
@@ -109,7 +136,14 @@ pub(crate) fn references_via_db(
     }));
     match cached {
         Ok(Some(result)) => result,
-        Ok(None) | Err(_) => compute_references(uri, text, position, encoding, include_declaration),
+        Ok(None) | Err(_) => compute_references_with_options(
+            uri,
+            text,
+            position,
+            encoding,
+            include_declaration,
+            snapshot.options_for_path(path),
+        ),
     }
 }
 
@@ -154,7 +188,12 @@ pub(crate) fn document_highlights_via_db(
     }));
     match cached {
         Ok(Some(result)) => result,
-        Ok(None) | Err(_) => compute_document_highlights(text, position, encoding),
+        Ok(None) | Err(_) => compute_document_highlights_with_options(
+            text,
+            position,
+            encoding,
+            snapshot.options_for_path(path),
+        ),
     }
 }
 

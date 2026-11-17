@@ -260,7 +260,8 @@ fn parse_macro_args(
 ) -> usize {
     let inside_brackets = flags.inside_brackets;
     let generator_for_ends = flags.generator_for_ends;
-    let macro_newlines = flags.paren_content_start == Some(macro_start);
+    let macro_newlines = ctx.options.syntax_edition >= crate::parser::SyntaxEdition::Julia114
+        && flags.paren_content_start == Some(macro_start);
     // Paren form `@m(a, b)`: the `(` must be adjacent (no whitespace), otherwise
     // `@m (a, b)` is the space form with a single parenthesized argument.
     if ctx.token(name_end).map(|t| t.kind) == Some(TokKind::LParen) {

@@ -19,6 +19,3 @@ end
 typegroup
     @generate_types()
 end
-typegroup = 1
-typegroup(x)
-x = typegroup

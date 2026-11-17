@@ -1,0 +1,166 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..121
+  ASSIGNMENT_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    PLUS_PERCENT_EQ@2..5 "+%="
+    WHITESPACE@5..6 " "
+    LITERAL@6..7
+      INTEGER@6..7 "1"
+  NEWLINE@7..8 "\n"
+  BINARY_EXPR@8..14
+    NAME@8..9
+      IDENT@8..9 "x"
+    WHITESPACE@9..10 " "
+    PLUS_PERCENT@10..12 "+%"
+    WHITESPACE@12..13 " "
+    NAME@13..14
+      IDENT@13..14 "y"
+  NEWLINE@14..15 "\n"
+  BINARY_EXPR@15..22
+    NAME@15..16
+      IDENT@15..16 "x"
+    WHITESPACE@16..17 " "
+    DOT_MINUS_PERCENT@17..20 ".-%"
+    WHITESPACE@20..21 " "
+    NAME@21..22
+      IDENT@21..22 "y"
+  NEWLINE@22..23 "\n"
+  CALL_EXPR@23..33
+    NAME@23..24
+      IDENT@23..24 "f"
+    ARG_LIST@24..33
+      LPAREN@24..25 "("
+      ARG@25..27
+        OPERATOR_ATOM@25..27
+          PLUS_PERCENT@25..27 "+%"
+      COMMA@27..28 ","
+      WHITESPACE@28..29 " "
+      ARG@29..32
+        OPERATOR_ATOM@29..32
+          DOT_MINUS_PERCENT@29..32 ".-%"
+      RPAREN@32..33 ")"
+  NEWLINE@33..34 "\n"
+  ASSIGNMENT_EXPR@34..40
+    NAME@34..35
+      IDENT@34..35 "x"
+    WHITESPACE@35..36 " "
+    EQ@36..37 "="
+    WHITESPACE@37..38 " "
+    OPERATOR_ATOM@38..40
+      PLUS_PERCENT@38..40 "+%"
+  NEWLINE@40..41 "\n"
+  PAREN_EXPR@41..45
+    LPAREN@41..42 "("
+    PLUS_PERCENT@42..44 "+%"
+    RPAREN@44..45 ")"
+  NEWLINE@45..46 "\n"
+  PAREN_EXPR@46..51
+    LPAREN@46..47 "("
+    OPERATOR_ATOM@47..50
+      DOT_STAR_PERCENT@47..50 ".*%"
+    RPAREN@50..51 ")"
+  NEWLINE@51..52 "\n"
+  QUOTE_SYM@52..55
+    COLON@52..53 ":"
+    PLUS_PERCENT@53..55 "+%"
+  NEWLINE@55..56 "\n"
+  CALL_EXPR@56..64
+    PLUS_PERCENT@56..58 "+%"
+    ARG_LIST@58..64
+      LPAREN@58..59 "("
+      ARG@59..60
+        NAME@59..60
+          IDENT@59..60 "x"
+      COMMA@60..61 ","
+      WHITESPACE@61..62 " "
+      ARG@62..63
+        NAME@62..63
+          IDENT@62..63 "y"
+      RPAREN@63..64 ")"
+  NEWLINE@64..65 "\n"
+  CALL_EXPR@65..74
+    DOT_PLUS_PERCENT@65..68 ".+%"
+    ARG_LIST@68..74
+      LPAREN@68..69 "("
+      ARG@69..70
+        NAME@69..70
+          IDENT@69..70 "x"
+      COMMA@70..71 ","
+      WHITESPACE@71..72 " "
+      ARG@72..73
+        NAME@72..73
+          IDENT@72..73 "y"
+      RPAREN@73..74 ")"
+  NEWLINE@74..75 "\n"
+  UNARY_EXPR@75..78
+    PLUS_PERCENT@75..77 "+%"
+    NAME@77..78
+      IDENT@77..78 "x"
+  NEWLINE@78..79 "\n"
+  BINARY_EXPR@79..90
+    NAME@79..80
+      IDENT@79..80 "x"
+    WHITESPACE@80..81 " "
+    PLUS_PERCENT@81..83 "+%"
+    WHITESPACE@83..84 " "
+    NAME@84..85
+      IDENT@84..85 "y"
+    WHITESPACE@85..86 " "
+    PLUS_PERCENT@86..88 "+%"
+    WHITESPACE@88..89 " "
+    NAME@89..90
+      IDENT@89..90 "z"
+  NEWLINE@90..91 "\n"
+  BINARY_EXPR@91..100
+    NAME@91..92
+      IDENT@91..92 "x"
+    WHITESPACE@92..93 " "
+    PLUS_PERCENT@93..98 "+%₁"
+    WHITESPACE@98..99 " "
+    NAME@99..100
+      IDENT@99..100 "y"
+  NEWLINE@100..101 "\n"
+  UNARY_EXPR@101..105
+    DOT_PLUS_PERCENT@101..104 ".+%"
+    NAME@104..105
+      IDENT@104..105 "x"
+  NEWLINE@105..106 "\n"
+  QUOTE_SYM@106..112
+    COLON@106..107 ":"
+    PAREN_EXPR@107..112
+      LPAREN@107..108 "("
+      OPERATOR_ATOM@108..111
+        PLUS_PERCENT_EQ@108..111 "+%="
+      RPAREN@111..112 ")"
+  NEWLINE@112..113 "\n"
+  QUOTE_SYM@113..120
+    COLON@113..114 ":"
+    PAREN_EXPR@114..120
+      LPAREN@114..115 "("
+      OPERATOR_ATOM@115..119
+        DOT_PLUS_PERCENT_EQ@115..119 ".+%="
+      RPAREN@119..120 ")"
+  NEWLINE@120..121 "\n"
+
+diagnostic [2..2]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [10..10]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [17..17]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [25..25]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [29..29]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [38..38]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [42..42]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [47..47]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [53..53]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [56..56]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [65..65]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [75..75]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [81..81]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [86..86]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [101..101]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [108..108]: wrapping arithmetic requires syntax edition 1.14
+diagnostic [115..115]: wrapping arithmetic requires syntax edition 1.14

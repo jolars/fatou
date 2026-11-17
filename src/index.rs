@@ -16,14 +16,17 @@ pub mod model;
 pub mod typeexpr;
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::environment::{Environment, PackageMeta};
 
 pub use base::{build_system_index, build_system_library, build_system_library_cached};
 pub use cache::{CacheKey, IndexCache};
-pub use harvest::{harvest_entry, harvest_package, harvest_package_named, harvest_tree};
+pub use harvest::{
+    harvest_entry, harvest_entry_with_options, harvest_package, harvest_package_named,
+    harvest_package_with_options, harvest_tree,
+};
 pub use model::{
     ConstDef, DefLocation, Docstring, ExportedName, Field, FunctionGroup, HarvestDiagnostic,
     MacroDef, Method, ModuleIndex, ModuleUsing, PackageIndex, Param, Span, TypeDef, TypeKind,
@@ -38,6 +41,9 @@ pub use typeexpr::TypeExpr;
 /// is deliberately depot-independent.
 #[derive(Debug, Clone, Default)]
 pub struct HarvestedLibrary {
+    /// Runtime loading contexts and edition-specific indexes. Paths stay out of
+    /// the serializable, depot-independent `PackageIndex` model.
+    pub syntax: LibrarySyntax,
     pub packages: BTreeMap<String, Arc<PackageIndex>>,
     pub roots: BTreeMap<String, PathBuf>,
     /// The packages under development, one per workspace folder that is a
@@ -80,13 +86,210 @@ pub struct HarvestedLibrary {
     pub deps: BTreeMap<String, PackageMeta>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageSyntax {
+    pub root: PathBuf,
+    pub source: crate::parse_context::EditionSource,
+    pub options: crate::parser::ParseOptions,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LibrarySyntax {
+    pub files: BTreeMap<PathBuf, Vec<crate::parse_context::SourceContext>>,
+    pub unindexed_options: Vec<(
+        crate::parse_context::SourceContext,
+        crate::parser::ParseOptions,
+    )>,
+    /// Extension entries and checkouts with no slot in the name-keyed index.
+    pub unindexed_files: BTreeMap<PathBuf, Vec<crate::parse_context::SourceContext>>,
+    /// Loading roots and membership survive a failed manifest resolve only
+    /// to prevent edits under the wrong grammar.
+    pub failed_manifest_files: BTreeMap<PathBuf, Vec<crate::parse_context::SourceContext>>,
+    pub packages: BTreeMap<String, PackageSyntax>,
+    pub variants: BTreeMap<(String, crate::parser::ParseOptions), Arc<PackageIndex>>,
+    /// Project and manifest paths both identify an environment. Name masking
+    /// keeps the library's existing first-environment precedence.
+    pub environments: BTreeMap<PathBuf, BTreeMap<String, crate::parse_context::EditionSource>>,
+}
+
 /// The module names a package's own source files may `using`/`import`: its
 /// project's `Project.toml` `[deps]`. Stdlib and Base/Core names are *not*
 /// folded in — a consumer answers those from the harvested library, which knows
 /// what the located installation actually ships.
 pub type DeclaredDeps = std::collections::BTreeSet<String>;
 
+impl PackageSyntax {
+    pub(crate) fn entry(&self, name: &str) -> PathBuf {
+        crate::incremental::normalize_path(&self.root.join(match name {
+            "Base" => "Base.jl".to_string(),
+            "Core" => "boot.jl".to_string(),
+            _ => format!("src/{name}.jl"),
+        }))
+    }
+}
+
+impl LibrarySyntax {
+    pub(crate) fn retain_failed_manifest_memberships(
+        &mut self,
+        previous: &Self,
+        failed: &std::collections::BTreeSet<PathBuf>,
+    ) {
+        self.retain_failed_manifest_files(&previous.files, failed);
+        self.retain_failed_manifest_files(&previous.failed_manifest_files, failed);
+    }
+
+    pub(crate) fn retain_failed_manifest_files(
+        &mut self,
+        files: &BTreeMap<PathBuf, Vec<crate::parse_context::SourceContext>>,
+        failed: &std::collections::BTreeSet<PathBuf>,
+    ) {
+        if failed.is_empty() {
+            return;
+        }
+        for (path, contexts) in files {
+            for context in contexts {
+                if matches!(&context.source, crate::parse_context::EditionSource::Manifest { path, .. } if failed.contains(path))
+                {
+                    let retained = self.failed_manifest_files.entry(path.clone()).or_default();
+                    if !retained.contains(context) {
+                        retained.push(context.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    /// All cached variants participate in membership discovery. Selection at
+    /// query time filters each context to its currently active variant, so a
+    /// metadata edit can switch to a cached edition without another harvest.
+    pub(crate) fn rebuild_memberships(&mut self) {
+        let mut files = self.unindexed_files.clone();
+        for (name, package) in &self.packages {
+            let mut sources = vec![package.source.clone()];
+            for source in self
+                .environments
+                .values()
+                .filter_map(|packages| packages.get(name))
+            {
+                if !sources.contains(source) {
+                    sources.push(source.clone());
+                }
+            }
+            for ((variant_name, _), index) in &self.variants {
+                if variant_name != name {
+                    continue;
+                }
+                for member in &index.members {
+                    let contexts = files
+                        .entry(crate::incremental::normalize_path(
+                            &package.root.join(member),
+                        ))
+                        .or_default();
+                    for source in &sources {
+                        let context = crate::parse_context::SourceContext {
+                            entry: package.entry(name),
+                            source: source.clone(),
+                        };
+                        if !contexts.contains(&context) {
+                            contexts.push(context);
+                        }
+                    }
+                }
+            }
+        }
+        self.files = files;
+    }
+}
+
+/// Only the effective environment and enclosing workspace affect a lint view.
+/// Standalone files in the same environment can share one view.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct LibraryViewKey {
+    environment: Option<PathBuf>,
+    workspace: Option<String>,
+}
+
 impl HarvestedLibrary {
+    /// A disk-backed CLI view of the selected environment. The LSP derives the
+    /// same view from tracked metadata in `library_package_for_context`.
+    pub fn in_context(
+        &self,
+        context: &crate::parse_context::SourceContext,
+        override_edition: Option<crate::parser::SyntaxEdition>,
+    ) -> Self {
+        let buffers = BTreeMap::new();
+        let mut editions = crate::parse_context::DiskEditionSelections::new(&buffers);
+        self.lint_view(
+            &self.lint_view_key(context),
+            override_edition,
+            &mut editions,
+        )
+    }
+
+    pub(crate) fn lint_view_key(
+        &self,
+        context: &crate::parse_context::SourceContext,
+    ) -> LibraryViewKey {
+        LibraryViewKey {
+            environment: context
+                .source
+                .path()
+                .filter(|path| self.syntax.environments.contains_key(*path))
+                .map(PathBuf::from),
+            workspace: self
+                .workspaces
+                .iter()
+                .find(|name| {
+                    self.roots.get(*name).is_some_and(|root| {
+                        crate::incremental::normalize_path(
+                            &root.join("src").join(format!("{name}.jl")),
+                        ) == context.entry
+                    })
+                })
+                .cloned(),
+        }
+    }
+
+    pub(crate) fn lint_view(
+        &self,
+        key: &LibraryViewKey,
+        override_edition: Option<crate::parser::SyntaxEdition>,
+        editions: &mut crate::parse_context::DiskEditionSelections<'_>,
+    ) -> Self {
+        let mut view = self.clone();
+        if self.syntax.packages.is_empty() {
+            return view;
+        }
+        for (name, package) in &self.syntax.packages {
+            let source = key
+                .environment
+                .as_deref()
+                .and_then(|path| self.syntax.environments.get(path))
+                .and_then(|packages| packages.get(name))
+                .unwrap_or(&package.source);
+            let source_override = override_edition.filter(|_| key.workspace.as_ref() == Some(name));
+            let overridden = source_override.map(crate::parse_context::EditionSelection::known);
+            let selected = overridden
+                .as_ref()
+                .unwrap_or_else(|| editions.select(source));
+            match selected
+                .certain
+                .then(|| self.syntax.variants.get(&(name.clone(), selected.options)))
+                .flatten()
+            {
+                Some(index) => {
+                    view.packages.insert(name.clone(), Arc::clone(index));
+                }
+                None => {
+                    view.packages.remove(name);
+                }
+            }
+        }
+        view.workspaces
+            .retain(|name| key.workspace.as_ref() == Some(name));
+        view
+    }
+
     /// The workspace package and host module path for `path`, when it is a
     /// source file of one of the dev packages (else `None`). The CLI counterpart
     /// of the language server's
@@ -111,10 +314,20 @@ impl HarvestedLibrary {
                 continue;
             };
             let src = normalize_path(&root.join("src"));
-            if !path.starts_with(&src) {
+            let in_closure = self.packages.get(name).is_some_and(|package| {
+                package
+                    .members
+                    .iter()
+                    .any(|member| normalize_path(&root.join(member)) == path)
+            });
+            if !in_closure {
                 continue;
             }
-            let depth = src.components().count();
+            let depth = if path.starts_with(&src) {
+                src.components().count()
+            } else {
+                0
+            };
             if best.is_none_or(|(d, _)| depth > d) {
                 best = Some((depth, name));
             }
@@ -124,7 +337,10 @@ impl HarvestedLibrary {
         let root = normalize_path(self.roots.get(name)?);
         // The file's package-relative path keys its host module in the harvest.
         // A file outside the include closure has no entry: not a member.
-        let rel = path.strip_prefix(&root).ok()?;
+        let rel = pkg
+            .members
+            .iter()
+            .find(|member| normalize_path(&root.join(member)) == path)?;
         let host = pkg.member_modules.get(rel)?;
         Some((
             Arc::clone(pkg),
@@ -230,23 +446,39 @@ pub fn harvest_libraries(envs: &[Environment]) -> HarvestedLibrary {
             if !claimed.insert(package.name.clone()) {
                 continue; // First environment wins the name slot.
             }
-            let index = harvest_package_named(source, &package.name);
+            if package.kind == crate::environment::PackageKind::Stdlib {
+                continue; // Already harvested from the installation's own project.
+            }
+            let index = harvest_package_with_options(
+                source,
+                &package.name,
+                crate::parser::ParseOptions {
+                    syntax_edition: package.syntax_edition,
+                },
+            );
             lib.packages.insert(package.name.clone(), Arc::new(index));
             lib.roots.insert(package.name.clone(), source.clone());
         }
     }
     // The packages under development, indexed like depot packages so their
     // top-level symbols resolve across their own files.
+    let projects = project_files(envs);
     for dev in dev_packages(envs) {
-        lib.packages
-            .insert(dev.name.clone(), Arc::new(harvest_workspace(&dev)));
+        lib.packages.insert(
+            dev.name.clone(),
+            Arc::new(harvest_workspace_for_project(
+                &dev,
+                projects.get(&dev.name).map(PathBuf::as_path),
+            )),
+        );
         lib.roots.insert(dev.name.clone(), dev.root);
         lib.workspaces.push(dev.name);
     }
     lib.workspaces.sort();
     lib.declared_deps = declared_deps(envs);
-    lib.project_files = project_files(envs);
+    lib.project_files = projects;
     lib.deps = dep_meta(envs);
+    install_syntax(envs, &mut lib);
     lib
 }
 
@@ -283,7 +515,9 @@ pub fn harvest_libraries_parallel(
             if !claimed.insert(package.name.clone()) {
                 continue; // First environment wins the name slot.
             }
-            work.push((&package.name, source, package));
+            if package.kind != crate::environment::PackageKind::Stdlib {
+                work.push((&package.name, source, package));
+            }
         }
     }
 
@@ -302,17 +536,168 @@ pub fn harvest_libraries_parallel(
         lib.roots.insert(name, root);
     }
 
+    let projects = project_files(envs);
     for dev in dev_packages(envs) {
-        lib.packages
-            .insert(dev.name.clone(), Arc::new(harvest_workspace(&dev)));
+        lib.packages.insert(
+            dev.name.clone(),
+            Arc::new(harvest_workspace_for_project(
+                &dev,
+                projects.get(&dev.name).map(PathBuf::as_path),
+            )),
+        );
         lib.roots.insert(dev.name.clone(), dev.root);
         lib.workspaces.push(dev.name);
     }
     lib.workspaces.sort();
     lib.declared_deps = declared_deps(envs);
-    lib.project_files = project_files(envs);
+    lib.project_files = projects;
     lib.deps = dep_meta(envs);
+    install_syntax(envs, &mut lib);
     lib
+}
+
+/// Track syntax for every resolved pin. Only the checkout selected by name
+/// contributes symbols to the library.
+fn install_syntax(envs: &[Environment], lib: &mut HarvestedLibrary) {
+    use crate::incremental::normalize_path;
+    use crate::parse_context::{
+        ContextCatalog, EditionSource, SourceContext, SourceRole, dependency_edition_source,
+        workspace_package_entries,
+    };
+    use crate::parser::ParseOptions;
+
+    // A manifest pin or workspace package can replace a bundled package.
+    // An edition match alone cannot make the previous root's index reusable.
+    lib.syntax.packages.retain(|name, package| {
+        lib.roots
+            .get(name)
+            .is_some_and(|root| normalize_path(root) == normalize_path(&package.root))
+    });
+    lib.syntax
+        .variants
+        .retain(|(name, _), _| lib.syntax.packages.contains_key(name));
+    let mut unindexed_roots = Vec::new();
+    let buffers = BTreeMap::new();
+    for env in envs {
+        let project = normalize_path(&env.project_file);
+        let manifest = env.manifest_file.as_deref().map(normalize_path);
+        let mut sources = BTreeMap::new();
+        for package in &env.packages {
+            let Some(root) = &package.source else {
+                continue;
+            };
+            let indexed = lib
+                .roots
+                .get(&package.name)
+                .map(|root| normalize_path(root))
+                == Some(normalize_path(root));
+            let source = dependency_edition_source(package, root, manifest.as_deref());
+            unindexed_roots.extend(package.extension_entries(root).map(|entry| SourceContext {
+                entry,
+                source: source.clone(),
+            }));
+            if !indexed {
+                unindexed_roots.push(SourceContext {
+                    entry: root.join("src").join(format!("{}.jl", package.name)),
+                    source,
+                });
+                continue;
+            }
+            if package.kind == crate::environment::PackageKind::Stdlib {
+                if let Some(installed) = lib.syntax.packages.get(&package.name) {
+                    sources.insert(package.name.clone(), installed.source.clone());
+                }
+                continue;
+            }
+            let options = ParseOptions {
+                syntax_edition: package.syntax_edition,
+            };
+            sources.insert(package.name.clone(), source.clone());
+            if !lib.syntax.packages.contains_key(&package.name) {
+                lib.syntax.variants.insert(
+                    (package.name.clone(), options),
+                    if lib.workspaces.contains(&package.name) {
+                        Arc::new(harvest_package_with_options(root, &package.name, options))
+                    } else {
+                        Arc::clone(&lib.packages[&package.name])
+                    },
+                );
+                lib.syntax.packages.insert(
+                    package.name.clone(),
+                    PackageSyntax {
+                        root: normalize_path(root),
+                        source: source.clone(),
+                        options,
+                    },
+                );
+            }
+            lib.syntax
+                .variants
+                .entry((package.name.clone(), options))
+                .or_insert_with(|| {
+                    Arc::new(harvest_package_with_options(root, &package.name, options))
+                });
+        }
+        if let Some(dev) = env.dev_package() {
+            let indexed = lib.roots.get(&dev.name).map(|root| normalize_path(root))
+                == Some(normalize_path(&dev.root));
+            unindexed_roots.extend(
+                workspace_package_entries(&project, &buffers)
+                    .into_iter()
+                    .skip(usize::from(indexed)),
+            );
+            if indexed {
+                let source = EditionSource::Project {
+                    path: project.clone(),
+                    role: SourceRole::Package,
+                };
+                let selection = std::fs::read_to_string(&project)
+                    .ok()
+                    .as_deref()
+                    .map(|text| source.select(Some(text)))
+                    .unwrap_or_else(|| source.select(None));
+                let index = Arc::clone(&lib.packages[&dev.name]);
+                lib.syntax.packages.insert(
+                    dev.name.clone(),
+                    PackageSyntax {
+                        root: normalize_path(&dev.root),
+                        source: source.clone(),
+                        options: selection.options,
+                    },
+                );
+                lib.syntax
+                    .variants
+                    .insert((dev.name.clone(), selection.options), Arc::clone(&index));
+                sources.insert(dev.name, source);
+            }
+        }
+        lib.syntax.environments.insert(project, sources.clone());
+        if let Some(manifest) = manifest {
+            lib.syntax.environments.insert(manifest, sources);
+        }
+    }
+    let catalog = ContextCatalog::load(&unindexed_roots, &buffers, None);
+    lib.syntax.unindexed_options = catalog
+        .files
+        .iter()
+        .flat_map(|(path, contexts)| {
+            contexts
+                .iter()
+                .filter(|(context, _)| context.entry == *path)
+                .map(|(context, selection)| (context.clone(), selection.options))
+        })
+        .collect();
+    lib.syntax.unindexed_files = catalog
+        .files
+        .into_iter()
+        .map(|(path, contexts)| {
+            (
+                path,
+                contexts.into_iter().map(|(context, _)| context).collect(),
+            )
+        })
+        .collect();
+    lib.syntax.rebuild_memberships();
 }
 
 /// Harvest one registered package, reading it from `cache` when present (keyed by
@@ -330,7 +715,13 @@ fn harvest_package_cached(
     {
         return Arc::new(index);
     }
-    let index = harvest_package_named(source, name);
+    let index = harvest_package_with_options(
+        source,
+        name,
+        crate::parser::ParseOptions {
+            syntax_edition: package.syntax_edition,
+        },
+    );
     if let (Some(cache), Some(key)) = (cache, key.as_ref()) {
         cache.store(name, key, &index);
     }
@@ -341,5 +732,30 @@ fn harvest_package_cached(
 /// Split out so the language server can re-run it on save without re-resolving
 /// the whole environment.
 pub fn harvest_workspace(dev: &crate::environment::DevPackage) -> PackageIndex {
-    harvest_package_named(&dev.root, &dev.name)
+    let project = crate::environment::project_file_in(&dev.root);
+    harvest_workspace_for_project(dev, project.as_deref())
+}
+
+fn harvest_workspace_for_project(
+    dev: &crate::environment::DevPackage,
+    project: Option<&Path>,
+) -> PackageIndex {
+    use crate::parse_context::{EditionSource, SourceRole};
+
+    let options = project.map_or_else(
+        || {
+            crate::parse_context::EditionSelection::known(crate::parser::SyntaxEdition::OLDEST)
+                .options
+        },
+        |path| {
+            let source = EditionSource::Project {
+                path: path.to_path_buf(),
+                role: SourceRole::Package,
+            };
+            source
+                .select(std::fs::read_to_string(path).ok().as_deref())
+                .options
+        },
+    );
+    harvest_package_with_options(&dev.root, &dev.name, options)
 }

@@ -12,5 +12,3 @@ typegroup
     "a docstring"
     struct D end
 end
-typegroup = 1
-typegroup(x)

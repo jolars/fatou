@@ -1,0 +1,22 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+assertion_line: 49
+expression: rendered
+---
+ROOT@0..14
+  TYPED_MATRIX_EXPR@0..9
+    NAME@0..1
+      IDENT@0..1 "a"
+    MATRIX_EXPR@1..9
+      LBRACKET@1..2 "["
+      ARG@2..9
+        RETURN_EXPR@2..9
+          RETURN_KW@2..8 "return"
+          WHITESPACE@8..9 " "
+  ERROR@9..13
+    END_KW@9..12 "end"
+    RBRACKET@12..13 "]"
+  NEWLINE@13..14 "\n"
+
+diagnostic [9..9]: misplaced `end` in array
+diagnostic [9..12]: trailing tokens after statement

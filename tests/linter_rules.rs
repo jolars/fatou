@@ -3173,7 +3173,21 @@ fn assert_julia_1_14_feature(src: &str, expected: usize) {
 #[test]
 fn version_compat_flags_typegroup_below_1_14() {
     assert_julia_1_14_feature("typegroup\nstruct A end\nstruct B end\nend\n", 1);
-    assert!(version_findings("1.13", "typegroup = 1\nf(typegroup)\n").is_empty());
+    let config = LintConfig {
+        select: Some(vec!["julia-version-compat".into()]),
+        ..Default::default()
+    };
+    let (rules, _) = fatou::linter::ResolvedRules::resolve(&config);
+    let rules = rules
+        .with_julia_target(Some(parse_compat("1.13").unwrap()))
+        .with_syntax_edition(Some(fatou::parser::SyntaxEdition::Julia113));
+    let report = fatou::linter::check::check_text(
+        None,
+        "typegroup = 1\nf(typegroup)\n",
+        &rules,
+        fatou::linter::ProjectContext::SystemOnly,
+    );
+    assert!(report.diagnostics.is_empty());
 }
 
 #[test]

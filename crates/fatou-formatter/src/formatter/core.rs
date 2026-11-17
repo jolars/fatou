@@ -13,7 +13,9 @@ use crate::formatter::ir::Ir;
 use crate::formatter::printer::{print, print_at};
 use crate::formatter::rules::{base_indent_level, lower, lower_body_range};
 use crate::formatter::style::{FormatStyle, apply_line_ending};
+#[cfg(test)]
 use crate::parser::parse;
+use crate::parser::{ParseOptions, parse_with_options};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 use crate::verify::{VerificationError, verification_baseline, verify_against};
 
@@ -71,6 +73,14 @@ impl From<VerificationError> for VerifiedFormatError {
     }
 }
 
+/// Fully resolved formatting and parsing options. Edition selection belongs to
+/// the host; the formatter never reads project files.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FormatOptions {
+    pub style: FormatStyle,
+    pub parse_options: ParseOptions,
+}
+
 /// Format `input` with the default style.
 pub fn format(input: &str) -> Result<String, FormatError> {
     format_with_style(input, FormatStyle::default())
@@ -85,7 +95,13 @@ pub fn format_verified(input: &str) -> Result<String, VerifiedFormatError> {
 /// Format `input` with the given style: parse to the lossless CST, lower it to
 /// the layout IR, and print (see the module docs).
 pub fn format_with_style(input: &str, style: FormatStyle) -> Result<String, FormatError> {
-    format_node(&parse(input).cst, style)
+    format_with_options(
+        input,
+        FormatOptions {
+            style,
+            ..FormatOptions::default()
+        },
+    )
 }
 
 /// Format `input` with `style`, then verify the result against the already
@@ -94,11 +110,13 @@ pub fn format_verified_with_style(
     input: &str,
     style: FormatStyle,
 ) -> Result<String, VerifiedFormatError> {
-    let parsed = parse(input);
-    let baseline = verification_baseline(&parsed)?;
-    let formatted = format_node(&parsed.cst, style)?;
-    verify_against(&baseline, &formatted)?;
-    Ok(formatted)
+    format_verified_with_options(
+        input,
+        FormatOptions {
+            style,
+            ..FormatOptions::default()
+        },
+    )
 }
 
 /// Format an already-parsed CST `root` with the given style. The language
@@ -201,6 +219,44 @@ fn statement_container(root: &SyntaxNode, range: TextRange) -> SyntaxNode {
         }
     };
     found.unwrap_or_else(|| root.clone())
+}
+
+/// Format using an explicitly selected syntax edition.
+pub fn format_with_options(input: &str, options: FormatOptions) -> Result<String, FormatError> {
+    format_node_with_options(
+        &parse_with_options(input, options.parse_options).cst,
+        options,
+    )
+}
+
+/// Format and verify using the same syntax edition for input and output.
+pub fn format_verified_with_options(
+    input: &str,
+    options: FormatOptions,
+) -> Result<String, VerifiedFormatError> {
+    let parsed = parse_with_options(input, options.parse_options);
+    let baseline = verification_baseline(&parsed, options.parse_options)?;
+    let formatted = format_node_with_options(&parsed.cst, options)?;
+    verify_against(&baseline, &formatted)?;
+    Ok(formatted)
+}
+
+/// Format a tree parsed with `options.parse_options`. Existing layout rules
+/// operate on that edition's CST; space-form macro arguments stay together.
+pub fn format_node_with_options(
+    root: &crate::syntax::SyntaxNode,
+    options: FormatOptions,
+) -> Result<String, FormatError> {
+    format_node(root, options.style)
+}
+
+/// Range-format a tree parsed with `options.parse_options`.
+pub fn format_range_with_options(
+    root: &crate::syntax::SyntaxNode,
+    range: TextRange,
+    options: FormatOptions,
+) -> Result<Option<RangeFormatted>, FormatError> {
+    format_range(root, range, options.style)
 }
 
 #[cfg(test)]

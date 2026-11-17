@@ -42,7 +42,7 @@ use smol_str::SmolStr;
 use crate::incremental::{Analysis, SourceFile, normalize_path};
 use crate::index::model::{DefLocation, Span};
 use crate::index::{ModuleIndex, PackageIndex};
-use crate::parser::parse;
+use crate::parser::parse_with_options;
 use crate::resolve::{
     ModulePath, Namespace, OccurrenceKey, PackageSource, Resolution, Resolver, module_at,
     resolve_module, resolve_submodule,
@@ -65,7 +65,7 @@ pub fn compute_definition<P: PackageSource>(
     encoding: PositionEncoding,
     packages: &P,
 ) -> Vec<Location> {
-    let model = SemanticModel::build(&parse(text).cst);
+    let model = SemanticModel::build(&parse_with_options(text, packages.syntax_options()).cst);
     let line_index = LineIndex::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     let workspace = super::uri::to_path(uri).and_then(|p| packages.workspace_member(&p));
@@ -192,7 +192,7 @@ fn definition_for<P: PackageSource>(
 ) -> Vec<Location> {
     if let Some(context) = super::documentation::DocumentationContext::at(model, offset) {
         if let Some(embedded) = context.embedded_julia() {
-            let parsed = parse(embedded.text);
+            let parsed = parse_with_options(embedded.text, packages.syntax_options());
             let embedded_model = SemanticModel::build(&parsed.cst);
             let embedded_index = LineIndex::new(embedded.text);
             let mut locations = definition_for(
@@ -323,7 +323,7 @@ fn reference_locations<P: PackageSource>(
     target: &str,
     encoding: PositionEncoding,
 ) -> Vec<Location> {
-    let parsed = parse(target);
+    let parsed = parse_with_options(target, packages.syntax_options());
     let reference = SemanticModel::build(&parsed.cst);
     if let Some(qualified) = reference.qualified_reads().first() {
         return qualified_locations(qualified, packages, workspace.as_ref(), encoding);

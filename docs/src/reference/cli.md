@@ -39,6 +39,11 @@ Parse and display the CST for debugging
 
 ### Options
 
+`--syntax-edition <EDITION>`
+:   Select Julia syntax edition 1.13, 1.14, or 1.15; overrides source project metadata independently of the supported runtime range
+
+    Possible values: `1.13`, `1.14`, `1.15`
+
 `--verify`
 :   Verify parser losslessness (`reconstruct(text) == text`)
 
@@ -64,6 +69,11 @@ Format `.jl` files
 :   Input file(s) or director(ies). Pass `-` for stdin, also read when paths are omitted and stdin is not a terminal
 
 ### Options
+
+`--syntax-edition <EDITION>`
+:   Select Julia syntax edition 1.13, 1.14, or 1.15; overrides source project metadata independently of the supported runtime range
+
+    Possible values: `1.13`, `1.14`, `1.15`
 
 `--check`
 :   Check formatting without writing; prints a diff and exits non-zero if any file would change. Requires path arguments: there is no file on disk to report on when reading stdin
@@ -95,6 +105,11 @@ Lint `.jl` files
 :   Input file(s) or path(s)
 
 ### Options
+
+`--syntax-edition <EDITION>`
+:   Select Julia syntax edition 1.13, 1.14, or 1.15; overrides source project metadata independently of the supported runtime range
+
+    Possible values: `1.13`, `1.14`, `1.15`
 
 `--fix`
 :   Apply safe fixes to the source and write the files back

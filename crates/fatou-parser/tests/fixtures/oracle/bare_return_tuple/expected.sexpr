@@ -1,0 +1,1 @@
+(toplevel (tuple (return) x) (= (tuple (return) x) y) (= x (tuple (return) y)) (call f (return) x) (tuple-p (return) x) (tuple (return) (return) x))

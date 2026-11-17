@@ -14,12 +14,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use serde::Deserialize;
 use toml::Spanned;
+use toml::de::{DeTable, DeValue};
 
 use crate::julia_version::{VersionRange, parse_compat};
 
 /// A parsed 16-byte package UUID, stored in textual (big-endian) byte order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Uuid([u8; 16]);
 
 impl Uuid {
@@ -85,11 +87,16 @@ pub enum PackageKind {
 /// A single pinned package from the manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Package {
+    /// The dependency edition recorded by Pkg, independent of the manifest's
+    /// top-level runtime version. Older manifests use edition 1.13.
+    pub syntax_edition: crate::parser::SyntaxEdition,
     pub name: String,
     pub uuid: Uuid,
     pub version: Option<String>,
     pub tree_sha1: Option<String>,
     pub deps: Vec<String>,
+    /// Names of extensions recorded by this manifest pin.
+    pub extensions: Vec<String>,
     pub kind: PackageKind,
     /// The resolved package root (the directory that contains `src/`), if
     /// determinable. `None` for stdlib packages and for registered packages not
@@ -98,6 +105,15 @@ pub struct Package {
 }
 
 impl Package {
+    pub(crate) fn extension_entries<'a>(
+        &'a self,
+        root: &'a Path,
+    ) -> impl Iterator<Item = PathBuf> + 'a {
+        self.extensions
+            .iter()
+            .filter_map(move |name| extension_entry(root, name, Path::is_file))
+    }
+
     /// The facts about this package that survive the harvest: what a consumer
     /// with no [`Environment`] in hand — the language server, whose database
     /// holds the harvest and not the resolve — can still report about it.
@@ -110,6 +126,28 @@ impl Package {
             version: self.version.clone(),
             kind: self.kind,
         }
+    }
+}
+
+pub(crate) fn extension_entry(
+    root: &Path,
+    name: &str,
+    is_file: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    let mut components = Path::new(name).components();
+    if !matches!(components.next(), Some(std::path::Component::Normal(_)))
+        || components.next().is_some()
+    {
+        return None;
+    }
+    let ext = root.join("ext");
+    let file = format!("{name}.jl");
+    let nested = ext.join(name).join(&file);
+    if is_file(&nested) {
+        Some(nested)
+    } else {
+        let flat = ext.join(file);
+        is_file(&flat).then_some(flat)
     }
 }
 
@@ -319,11 +357,7 @@ pub fn resolve(ctx: &EnvContext) -> Result<Option<Environment>, EnvironmentError
         .unwrap_or_default();
 
     let meta = parse_project(&project_file)?;
-    let manifest_file = find_manifest(&project_dir);
-    let mut packages = match &manifest_file {
-        Some(path) => parse_manifest(path, &project_dir, &depots)?,
-        None => Vec::new(),
-    };
+    let (manifest_file, mut packages) = load_manifest(&project_dir, &depots)?;
 
     let install = locate_install(ctx, &depots);
     if let Some(install) = &install {
@@ -345,17 +379,27 @@ pub fn resolve(ctx: &EnvContext) -> Result<Option<Environment>, EnvironmentError
     }))
 }
 
+/// Resolve a manifest's pins without needing a valid owning project or an
+/// index of the installed packages.
+pub(crate) fn load_manifest(
+    project_dir: &Path,
+    depots: &[PathBuf],
+) -> Result<(Option<PathBuf>, Vec<Package>), EnvironmentError> {
+    let Some(path) = find_manifest(project_dir) else {
+        return Ok((None, Vec::new()));
+    };
+    let packages = parse_manifest(&path, project_dir, depots)?;
+    Ok((Some(path), packages))
+}
+
 // --- Discovery -------------------------------------------------------------
 
 /// Find the project file, following Julia's precedence.
 fn locate_project(ctx: &EnvContext, depots: &[PathBuf]) -> Option<(PathBuf, EnvSource)> {
-    if let Some(raw) = ctx.julia_project.as_deref() {
-        let trimmed = raw.trim();
-        if !trimmed.is_empty()
-            && let Some(path) = from_julia_project(trimmed, ctx, depots)
-        {
-            return Some((path, EnvSource::JuliaProject));
-        }
+    if let Some(value) = julia_project_setting(ctx)
+        && let Some(path) = from_julia_project(value, ctx, depots)
+    {
+        return Some((path, EnvSource::JuliaProject));
     }
 
     if let Some(path) = walk_up_for_project(&ctx.workspace_root) {
@@ -363,6 +407,19 @@ fn locate_project(ctx: &EnvContext, depots: &[PathBuf]) -> Option<(PathBuf, EnvS
     }
 
     newest_default_env(ctx).map(|path| (path, EnvSource::DefaultEnv))
+}
+
+fn julia_project_setting(ctx: &EnvContext) -> Option<&str> {
+    ctx.julia_project
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+/// Resolve an explicit selection without falling back to workspace discovery.
+pub(crate) fn explicitly_selected_project(ctx: &EnvContext) -> Option<PathBuf> {
+    let value = julia_project_setting(ctx).filter(|&value| value != "@.")?;
+    from_julia_project(value, ctx, &depot_roots(ctx))
 }
 
 /// Interpret a `JULIA_PROJECT` value: `@.` (walk up), `@name` (shared env), or
@@ -624,7 +681,7 @@ fn newest_stdlib(stdlib: &Path) -> Option<(String, PathBuf)> {
 }
 
 /// Point each stdlib package at its source under the installation's `stdlib`.
-fn resolve_stdlib_sources(packages: &mut [Package], install: &JuliaInstall) {
+pub(crate) fn resolve_stdlib_sources(packages: &mut [Package], install: &JuliaInstall) {
     for pkg in packages
         .iter_mut()
         .filter(|p| p.kind == PackageKind::Stdlib)
@@ -657,6 +714,11 @@ pub(crate) type SpannedMap = BTreeMap<Spanned<String>, Spanned<String>>;
 /// would surface as a silently missing index rather than as an error.
 #[derive(Debug, Default, serde::Deserialize)]
 pub(crate) struct ProjectFile {
+    /// A declaration with no string value still carries its diagnostic span.
+    #[serde(skip)]
+    pub syntax: Option<Spanned<Option<String>>>,
+    #[serde(skip)]
+    pub extensions: Vec<String>,
     pub name: Option<Spanned<String>>,
     /// Kept textual rather than a parsed [`Uuid`]: a malformed UUID must stay a
     /// dropped value (this module's "a malformed on-disk file is input"
@@ -679,6 +741,11 @@ pub(crate) struct ProjectFile {
     /// registry-resolved dependency from one pinned to a URL or a path.
     #[serde(default)]
     pub sources: BTreeMap<Spanned<String>, toml::Value>,
+}
+
+/// Locate only the project, without requiring a readable manifest or install.
+pub(crate) fn discover_project(ctx: &EnvContext) -> Option<PathBuf> {
+    locate_project(ctx, &depot_roots(ctx)).map(|(path, _)| path)
 }
 
 impl ProjectFile {
@@ -737,7 +804,7 @@ fn parse_project(path: &Path) -> Result<ProjectMeta, EnvironmentError> {
 /// Parse a project file's text against [`ProjectFile`]. The one project-file
 /// parse in the crate; `path` is carried only for the error.
 pub(crate) fn parse_project_text(path: &Path, text: &str) -> Result<ProjectFile, EnvironmentError> {
-    parse_toml(path, text)
+    decode_project(text).map_err(|err| toml_parse_error(path, err))
 }
 
 /// [`parse_project_text`] for a caller with no file name to name: a consumer
@@ -745,72 +812,127 @@ pub(crate) fn parse_project_text(path: &Path, text: &str) -> Result<ProjectFile,
 /// caller does not have to invent a placeholder path that the error would then
 /// carry.
 pub(crate) fn parse_project_str(text: &str) -> Option<ProjectFile> {
-    toml::from_str(text).ok()
+    decode_project(text).ok()
+}
+
+fn decode_project(text: &str) -> Result<ProjectFile, toml::de::Error> {
+    let table = DeTable::parse(text)?;
+    // An invalid edition affects parsing and rewrites without invalidating
+    // the package identity or dependency declarations.
+    let syntax = syntax_version(table.get_ref())
+        .map(|version| Spanned::new(version.span(), version.into_inner().map(str::to_owned)));
+    let extensions = extension_names(table.get_ref())
+        .map(str::to_owned)
+        .collect();
+    let mut project = ProjectFile::deserialize(toml::de::Deserializer::from(table))?;
+    project.syntax = syntax;
+    project.extensions = extensions;
+    Ok(project)
+}
+
+/// Decode the edition field in either a project or a manifest pin. Retain
+/// the offending value's span even when the table or field has the wrong type.
+pub(crate) fn syntax_version<'a>(table: &'a DeTable<'_>) -> Option<Spanned<Option<&'a str>>> {
+    let syntax = table.get("syntax")?;
+    let version = syntax
+        .get_ref()
+        .as_table()
+        .and_then(|table| table.get("julia_version"));
+    Some(Spanned::new(
+        version.unwrap_or(syntax).span(),
+        version.and_then(|value| value.get_ref().as_str()),
+    ))
+}
+
+pub(crate) fn extension_names<'a>(table: &'a DeTable<'_>) -> impl Iterator<Item = &'a str> {
+    table
+        .get("extensions")
+        .and_then(|value| value.get_ref().as_table())
+        .into_iter()
+        .flat_map(|extensions| extensions.keys().map(|name| name.get_ref().as_ref()))
 }
 
 // --- Manifest.toml ---------------------------------------------------------
+
+pub(crate) fn parse_manifest_table<'a>(
+    path: &Path,
+    text: &'a str,
+) -> Result<Spanned<DeTable<'a>>, EnvironmentError> {
+    DeTable::parse(text).map_err(|err| toml_parse_error(path, err))
+}
+
+/// Format 2 nests dependencies under `deps`. Format 1 puts them at the top level.
+pub(crate) fn manifest_dependency_table<'a, 'text>(
+    table: &'a DeTable<'text>,
+) -> &'a DeTable<'text> {
+    table
+        .get("deps")
+        .and_then(|value| value.get_ref().as_table())
+        .unwrap_or(table)
+}
+
+pub(crate) fn manifest_entry_tables<'a, 'text>(
+    table: &'a DeTable<'text>,
+) -> impl Iterator<Item = (&'a str, &'a DeTable<'text>)> {
+    manifest_dependency_table(table)
+        .iter()
+        .flat_map(|(name, value)| {
+            value
+                .get_ref()
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.get_ref().as_table())
+                .map(move |entry| (name.get_ref().as_ref(), entry))
+        })
+}
+
+pub(crate) fn manifest_entry_uuid(table: &DeTable<'_>) -> Option<Uuid> {
+    table.get("uuid")?.get_ref().as_str()?.parse().ok()
+}
 
 fn parse_manifest(
     path: &Path,
     project_dir: &Path,
     depots: &[PathBuf],
 ) -> Result<Vec<Package>, EnvironmentError> {
-    let table = read_toml(path)?;
-    let mut packages = Vec::new();
-
-    // Format 2.0 nests entries under a top-level `deps` table; format 1.0 puts
-    // each package array at the top level.
-    if let Some(deps) = table.get("deps").and_then(|v| v.as_table()) {
-        for (name, value) in deps {
-            collect_entries(name, value, project_dir, depots, &mut packages);
-        }
-    } else {
-        for (name, value) in &table {
-            collect_entries(name, value, project_dir, depots, &mut packages);
-        }
-    }
-
-    packages.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(packages)
+    let text = read_text(path)?;
+    let table = parse_manifest_table(path, &text)?;
+    Ok(manifest_packages(
+        path,
+        table.get_ref(),
+        project_dir,
+        depots,
+    ))
 }
 
-/// Push every package entry in `value` (an array of tables) into `packages`.
-fn collect_entries(
-    name: &str,
-    value: &toml::Value,
+fn manifest_packages(
+    manifest: &Path,
+    table: &DeTable<'_>,
     project_dir: &Path,
     depots: &[PathBuf],
-    packages: &mut Vec<Package>,
-) {
-    let Some(entries) = value.as_array() else {
-        return;
-    };
-    for entry in entries {
-        if let Some(table) = entry.as_table()
-            && let Some(package) = parse_entry(name, table, project_dir, depots)
-        {
-            packages.push(package);
-        }
-    }
+) -> Vec<Package> {
+    let mut packages: Vec<_> = manifest_entry_tables(table)
+        .filter_map(|(name, table)| parse_entry(manifest, name, table, project_dir, depots))
+        .collect();
+    packages.sort_by(|a, b| a.name.cmp(&b.name));
+    packages
 }
 
 fn parse_entry(
+    manifest: &Path,
     name: &str,
-    table: &toml::Table,
+    table: &DeTable<'_>,
     project_dir: &Path,
     depots: &[PathBuf],
 ) -> Option<Package> {
-    let uuid: Uuid = table.get("uuid").and_then(|v| v.as_str())?.parse().ok()?;
-    let version = table
-        .get("version")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-    let tree_sha1 = table
-        .get("git-tree-sha1")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-    let path = table.get("path").and_then(|v| v.as_str());
-    let deps = extract_deps(table.get("deps"));
+    let uuid = manifest_entry_uuid(table)?;
+    let string = |key: &str| table.get(key)?.get_ref().as_str();
+    let version = string("version").map(str::to_owned);
+    let tree_sha1 = string("git-tree-sha1").map(str::to_owned);
+    let path = string("path");
+    let deps = extract_deps(table.get("deps").map(Spanned::get_ref));
+    let extensions = extension_names(table).map(str::to_owned).collect();
 
     let kind = if path.is_some() {
         PackageKind::Dev
@@ -827,77 +949,45 @@ fn parse_entry(
     };
 
     Some(Package {
+        syntax_edition: crate::parse_context::manifest_entry_edition(manifest, table)
+            .options
+            .syntax_edition,
         name: name.to_string(),
         uuid,
         version,
         tree_sha1,
         deps,
+        extensions,
         kind,
         source,
     })
 }
 
-// --- The manifest, with spans ----------------------------------------------
-
-/// Each package name's entries, of which only `path` is typed: it is the one
-/// field naming something outside the manifest, and so the only one a reader
-/// can be sent to.
-type SpannedEntries = BTreeMap<String, Vec<SpannedEntry>>;
-
-/// A manifest read for its `path` entries alone, *with spans* — format 2.0,
-/// which nests every entry under a top-level `deps` table.
-///
-/// [`parse_manifest`] reads a plain [`toml::Table`] on purpose, and a
-/// `toml::Value` carries no span; a consumer that anchors inside a manifest
-/// therefore needs a typed schema. One schema cannot cover both layouts:
-/// `serde(flatten)` and `untagged` buffer through serde's `Content`, which
-/// drops the deserializer's span hook silently. Hence two attempts, one per
-/// layout (see [`manifest_path_entries`]).
-#[derive(serde::Deserialize)]
-struct SpannedManifest {
-    #[serde(default)]
-    deps: SpannedEntries,
-}
-
-#[derive(serde::Deserialize)]
-struct SpannedEntry {
-    path: Option<Spanned<String>>,
-}
-
-/// Every `path = "..."` a manifest's text pins, as the package name and the
-/// spanned path, in name order. Spans are byte offsets into `text`, exactly as
-/// [`ProjectFile`]'s are.
-///
-/// Empty when the text parses against neither layout: a half-typed manifest
-/// must anchor nothing, and its own `toml-syntax` finding reports the state it
-/// is in.
+/// Every `path = "..."` a manifest pins, with the byte span of its value.
 pub(crate) fn manifest_path_entries(text: &str) -> Vec<(String, Spanned<String>)> {
-    let deps = toml::from_str::<SpannedManifest>(text)
-        .ok()
-        .map(|manifest| manifest.deps)
-        .filter(|deps| !deps.is_empty())
-        // Format 1.0 puts each package's array at the top level instead. Tried
-        // only once 2.0 has come up empty, since a 2.0 manifest's
-        // `julia_version` is a string where this schema wants an array.
-        .or_else(|| toml::from_str::<SpannedEntries>(text).ok())
-        .unwrap_or_default();
-    deps.into_iter()
-        .flat_map(|(name, entries)| {
-            entries
-                .into_iter()
-                .filter_map(move |entry| Some((name.clone(), entry.path?)))
+    let Ok(table) = DeTable::parse(text) else {
+        return Vec::new();
+    };
+    manifest_entry_tables(table.get_ref())
+        .filter_map(|(name, entry)| {
+            let path = entry.get("path")?;
+            let value = path.get_ref().as_str()?;
+            Some((name.to_owned(), Spanned::new(path.span(), value.to_owned())))
         })
         .collect()
 }
 
 /// A package's `deps` may be an array of names or a table (name -> uuid).
-fn extract_deps(value: Option<&toml::Value>) -> Vec<String> {
+fn extract_deps(value: Option<&DeValue<'_>>) -> Vec<String> {
     match value {
-        Some(toml::Value::Array(arr)) => arr
+        Some(DeValue::Array(arr)) => arr
             .iter()
-            .filter_map(|v| v.as_str().map(str::to_string))
+            .filter_map(|v| v.get_ref().as_str().map(str::to_owned))
             .collect(),
-        Some(toml::Value::Table(table)) => table.keys().cloned().collect(),
+        Some(DeValue::Table(table)) => table
+            .keys()
+            .map(|key| key.get_ref().as_ref().to_owned())
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -1036,20 +1126,21 @@ fn parse_toml<T: serde::de::DeserializeOwned>(
     path: &Path,
     text: &str,
 ) -> Result<T, EnvironmentError> {
-    toml::from_str(text).map_err(|err| EnvironmentError::Parse {
+    toml::from_str(text).map_err(|err| toml_parse_error(path, err))
+}
+
+fn toml_parse_error(path: &Path, err: toml::de::Error) -> EnvironmentError {
+    EnvironmentError::Parse {
         path: path.to_path_buf(),
         // `to_string` renders a multi-line snippet with a caret diagram, which
         // is right for a terminal and wrong for a one-line diagnostic; `span`
         // now carries the location the caret was drawing.
         message: err.message().to_string(),
         span: err.span(),
-    })
+    }
 }
 
-/// Read and parse a file as an untyped table. The manifest's reader: nothing
-/// anchors a diagnostic inside a manifest beyond its syntax, so it needs no
-/// schema of its own — which also sidesteps its two incompatible layouts (see
-/// [`parse_manifest`]).
+/// Read an untyped table when only the manifest's runtime version is needed.
 fn read_toml(path: &Path) -> Result<toml::Table, EnvironmentError> {
     parse_toml(path, &read_text(path)?)
 }
@@ -1095,13 +1186,12 @@ mod tests {
 
     #[test]
     fn extract_deps_array_and_table() {
-        let value: toml::Value = toml::from_str("deps = [\"A\", \"B\"]").unwrap();
-        assert_eq!(extract_deps(value.get("deps")), vec!["A", "B"]);
-
-        let value: toml::Value = toml::from_str("[deps]\nA = \"x\"\nB = \"y\"").unwrap();
-        let mut got = extract_deps(value.get("deps"));
-        got.sort();
-        assert_eq!(got, vec!["A", "B"]);
+        for text in ["deps = [\"A\", \"B\"]", "[deps]\nA = \"x\"\nB = \"y\""] {
+            let table = DeTable::parse(text).unwrap();
+            let mut deps = extract_deps(table.get_ref().get("deps").map(Spanned::get_ref));
+            deps.sort();
+            assert_eq!(deps, ["A", "B"]);
+        }
     }
 
     #[test]
@@ -1123,14 +1213,10 @@ mod tests {
             path = "vendor/Local"
             uuid = "00000000-0000-0000-0000-000000000001"
         "#;
-        let table: toml::Table = text.parse().unwrap();
+        let path = Path::new("Manifest.toml");
+        let table = parse_manifest_table(path, text).unwrap();
         let project_dir = Path::new("/proj");
-        let deps = table.get("deps").and_then(|v| v.as_table()).unwrap();
-        let mut packages = Vec::new();
-        for (name, value) in deps {
-            collect_entries(name, value, project_dir, &[], &mut packages);
-        }
-        packages.sort_by(|a, b| a.name.cmp(&b.name));
+        let packages = manifest_packages(path, table.get_ref(), project_dir, &[]);
 
         assert_eq!(packages.len(), 3);
         let by_name = |n: &str| packages.iter().find(|p| p.name == n).unwrap();

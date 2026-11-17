@@ -1,0 +1,1 @@
+(toplevel (call f (= typegroup 1)) (call f (parameters (= typegroup 1))) (tuple-p (parameters (= typegroup 1))) (call f (parameters (= (var typegroup) 1))))

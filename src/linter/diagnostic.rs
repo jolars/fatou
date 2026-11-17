@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub const ANALYSIS_INCOMPLETE: &str = "analysis-incomplete";
 
 /// Severity assigned to a lint diagnostic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
@@ -36,7 +36,7 @@ impl Severity {
 
 /// Whether a fix is safe to apply automatically or needs explicit opt-in
 /// (`--unsafe-fixes`), because it might change behavior.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Applicability {
     Safe,
@@ -44,7 +44,7 @@ pub enum Applicability {
 }
 
 /// A single byte-range replacement.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct Fix {
     pub description: String,
     pub content: String,
@@ -56,7 +56,7 @@ pub struct Fix {
 /// Render-ready violation metadata. `name` is the short title (typically the
 /// rule ID); `body` is the one-line explanation; `suggestion` is an optional
 /// follow-on hint (rendered as a `help:` note).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct ViolationData {
     pub name: String,
     pub body: String,
@@ -79,7 +79,7 @@ impl ViolationData {
 }
 
 /// A lint finding or informational analysis notice anchored to a source range.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct Diagnostic {
     /// Static rule ID (e.g. `"unused-binding"`) or an analysis diagnostic code.
     pub rule: &'static str,

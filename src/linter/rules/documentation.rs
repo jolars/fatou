@@ -47,7 +47,7 @@ pub(crate) struct DocumentationScan {
 }
 
 impl DocumentationScan {
-    pub(crate) fn collect(model: &SemanticModel) -> Self {
+    pub(crate) fn collect(model: &SemanticModel, options: parser::ParseOptions) -> Self {
         let mut scan = Self::default();
         for attachment in model.documentation() {
             let DocText::Static(decoded) = &attachment.text else {
@@ -65,13 +65,14 @@ impl DocumentationScan {
                 continue;
             }
 
-            collect_code_problems(&markdown.cst, decoded, &mut scan.invalid_code);
+            collect_code_problems(&markdown.cst, decoded, &mut scan.invalid_code, options);
             collect_argument_mismatches(
                 &markdown.cst,
                 decoded,
                 attachment,
                 model,
                 &mut scan.argument_mismatches,
+                options,
             );
             collect_references(
                 &markdown.cst,
@@ -88,17 +89,29 @@ fn collect_code_problems(
     root: &fatou_parser::documentation::syntax::SyntaxNode,
     decoded: &crate::ast::StaticDocText,
     out: &mut Vec<InvalidDocstringCode>,
+    options: parser::ParseOptions,
 ) {
     for fence in root.descendants().filter_map(CodeBlock::cast) {
         match fence.fence_kind() {
-            FenceKind::Julia => {
-                check_mapped_julia(MappedText::fence(decoded.as_str(), &fence), decoded, out)
-            }
-            FenceKind::JuliaRepl | FenceKind::JlDoctest { .. } => {
-                check_repl_fence(&MappedText::fence(decoded.as_str(), &fence), decoded, out)
-            }
+            FenceKind::Julia => check_mapped_julia(
+                MappedText::fence(decoded.as_str(), &fence),
+                decoded,
+                out,
+                options,
+            ),
+            FenceKind::JuliaRepl | FenceKind::JlDoctest { .. } => check_repl_fence(
+                &MappedText::fence(decoded.as_str(), &fence),
+                decoded,
+                out,
+                options,
+            ),
             FenceKind::Documenter { directive, .. } if directive != DocumenterDirective::Raw => {
-                check_mapped_julia(MappedText::fence(decoded.as_str(), &fence), decoded, out)
+                check_mapped_julia(
+                    MappedText::fence(decoded.as_str(), &fence),
+                    decoded,
+                    out,
+                    options,
+                )
             }
             FenceKind::Plain
             | FenceKind::Documenter { .. }
@@ -112,6 +125,7 @@ fn check_repl_fence(
     mapped: &MappedText,
     decoded: &crate::ast::StaticDocText,
     out: &mut Vec<InvalidDocstringCode>,
+    options: parser::ParseOptions,
 ) {
     let text = &mapped.text;
     let lines = line_ranges(text, 0, text.len());
@@ -130,7 +144,7 @@ fn check_repl_fence(
         };
         let mut snippet = MappedText::default();
         snippet.push_mapped_slice(mapped, 0, separator.start);
-        check_mapped_julia(snippet, decoded, out);
+        check_mapped_julia(snippet, decoded, out, options);
         return;
     }
 
@@ -146,7 +160,7 @@ fn check_repl_fence(
         let code_start = line.content_end - code.len();
         let mut snippet = MappedText::default();
         snippet.push_mapped_slice(mapped, code_start, line.end);
-        let mut parsed = parser::parse(&snippet.text);
+        let mut parsed = parser::parse_with_options(&snippet.text, options);
         let mut next = line_index + 1;
 
         // A clean first line is a complete input, so subsequent lines are
@@ -162,7 +176,7 @@ fn check_repl_fence(
                 break;
             }
             snippet.push_mapped_slice(mapped, continuation.start, continuation.end);
-            parsed = parser::parse(&snippet.text);
+            parsed = parser::parse_with_options(&snippet.text, options);
             next += 1;
         }
         record_parse_diagnostics(&snippet, &parsed.diagnostics, decoded, out);
@@ -174,8 +188,9 @@ fn check_mapped_julia(
     snippet: MappedText,
     decoded: &crate::ast::StaticDocText,
     out: &mut Vec<InvalidDocstringCode>,
+    options: parser::ParseOptions,
 ) {
-    let parsed = parser::parse(&snippet.text);
+    let parsed = parser::parse_with_options(&snippet.text, options);
     record_parse_diagnostics(&snippet, &parsed.diagnostics, decoded, out);
 }
 
@@ -205,6 +220,7 @@ fn collect_argument_mismatches(
     attachment: &SemanticDoc,
     model: &SemanticModel,
     out: &mut Vec<DocstringArgumentMismatch>,
+    options: parser::ParseOptions,
 ) {
     let Some(parameters) = documented_parameters(attachment, model) else {
         return;
@@ -234,7 +250,7 @@ fn collect_argument_mismatches(
             let Some(Inline::Code(code)) = item.inlines().next() else {
                 continue;
             };
-            let Some(name) = simple_argument_name(&code.content()) else {
+            let Some(name) = simple_argument_name(&code.content(), options) else {
                 continue;
             };
             if parameters.contains(&name) {
@@ -275,8 +291,8 @@ fn documented_parameters(
     )
 }
 
-fn simple_argument_name(text: &str) -> Option<String> {
-    let parsed = parser::parse(text);
+fn simple_argument_name(text: &str, options: parser::ParseOptions) -> Option<String> {
+    let parsed = parser::parse_with_options(text, options);
     if !parsed.diagnostics.is_empty() {
         return None;
     }

@@ -1,0 +1,28 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..21
+  INDEX_EXPR@0..20
+    NAME@0..1
+      IDENT@0..1 "a"
+    ARG_LIST@1..20
+      LBRACKET@1..2 "["
+      ARG@2..19
+        RETURN_EXPR@2..19
+          RETURN_KW@2..8 "return"
+          WHITESPACE@8..9 " "
+          BEGIN_EXPR@9..19
+            BEGIN_KW@9..14 "begin"
+            BLOCK@14..19
+              BARE_TUPLE_EXPR@14..19
+                COMMA@14..15 ","
+                WHITESPACE@15..16 " "
+                ERROR@16..19
+                  END_KW@16..19 "end"
+      RBRACKET@19..20 "]"
+  NEWLINE@20..21 "\n"
+
+diagnostic [14..14]: unexpected `,` at the start of a statement
+diagnostic [16..19]: unexpected block keyword
+diagnostic [9..14]: expected `end`

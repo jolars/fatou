@@ -160,25 +160,24 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (2026-11-17 — multiline macro argument scope)
+## Latest session (2026-11-17 — explicit syntax editions)
 
-- Parser support for parenthesized multiline macro calls exposes semantic
-  argument boundaries: `(@m @n a\n b)` must keep `b` outside `@n`, and
-  `(@m +\n x)` must keep `+` as a value. Nonfinal space-form macro arguments
-  reuse the existing macro operand fence and parenthesize operator values.
-- A bare tuple argument fences its final item rather than the whole tuple,
-  preserving its surface syntax. Tests compare implicit and explicit grouping
-  across nested macros, binary and tuple arguments, vectors, generators,
-  LF/CRLF, and widths 24/80. They require program preservation, canonical
-  agreement, and idempotence; the new regression test fails before the fix.
-- No fixture style decision changes. The parser's new valid fixture uses the
-  existing `where T` to `where {T}` policy and joins that documented drift
-  group.
-- Formatter, parser-corpus equivalence, full workspace, clippy, rustfmt, and
-  both engine Wasm gates pass. The new valid parser fixture is idempotent for
-  LF/CRLF.
+- Added `FormatOptions` and option-aware full, verified, CST, and range
+  formatting APIs. Parsing, semantic verification, and output reparsing use the
+  same edition. Existing convenience APIs retain the latest supported edition.
+- Fixtures accept optional `edition.txt` metadata. Split the old `typegroup`
+  identifier cases into a 1.13 fixture; typegroup blocks use 1.14 or later.
+  Hand-authored expected output and the existing macro argument policy remain
+  unchanged.
+- Added checks across editions, widths, LF/CRLF, verification, and idempotence.
+  The gate is **132/161** fixtures. Workspace, clippy, and both engine Wasm
+  gates pass.
+- CLI and LSP adapters check every loading context and withhold conflicting or
+  uncertain edits. No formatter behavior follow-up is queued.
 
 ## Earlier sessions
+
+- **Multiline macro argument scope** (2026-11-17): keep whitespace-form macro arguments together across canonical reflow; width-driven continuation still protects argument boundaries.
 
 - **2026-11-17** — macro operand fences before generator clauses and list
   commas, including singleton tuples, nested macros, and CRLF.

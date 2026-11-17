@@ -18,7 +18,7 @@ use lsp_types::{DocumentLink, Range};
 use rowan::ast::AstNode as _;
 
 use crate::incremental::{Analysis, normalize_path};
-use crate::parser::parse;
+use crate::parser::{ParseOptions, parse_with_options};
 use crate::project::{include_sites, resolve_target};
 use crate::semantic::SemanticModel;
 use crate::syntax::SyntaxNode;
@@ -38,7 +38,16 @@ pub fn compute_document_links(
     base_dir: Option<&Path>,
     encoding: PositionEncoding,
 ) -> Vec<DocumentLink> {
-    let root = parse(text).cst;
+    compute_document_links_with_options(text, base_dir, encoding, ParseOptions::default())
+}
+
+pub fn compute_document_links_with_options(
+    text: &str,
+    base_dir: Option<&Path>,
+    encoding: PositionEncoding,
+    options: ParseOptions,
+) -> Vec<DocumentLink> {
+    let root = parse_with_options(text, options).cst;
     let model = SemanticModel::build(&root);
     links_for_tree(&root, &model, text, base_dir, encoding)
 }
@@ -70,7 +79,12 @@ pub(crate) fn document_links_via_db(
     match cached {
         Ok(Some(links)) => links,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_document_links(text, base_dir, encoding),
+        Ok(None) | Err(_) => compute_document_links_with_options(
+            text,
+            base_dir,
+            encoding,
+            snapshot.options_for_path(path),
+        ),
     }
 }
 

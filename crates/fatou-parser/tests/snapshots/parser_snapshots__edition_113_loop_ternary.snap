@@ -1,0 +1,45 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..71
+  WHILE_EXPR@0..70
+    WHILE_KW@0..5 "while"
+    WHITESPACE@5..6 " "
+    CONDITION@6..10
+      NAME@6..10
+        IDENT@6..10 "flag"
+    BLOCK@10..67
+      NEWLINE@10..11 "\n"
+      WHITESPACE@11..15 "    "
+      TERNARY_EXPR@15..38
+        NAME@15..19
+          IDENT@15..19 "flag"
+        WHITESPACE@19..20 " "
+        QUESTION@20..21 "?"
+        WHITESPACE@21..22 " "
+        BREAK_EXPR@22..27
+          BREAK_KW@22..27 "break"
+        WHITESPACE@27..28 " "
+        COLON@28..29 ":"
+        WHITESPACE@29..30 " "
+        CONTINUE_EXPR@30..38
+          CONTINUE_KW@30..38 "continue"
+      NEWLINE@38..39 "\n"
+      WHITESPACE@39..43 "    "
+      TERNARY_EXPR@43..66
+        NAME@43..47
+          IDENT@43..47 "flag"
+        WHITESPACE@47..48 " "
+        QUESTION@48..49 "?"
+        WHITESPACE@49..50 " "
+        CONTINUE_EXPR@50..58
+          CONTINUE_KW@50..58 "continue"
+        WHITESPACE@58..59 " "
+        COLON@59..60 ":"
+        WHITESPACE@60..61 " "
+        BREAK_EXPR@61..66
+          BREAK_KW@61..66 "break"
+      NEWLINE@66..67 "\n"
+    END_KW@67..70 "end"
+  NEWLINE@70..71 "\n"

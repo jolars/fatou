@@ -1,0 +1,1 @@
+(toplevel (= typegroup 1) (macrocall (macro_name m) typegroup) (macrocall (macro_name m) (error (typegroup (block (string-s "doc"))))) (error (typegroup (block (struct A (block))))) (macrocall (macro_name m) (error (typegroup (block (string "text")) (error-t)))))

@@ -760,6 +760,7 @@ fn a_stage_after_a_peek_survives_the_drain() {
     db.reparse_store(
         file,
         PrevParse {
+            options: Default::default(),
             text: "alphaX = 1\n".into(),
             green: parse("alphaX = 1\n").cst.green().to_owned(),
             diagnostics: Vec::new(),

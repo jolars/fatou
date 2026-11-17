@@ -6,20 +6,27 @@ use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 
-use std::collections::BTreeMap;
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, OnceLock};
 
 use crate::config::LintConfig;
 use crate::file_discovery::{ExcludeFilter, FileDiscoveryError, collect_julia_files};
-use crate::index::{DeclaredDeps, PackageIndex, build_system_index};
+use crate::index::{DeclaredDeps, HarvestedLibrary, PackageIndex, build_system_index};
 use crate::julia_version::VersionRange;
+use crate::parse_context::{
+    ContextCatalog, DiskEditionSelections, EditionSelection, EditionSource, SourceContext,
+};
+use crate::parser::{ParseOptions, SyntaxEdition};
+use crate::project::scripts::ScriptAnalysis;
 use rowan::TextRange;
 
 use crate::linter::diagnostic::{Diagnostic, Severity, ViolationData};
-use crate::linter::include_graph::{IncludeProblem, include_problems};
+use crate::linter::include_graph::{
+    IncludeProblem, include_problems_from_catalog, include_problems_with_options,
+};
 use crate::linter::rules::{ResolutionContext, ResolvedRules, RuleContext};
 use crate::linter::suppression::SuppressionMap;
-use crate::parser::parse;
 use crate::semantic::SemanticModel;
 use crate::syntax::SyntaxNode;
 
@@ -101,6 +108,14 @@ pub enum ProjectContext<'a> {
 }
 
 impl<'a> ProjectContext<'a> {
+    fn library(self) -> Option<&'a crate::index::HarvestedLibrary> {
+        match self {
+            Self::Harvested(library) => Some(library),
+            Self::Scripts { library, .. } => library,
+            _ => None,
+        }
+    }
+
     /// The [`ResolutionContext`] for the file at `path`, if any.
     ///
     /// The declared dependency set rides along only for a *package source
@@ -146,6 +161,181 @@ impl<'a> ProjectContext<'a> {
     }
 }
 
+struct BatchRules {
+    loose: ResolvedRules,
+    workspace: ResolvedRules,
+    script: ResolvedRules,
+}
+
+impl BatchRules {
+    fn new(
+        config: &LintConfig,
+        julia_target: Option<VersionRange>,
+        edition: Option<SyntaxEdition>,
+    ) -> (Self, Vec<String>) {
+        let (loose, unknown_rules) = ResolvedRules::resolve(config);
+        let configure = |rules: ResolvedRules| {
+            rules
+                .with_julia_target(julia_target)
+                .with_syntax_edition(edition)
+        };
+        (
+            Self {
+                loose: configure(loose),
+                workspace: configure(ResolvedRules::resolve_for_workspace(config).0),
+                script: configure(ResolvedRules::resolve_for_scripts(config).0),
+            },
+            unknown_rules,
+        )
+    }
+
+    fn needs_import_usage(&self) -> bool {
+        [&self.loose, &self.workspace, &self.script]
+            .iter()
+            .any(|rules| rules.enabled().contains("unused-import"))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ViewRules<'a> {
+    Fixed(&'a ResolvedRules),
+    ByMembership(&'a BatchRules),
+}
+
+impl<'a> ViewRules<'a> {
+    fn syntax_edition(self) -> Option<SyntaxEdition> {
+        match self {
+            Self::Fixed(rules) => rules,
+            Self::ByMembership(rules) => &rules.loose,
+        }
+        .syntax_edition()
+    }
+
+    fn for_view(self, in_script: bool, in_workspace: bool) -> &'a ResolvedRules {
+        match self {
+            Self::Fixed(rules) => rules,
+            Self::ByMembership(rules) if in_script => &rules.script,
+            Self::ByMembership(rules) if in_workspace => &rules.workspace,
+            Self::ByMembership(rules) => &rules.loose,
+        }
+    }
+}
+
+/// Syntax memberships and package import usage shared by a batch of lint
+/// targets. Fix passes retain the original memberships and reproject changed
+/// text so that candidate fixes see the current source.
+pub struct LintBatch {
+    rules: BatchRules,
+    catalog: ContextCatalog,
+    package_imports: Option<ScriptAnalysis>,
+    includes: BTreeMap<ParseOptions, BTreeMap<PathBuf, Vec<IncludeProblem>>>,
+    libraries: HashMap<SourceContext, Arc<HarvestedLibrary>>,
+}
+
+impl LintBatch {
+    pub fn new(
+        files: &[PathBuf],
+        entries: &[PathBuf],
+        library: Option<&crate::index::HarvestedLibrary>,
+        config: &LintConfig,
+        julia_target: Option<VersionRange>,
+        edition: Option<SyntaxEdition>,
+    ) -> (Self, Vec<String>) {
+        let (rules, unknown_rules) = BatchRules::new(config, julia_target, edition);
+        let packages = package_entries(library);
+        let mut roots = entries.to_vec();
+        roots.extend(packages.iter().cloned());
+        let catalog = ContextCatalog::discover(files, &roots, &BTreeMap::new(), edition);
+        let package_imports = (rules.needs_import_usage() && !packages.is_empty())
+            .then(|| imports_from_catalog(&packages, &catalog));
+        let mut paths_per_edition = BTreeMap::<_, Vec<_>>::new();
+        let mut libraries = HashMap::new();
+        let mut views = HashMap::new();
+        let buffers = BTreeMap::new();
+        let mut editions = DiskEditionSelections::new(&buffers);
+        for path in files {
+            let path = crate::incremental::normalize_path(path);
+            for options in catalog.options(&path) {
+                paths_per_edition
+                    .entry(options)
+                    .or_default()
+                    .push(path.clone());
+            }
+            if let Some(library) = library {
+                for (context, _) in catalog.selections(&path) {
+                    libraries.entry(context.clone()).or_insert_with(|| {
+                        let key = library.lint_view_key(context);
+                        Arc::clone(views.entry(key.clone()).or_insert_with(|| {
+                            Arc::new(library.lint_view(&key, edition, &mut editions))
+                        }))
+                    });
+                }
+            }
+        }
+        let includes = paths_per_edition
+            .into_iter()
+            .map(|(options, paths)| {
+                (
+                    options,
+                    include_problems_from_catalog(&paths, options, &catalog, None),
+                )
+            })
+            .collect();
+        (
+            Self {
+                rules,
+                catalog,
+                package_imports,
+                includes,
+                libraries,
+            },
+            unknown_rules,
+        )
+    }
+
+    pub fn source(&self, path: &Path) -> Result<&str, LintError> {
+        self.catalog.sources[&crate::incremental::normalize_path(path)]
+            .as_deref()
+            .map_err(|message| LintError::Io {
+                path: path.to_path_buf(),
+                message: message.clone(),
+            })
+    }
+
+    pub fn check(&self, path: &Path, text: &str, project: ProjectContext<'_>) -> LintFileReport {
+        let key = crate::incremental::normalize_path(path);
+        let selections = self.catalog.selections(&key);
+        let unchanged = self
+            .catalog
+            .sources
+            .get(&key)
+            .and_then(|source| source.as_ref().ok())
+            .is_some_and(|source| source.as_ref() == text);
+        let updated;
+        let imports = if unchanged || self.package_imports.is_none() {
+            self.package_imports.as_ref()
+        } else {
+            updated = package_import_usage(
+                Some(path),
+                text,
+                self.rules.loose.syntax_edition(),
+                project,
+                selections,
+            );
+            updated.as_ref()
+        };
+        check_text_with_imports(
+            Some(path),
+            text,
+            ViewRules::ByMembership(&self.rules),
+            project,
+            selections,
+            imports,
+            Some((self, unchanged)),
+        )
+    }
+}
+
 /// Lint every `.jl` file under `paths` with default configuration.
 pub fn check_paths(paths: &[PathBuf]) -> Result<LintResult, LintError> {
     check_paths_with_config(
@@ -167,104 +357,47 @@ pub fn check_paths_with_config(
     julia_target: Option<VersionRange>,
     project: ProjectContext<'_>,
 ) -> Result<LintResult, LintError> {
-    let files = collect_julia_files(paths, exclude).map_err(LintError::Discovery)?;
-    let (rules, unknown_rules) = ResolvedRules::resolve(config);
-    let rules = rules.with_julia_target(julia_target);
-    let workspace_rules = ResolvedRules::resolve_for_workspace(config)
-        .0
-        .with_julia_target(julia_target);
-    let script_rules = match project {
-        ProjectContext::Scripts { .. } => Some(
-            ResolvedRules::resolve_for_scripts(config)
-                .0
-                .with_julia_target(julia_target),
-        ),
-        _ => None,
-    };
+    check_paths_with_edition(paths, config, exclude, julia_target, project, None)
+}
 
-    // Read and parse every file up front (in parallel): the include-graph
-    // pre-pass wants all trees before the per-file rule runs, so a file's
-    // include edges are answered from the lint set instead of re-parsed from
-    // disk. Only the green trees cross the thread boundary (`SyntaxNode` is
-    // `Rc`-based and not `Send`); each consumer rebuilds its red tree, which
-    // is cheap. `collect` keeps the sorted discovery order for deterministic
-    // reporting.
-    let parsed = files
+/// The CLI override changes source grammar independently of runtime lint bounds.
+pub fn check_paths_with_edition(
+    paths: &[PathBuf],
+    config: &LintConfig,
+    exclude: &ExcludeFilter,
+    julia_target: Option<VersionRange>,
+    project: ProjectContext<'_>,
+    syntax_edition: Option<crate::parser::SyntaxEdition>,
+) -> Result<LintResult, LintError> {
+    let files = collect_julia_files(paths, exclude).map_err(LintError::Discovery)?;
+    let entries = match project {
+        ProjectContext::Scripts { scripts, .. } => scripts
+            .programs
+            .iter()
+            .map(|program| program.entry.clone())
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    let (batch, unknown_rules) = LintBatch::new(
+        &files,
+        &entries,
+        project.library(),
+        config,
+        julia_target,
+        syntax_edition,
+    );
+    let reports = files
         .par_iter()
         .map(|path| {
-            let text = std::fs::read_to_string(path).map_err(|err| LintError::Io {
-                path: path.clone(),
-                message: err.to_string(),
-            })?;
-            let out = parse(&text);
-            Ok((path.clone(), out.cst.green().to_owned(), out.diagnostics))
+            let text = batch.source(path)?;
+            Ok(batch.check(path, text, project))
         })
         .collect::<Result<Vec<_>, LintError>>()?;
-
-    let seeds: Vec<(PathBuf, SyntaxNode)> = parsed
-        .iter()
-        .map(|(path, green, _)| (path.clone(), SyntaxNode::new_root(green.clone())))
-        .collect();
-    let include_problems = include_problems(&seeds);
-    let import_usage = rules
-        .enabled()
-        .contains("unused-import")
-        .then(|| {
-            package_import_usage(
-                project,
-                &parsed
-                    .iter()
-                    .map(|(path, green, _)| {
-                        (
-                            crate::incremental::normalize_path(path),
-                            Arc::from(green.to_string()),
-                        )
-                    })
-                    .collect(),
-            )
-        })
-        .flatten();
-
-    let reports: Vec<LintFileReport> = parsed
-        .par_iter()
-        .map(|(path, green, diagnostics)| {
-            let root = SyntaxNode::new_root(green.clone());
-            let includes = include_problems
-                .get(path)
-                .map(Vec::as_slice)
-                .unwrap_or_default();
-            let rules = match (project, &script_rules) {
-                (ProjectContext::Scripts { scripts, .. }, Some(rules)) if scripts.applies(path) => {
-                    rules
-                }
-                _ if project
-                    .resolution_for(Some(path))
-                    .is_some_and(|r| r.workspace.is_some()) =>
-                {
-                    &workspace_rules
-                }
-                _ => &rules,
-            };
-            check_parsed(
-                Some(path),
-                &root,
-                diagnostics,
-                rules,
-                includes,
-                project,
-                import_usage.as_ref(),
-            )
-        })
-        .collect();
-
     let total_findings = reports
         .iter()
-        .filter_map(|report| match report.status {
-            LintStatus::Findings { count } => Some(count),
-            _ => None,
-        })
-        .sum();
-
+        .flat_map(|report| &report.diagnostics)
+        .filter(|diagnostic| !diagnostic.is_notice() && diagnostic.rule != PARSE_ERROR_RULE)
+        .count();
     Ok(LintResult {
         checked_files: files.len(),
         total_findings,
@@ -279,8 +412,9 @@ pub fn check_document(text: &str) -> LintFileReport {
     check_text(None, text, &rules, ProjectContext::SystemOnly)
 }
 
-/// Lint `text` under `config`, attributing findings to `path`. Used by the docs
-/// generator (`crate::linter::docs`) to render each example's real diagnostics.
+/// Lint `text` under `config`, attributing findings to `path`. These in-memory
+/// convenience APIs use the latest syntax edition without project discovery.
+/// Used by the docs generator (`crate::linter::docs`) to render each example's real diagnostics.
 pub fn check_source(path: Option<&Path>, text: &str, config: &LintConfig) -> LintFileReport {
     check_source_with_target(path, text, config, None)
 }
@@ -317,76 +451,407 @@ pub fn check_source_in_project(
         Some(deps) => ProjectContext::SystemInProject(deps),
         None => ProjectContext::SystemOnly,
     };
-    check_text(path, text, &rules, project)
+    check_text_single(
+        path,
+        text,
+        ViewRules::Fixed(&rules),
+        project,
+        ParseOptions::default(),
+        None,
+        None,
+    )
 }
 
-/// Single-file entry: parse, follow the file's own include chains (no lint-set
-/// siblings to seed — used for stdin, docs examples, and tests), then lint.
+/// Select source contexts from project metadata, parse, follow static includes,
+/// and lint. A pathless document uses the latest edition. Use `check_source`
+/// when a path only attributes an in-memory example and should not select metadata.
 pub fn check_text(
     path: Option<&Path>,
     text: &str,
     rules: &ResolvedRules,
     project: ProjectContext<'_>,
 ) -> LintFileReport {
-    let parsed = parse(text);
-    let import_usage = if rules.enabled().contains("unused-import") {
-        let buffers = path
-            .map(|path| (crate::incremental::normalize_path(path), Arc::from(text)))
-            .into_iter()
-            .collect();
-        package_import_usage(project, &buffers)
-    } else {
-        None
+    let mut entries = match project {
+        ProjectContext::Scripts { scripts, .. } => scripts
+            .programs
+            .iter()
+            .map(|program| program.entry.clone())
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
     };
-    let include_problems = match path {
+    entries.extend(package_entries(project.library()));
+    let selections;
+    let catalog;
+    let contexts = if let Some(path) = path {
+        let path = crate::incremental::normalize_path(path);
+        let buffers = BTreeMap::from([(path.clone(), Arc::from(text))]);
+        catalog = ContextCatalog::discover(
+            std::slice::from_ref(&path),
+            &entries,
+            &buffers,
+            rules.syntax_edition(),
+        );
+        catalog.selections(&path)
+    } else {
+        let edition = rules.syntax_edition().unwrap_or_default();
+        selections = vec![(
+            SourceContext {
+                entry: PathBuf::new(),
+                source: EditionSource::Fixed(edition),
+            },
+            EditionSelection::known(edition),
+        )];
+        &selections
+    };
+    check_text_in_contexts(path, text, rules, project, contexts)
+}
+
+/// Analyze every applicable edition. Semantic rules still join the driver's
+/// shared walk once per parsed view; parse errors block only their own view.
+pub fn check_text_in_contexts(
+    path: Option<&Path>,
+    text: &str,
+    rules: &ResolvedRules,
+    project: ProjectContext<'_>,
+    selections: &[(SourceContext, EditionSelection)],
+) -> LintFileReport {
+    let imports = rules
+        .enabled()
+        .contains("unused-import")
+        .then(|| package_import_usage(path, text, rules.syntax_edition(), project, selections))
+        .flatten();
+    check_text_with_imports(
+        path,
+        text,
+        ViewRules::Fixed(rules),
+        project,
+        selections,
+        imports.as_ref(),
+        None,
+    )
+}
+
+fn check_text_with_imports(
+    path: Option<&Path>,
+    text: &str,
+    rules: ViewRules<'_>,
+    project: ProjectContext<'_>,
+    selections: &[(SourceContext, EditionSelection)],
+    package_imports: Option<&ScriptAnalysis>,
+    batch: Option<(&LintBatch, bool)>,
+) -> LintFileReport {
+    let mut reports = Vec::new();
+    let mut report_entries = Vec::new();
+    let certain = selections.iter().all(|(_, selection)| selection.certain);
+    let mut seen = std::collections::HashSet::new();
+    for (context, selection) in selections {
+        // Keep existing conservative script resolution within one environment
+        // and grammar. Different metadata sources require separate library views.
+        let is_script = matches!(
+            context.source,
+            crate::parse_context::EditionSource::Fixed(_)
+                | crate::parse_context::EditionSource::Project {
+                    role: crate::parse_context::SourceRole::Script,
+                    ..
+                }
+        );
+        if !seen.insert((
+            context.source.clone(),
+            selection.options,
+            (!is_script).then_some(context.entry.clone()),
+        )) {
+            continue;
+        }
+        let filtered;
+        let library_view = project.library().map(|library| {
+            match batch.and_then(|(batch, _)| batch.libraries.get(context)) {
+                Some(view) => Cow::Borrowed(view.as_ref()),
+                None => Cow::Owned(library.in_context(context, rules.syntax_edition())),
+            }
+        });
+        let view_project = match project {
+            ProjectContext::Scripts { scripts, .. } => {
+                filtered = crate::project::scripts::ScriptAnalysis {
+                    programs: scripts
+                        .programs
+                        .iter()
+                        .filter(|program| {
+                            program.parse_options == selection.options
+                                && selections.iter().any(|(candidate, _)| {
+                                    candidate.entry == program.entry
+                                        && candidate.source == context.source
+                                })
+                        })
+                        .cloned()
+                        .collect(),
+                    pending: scripts.pending,
+                };
+                ProjectContext::Scripts {
+                    library: library_view.as_deref(),
+                    scripts: &filtered,
+                }
+            }
+            ProjectContext::Harvested(_) => {
+                ProjectContext::Harvested(library_view.as_deref().expect("context library"))
+            }
+            other => other,
+        };
+        let imports = package_imports.map(|usage| ScriptAnalysis {
+            programs: usage
+                .programs
+                .iter()
+                .filter(|program| {
+                    program.entry == context.entry && program.parse_options == selection.options
+                })
+                .cloned()
+                .collect(),
+            pending: usage.pending,
+        });
+        report_entries.push(context.entry.clone());
+        reports.push((
+            selection.options,
+            check_text_single(
+                path,
+                text,
+                rules,
+                view_project,
+                selection.options,
+                imports.as_ref(),
+                batch,
+            ),
+        ));
+    }
+    if reports.is_empty() {
+        let options = ParseOptions::default();
+        reports.push((
+            options,
+            check_text_single(path, text, rules, project, options, package_imports, batch),
+        ));
+    }
+    if reports.len() == 1 && certain {
+        let mut report = reports.pop().unwrap().1;
+        report.diagnostics.sort_by_key(diagnostic_order);
+        return report;
+    }
+    let diagnostic_key = |d: &Diagnostic| (d.rule, d.range, d.severity, d.message.clone());
+    let finding_key = |d: &Diagnostic| (d.rule, d.range, d.message.clone());
+    let exact: Vec<std::collections::HashSet<_>> = reports
+        .iter()
+        .map(|(_, report)| report.diagnostics.iter().collect())
+        .collect();
+    let findings: Vec<std::collections::HashSet<_>> = reports
+        .iter()
+        .map(|(_, report)| report.diagnostics.iter().map(finding_key).collect())
+        .collect();
+    let mut merged = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (_, report) in &reports {
+        for diagnostic in &report.diagnostics {
+            if !seen.insert(diagnostic_key(diagnostic)) {
+                continue;
+            }
+            let common = exact.iter().all(|report| report.contains(diagnostic));
+            let mut diagnostic = diagnostic.clone();
+            if !common || !certain {
+                diagnostic.fixes.clear();
+            }
+            if !common && reports.len() > 1 {
+                let key = finding_key(&diagnostic);
+                let contexts = reports
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| findings[*index].contains(&key))
+                    .map(|(index, (options, _))| {
+                        format!(
+                            "{} ({})",
+                            report_entries[index].display(),
+                            options.syntax_edition
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                diagnostic
+                    .message
+                    .body
+                    .push_str(&format!(" [syntax contexts: {contexts}]"));
+            }
+            merged.push(diagnostic);
+        }
+    }
+    if !certain {
+        for (_, selection) in selections {
+            if let Some(issue) = &selection.issue {
+                let mut diagnostic = Diagnostic::new(
+                    PARSE_ERROR_RULE,
+                    TextRange::empty(0.into()),
+                    format!(
+                        "syntax edition is uncertain: {}: {}",
+                        issue.path.display(),
+                        issue.message
+                    ),
+                );
+                diagnostic.severity = Severity::Error;
+                diagnostic.path = path.map(Path::to_path_buf);
+                if !merged.contains(&diagnostic) {
+                    merged.push(diagnostic);
+                }
+            }
+        }
+    }
+    if reports.len() > 1 || !certain {
+        let applied = crate::linter::fix::apply_fixes(text, &merged, true);
+        if reports.iter().any(|(options, _)| {
+            !crate::parser::parse_with_options(&applied.output, *options)
+                .diagnostics
+                .is_empty()
+        }) {
+            for diagnostic in &mut merged {
+                diagnostic.fixes.clear();
+            }
+        }
+    }
+    merged.sort_by_key(diagnostic_order);
+    let parse_count = merged
+        .iter()
+        .filter(|diagnostic| diagnostic.rule == PARSE_ERROR_RULE)
+        .count();
+    let count = merged
+        .iter()
+        .filter(|diagnostic| !diagnostic.is_notice())
+        .count();
+    let status = if parse_count > 0 {
+        LintStatus::ParseDiagnostics { count: parse_count }
+    } else if count > 0 {
+        LintStatus::Findings { count }
+    } else {
+        LintStatus::Clean
+    };
+    LintFileReport {
+        path: path.map(Path::to_path_buf),
+        status,
+        diagnostics: merged,
+    }
+}
+
+fn diagnostic_order(diagnostic: &Diagnostic) -> (rowan::TextSize, rowan::TextSize, &'static str) {
+    (
+        diagnostic.range.start(),
+        diagnostic.range.end(),
+        diagnostic.rule,
+    )
+}
+
+fn check_text_single(
+    path: Option<&Path>,
+    text: &str,
+    rules: ViewRules<'_>,
+    project: ProjectContext<'_>,
+    options: ParseOptions,
+    import_usage: Option<&ScriptAnalysis>,
+    batch: Option<(&LintBatch, bool)>,
+) -> LintFileReport {
+    let parsed = crate::parser::parse_with_options(text, options);
+    let computed;
+    let include_problems = match (path, batch) {
         // A pathless document has no base directory to resolve includes
         // against; the include-graph rules stay silent.
-        Some(path) => {
-            let seeds = [(path.to_path_buf(), parsed.cst.clone())];
-            include_problems(&seeds).remove(path).unwrap_or_default()
+        (None, _) => &[][..],
+        (Some(path), Some((batch, true))) => batch
+            .includes
+            .get(&options)
+            .and_then(|problems| problems.get(&crate::incremental::normalize_path(path)))
+            .map_or(&[][..], Vec::as_slice),
+        (Some(path), Some((batch, false))) => {
+            let path = crate::incremental::normalize_path(path);
+            computed = include_problems_from_catalog(
+                std::slice::from_ref(&path),
+                options,
+                &batch.catalog,
+                Some((&path, &parsed.cst)),
+            )
+            .remove(&path)
+            .unwrap_or_default();
+            &computed
         }
-        None => Vec::new(),
+        (Some(path), None) => {
+            let seeds = [(path.to_path_buf(), parsed.cst.clone())];
+            computed = include_problems_with_options(&seeds, options)
+                .remove(path)
+                .unwrap_or_default();
+            &computed
+        }
     };
     check_parsed(
         path,
         &parsed.cst,
         &parsed.diagnostics,
         rules,
-        &include_problems,
+        include_problems,
         project,
-        import_usage.as_ref(),
+        import_usage,
+        options,
+    )
+}
+
+fn package_entries(library: Option<&crate::index::HarvestedLibrary>) -> Vec<PathBuf> {
+    let Some(library) = library else {
+        return Vec::new();
+    };
+    library
+        .workspaces
+        .iter()
+        .filter_map(|name| {
+            let root = library.roots.get(name)?;
+            Some(crate::incremental::normalize_path(
+                &root.join("src").join(format!("{name}.jl")),
+            ))
+        })
+        .collect()
+}
+
+fn imports_from_catalog(entries: &[PathBuf], catalog: &ContextCatalog) -> ScriptAnalysis {
+    let programs: std::collections::BTreeSet<_> = entries
+        .iter()
+        .flat_map(|entry| {
+            catalog
+                .selections(entry)
+                .iter()
+                .filter_map(|(context, selection)| {
+                    (context.entry == *entry).then_some((entry.clone(), selection.options))
+                })
+        })
+        .collect();
+    ScriptAnalysis::from_sources_with_options(
+        &programs.into_iter().collect::<Vec<_>>(),
+        &catalog.sources,
     )
 }
 
 fn package_import_usage(
+    path: Option<&Path>,
+    text: &str,
+    edition: Option<SyntaxEdition>,
     project: ProjectContext<'_>,
-    buffers: &BTreeMap<PathBuf, Arc<str>>,
-) -> Option<crate::project::scripts::ScriptAnalysis> {
-    let library = match project {
-        ProjectContext::Harvested(library) => library,
-        ProjectContext::Scripts {
-            library: Some(library),
-            ..
-        } => library,
-        _ => return None,
-    };
-    let entries: Vec<_> = library
-        .workspaces
-        .iter()
-        .filter_map(|name| {
-            Some(
-                library
-                    .roots
-                    .get(name)?
-                    .join("src")
-                    .join(format!("{name}.jl")),
-            )
-        })
+    selections: &[(SourceContext, EditionSelection)],
+) -> Option<ScriptAnalysis> {
+    let entries = package_entries(project.library());
+    if entries.is_empty() {
+        return None;
+    }
+    let buffers = path
+        .map(|path| (crate::incremental::normalize_path(path), Arc::from(text)))
+        .into_iter()
         .collect();
-    let sources = crate::script_loading::load_sources(&entries, buffers);
-    Some(crate::project::scripts::ScriptAnalysis::from_sources(
-        &entries, &sources,
-    ))
+    let contexts: Vec<_> = selections
+        .iter()
+        .filter_map(|(context, _)| entries.contains(&context.entry).then_some(context.clone()))
+        .collect();
+    let catalog = if selections.is_empty() {
+        crate::script_loading::load_contexts(&entries, &buffers, edition)
+    } else {
+        ContextCatalog::load(&contexts, &buffers, edition)
+    };
+    Some(imports_from_catalog(&entries, &catalog))
 }
 
 /// Core per-file pass over an already-parsed file: run rules on a clean tree
@@ -398,10 +863,11 @@ fn check_parsed(
     path: Option<&Path>,
     root: &SyntaxNode,
     parse_diagnostics: &[crate::parser::ParseDiagnostic],
-    rules: &ResolvedRules,
+    rules: ViewRules<'_>,
     includes: &[IncludeProblem],
     project: ProjectContext<'_>,
     import_usage: Option<&crate::project::scripts::ScriptAnalysis>,
+    options: crate::parser::ParseOptions,
 ) -> LintFileReport {
     if !parse_diagnostics.is_empty() {
         let diagnostics = parse_diagnostics
@@ -438,6 +904,12 @@ fn check_parsed(
         ProjectContext::Scripts { scripts, .. } => Some(scripts),
         _ => None,
     };
+    let rules = rules.for_view(
+        path.is_some_and(|path| scripts.is_some_and(|scripts| scripts.applies(path))),
+        resolution
+            .as_ref()
+            .is_some_and(|resolution| resolution.workspace.is_some()),
+    );
     let diagnostics = lint_parsed_with_import_usage(
         path,
         root,
@@ -447,6 +919,7 @@ fn check_parsed(
         includes,
         scripts,
         import_usage,
+        options,
     );
 
     let count = diagnostics.iter().filter(|d| !d.is_notice()).count();
@@ -502,7 +975,15 @@ pub fn lint_parsed_with_scripts(
     scripts: Option<&crate::project::scripts::ScriptAnalysis>,
 ) -> Vec<Diagnostic> {
     lint_parsed_with_import_usage(
-        path, root, model, rules, resolution, includes, scripts, None,
+        path,
+        root,
+        model,
+        rules,
+        resolution,
+        includes,
+        scripts,
+        None,
+        crate::parser::ParseOptions::default(),
     )
 }
 
@@ -518,9 +999,11 @@ pub(crate) fn lint_parsed_with_import_usage(
     includes: &[IncludeProblem],
     scripts: Option<&crate::project::scripts::ScriptAnalysis>,
     import_usage: Option<&crate::project::scripts::ScriptAnalysis>,
+    options: crate::parser::ParseOptions,
 ) -> Vec<Diagnostic> {
     let suppressions = SuppressionMap::build(root);
     let ctx = RuleContext::new(path, root, model)
+        .with_parse_options(options)
         .with_resolution(resolution)
         .with_scripts(scripts)
         .with_import_usage(import_usage)

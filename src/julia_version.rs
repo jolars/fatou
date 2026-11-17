@@ -44,6 +44,42 @@ impl Version {
     pub const fn major_only(major: u32) -> Self {
         Self::new(major, 0, 0)
     }
+
+    /// Validate Julia's `VersionNumber` spelling before dropping its
+    /// prerelease and build identifiers for numeric comparisons.
+    pub(crate) fn parse_julia_number(text: &str) -> Option<Self> {
+        if text == "∞" {
+            return Some(Self::new(u32::MAX, u32::MAX, u32::MAX));
+        }
+        let text = text.strip_prefix(['v', 'V']).unwrap_or(text);
+        let (release, build) = text
+            .split_once('+')
+            .map_or((text, None), |(release, build)| (release, Some(build)));
+        let end = release
+            .find(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
+            .unwrap_or(release.len());
+        let (core, pre) = release.split_at(end);
+        let valid_identifiers = |suffix: &str| {
+            suffix.split('.').all(|part| {
+                !part.is_empty()
+                    && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                    && (!part.bytes().all(|b| b.is_ascii_digit()) || part.parse::<u64>().is_ok())
+            })
+        };
+        let valid_pre = match pre {
+            "" => true,
+            "-" => build.is_none(),
+            pre if pre.starts_with('-') => valid_identifiers(&pre[1..]),
+            pre => pre.as_bytes()[0].is_ascii_alphabetic() && valid_identifiers(pre),
+        };
+        if !valid_pre
+            || build.is_some_and(|build| !build.is_empty() && !valid_identifiers(build))
+            || core.split('.').count() > 3
+        {
+            return None;
+        }
+        core.parse().ok()
+    }
 }
 
 impl fmt::Display for Version {
@@ -132,7 +168,7 @@ impl std::error::Error for ParseError {}
 /// - `1.6 - 1.11` — inclusive hyphen range.
 /// - `>= 1.6`, `≥ 1.6`, `< 2` — inequalities.
 pub fn parse_compat(spec: &str) -> Result<VersionRange, ParseError> {
-    Ok(CompatSpec::parse(spec)?.envelope())
+    CompatSpec::parse(spec)?.envelope().ok_or(ParseError)
 }
 
 #[cfg(test)]

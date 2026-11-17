@@ -18,6 +18,10 @@ pub enum DiagnosticKind {
     /// JuliaSyntax places a zero-width `(error-t)` after the keyword expression
     /// and leaves the comma to the enclosing tuple or argument list.
     UnexpectedComma,
+    /// In edition 1.13, a delimiter that closes an enclosing expression but
+    /// does not terminate a bare `break` or `continue`. Anchored at the keyword's
+    /// end, with a zero-width recovery marker inside the keyword expression.
+    UnexpectedLoopExitDelimiter,
     /// A recovery run after a labeled `break`/`continue` reaches EOF. Anchored
     /// at EOF; JuliaSyntax appends a zero-width `(error-t)` inside the run.
     PrematureEndOfInput,
@@ -162,9 +166,9 @@ pub enum DiagnosticKind {
     /// `importpath` but error-wraps it. Dotted quoted components (`using A.:b`)
     /// remain valid. Anchored at the quote colon.
     InvalidQuotedImportName,
-    /// A bracket- or brace-delimited list begins with a comma (`[,x]`,
-    /// `A[,x]`, `{,x}`). JuliaSyntax retains a zero-width `(error)` element
-    /// before the separator. Anchored at the comma.
+    /// A bracket, brace, or bare tuple begins with a comma. JuliaSyntax
+    /// retains a zero-width `(error)` element before the separator. Anchored
+    /// at the comma.
     EmptyListSlot,
     MissingOperand,
     MissingWhereBound,
@@ -212,12 +216,16 @@ pub enum DiagnosticKind {
     /// `(ErrorNumericOverflow)`. Anchored to the complete `LITERAL`, including
     /// a folded leading sign.
     NumericOverflow,
+    /// Syntax unavailable in the selected edition. Anchored to the operator.
+    UnsupportedEdition,
+    /// A recovered `typegroup` block in edition 1.13. Anchored to its keyword.
+    UnsupportedTypegroup,
 }
 
 /// How many ordered diagnostic streams a [`parse`](crate::parser::parse)
 /// emits: the drive-loop/`parse_stmt` stream, then one per post-build flag
 /// pass. See [`DiagnosticKind::stream`].
-pub(crate) const DIAGNOSTIC_STREAMS: usize = 6;
+pub(crate) const DIAGNOSTIC_STREAMS: usize = 7;
 
 impl DiagnosticKind {
     /// Which of [`parse`](crate::parser::parse)'s ordered diagnostic streams
@@ -239,13 +247,16 @@ impl DiagnosticKind {
             CatchVarNotIdentifier => 3,
             InvalidExportItem => 4,
             NumericOverflow => 5,
+            UnsupportedEdition => 6,
 
             // Everything else is pushed as the drive loop walks the token
             // stream, so it is already in document order.
             MissingEnd
+            | UnsupportedTypegroup
             | MissingTryHandler
             | StringJuxtapose
             | UnexpectedComma
+            | UnexpectedLoopExitDelimiter
             | PrematureEndOfInput
             | DotWhitespace
             | QuoteColonWhitespace

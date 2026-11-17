@@ -74,7 +74,7 @@ Start with adjacent assignment/comparison token boundaries.
 JS corpus (**907 cases**, error shapes included): **885 allowlisted**, 22
 classified divergences, 0 unsupported. All 756 original inputs remain, including
 six removed from upstream's harvested binding, and all 749 original passing
-cases remain allowlisted. Dir corpus (**280 cases**): **272 allowlisted**, 8
+cases remain allowlisted. Dir corpus (**298 cases**): **290 allowlisted**, 8
 blocked. Seven curated grammar changes moved to blocked with identical parser
 fixtures and reviewed CST snapshots; numeric display remains blocked. Both
 corpora enforce complete triage and reject stale blocked entries.
@@ -119,35 +119,29 @@ prefix `**a`/`--a` (`call-pre`, in neither corpus); trailing block-body junk
 keyword in `(@m x\n end)`. The last two remain pre-existing divergences in the
 multiline-macro probe set.
 
-## Latest session (2026-11-17 — Unicode 18 lexer)
+## Latest session (2026-11-18, statement tuples and type group docstrings)
 
-- **Lexer**: regenerate `unicode_ident.rs` from the locked Julia 1.15.0-DEV.783
-  binary with matching JuliaSyntax 2.0.0-DEV. Add the ten missing explicit
-  suffixes from JuliaLang/julia#60285 and #63505. The grammar and projector need
-  no changes.
-- **Coverage**: `unicode_18_identifiers` and `unicode_18_operator_suffixes` add
-  two parser/oracle fixtures and reviewed CST snapshots. Test identifier start
-  and continuation classes, invalid leading marks and unassigned neighbors, all
-  ten suffixes with six operator forms, and operators that reject suffixes.
-  LF/CRLF tests check clean parsing, losslessness, oracle parity, and 12
-  targeted incremental edits. Both fixtures join the seeded edit sweep. The
-  lexer regressions fail before the change.
-- **Probes**: all **12,919 new identifier starts** and **12,958 new
-  continuations** match the locked oracle in 25,877 expressions. All ten
-  suffixes match across 13 forms (130 expressions). Regeneration replays the
-  identifier table byte-for-byte; the explicit suffix delta is exactly ten
-  characters, with none removed.
-- **Parity**: curated **270/278 -> 272/280**, harvested **885/907 -> 885/907**,
-  with no regressions or new blocked entries. Earlier generated oracle artifacts
-  replay unchanged.
-- **Validation**: focused parser/oracle and incremental tests, full workspace
-  tests, clippy, rustfmt, and both engine Wasm builds pass. Both fixtures format
-  safely, reparse cleanly, and are idempotent at widths 24/80 with LF and CRLF.
-
-**Ranked next target:** adjacent assignment/comparison token boundaries in the
-harvested migration ledger.
+- A bare `return` can start a statement-level tuple and still leaves argument
+  separators to the enclosing list parser.
+- A quote glued to `typegroup` opens a docstring. Edition 1.13 recovers the
+  block and reports the 1.14 requirement.
+- Three new curated fixtures pass. The harvested corpus stays at 885 of 907.
 
 ## Earlier sessions
+
+- **Declaration and block recovery** (2026-11-18): recovered old-edition type
+  groups, reserved declaration names, and leading return-block commas. 885 / 287.
+
+- **Edition review** (2026-11-18): covered 1.13 loop-exit delimiters and
+  `typegroup` argument names in the pinned oracle. 885 / 284.
+
+- **Edition review** (2026-11-17): preserved ternary colons after loop exits and
+  recorded wrapping-operator edition diagnostics. 885 / 281.
+
+- **Julia syntax editions** (2026-11-17): added explicit parser and reparse
+  options, edition-specific oracle projections, and eight pinned fixtures.
+
+- **Unicode 18 lexer** (2026-11-17): regenerated pinned identifier/operator tables and reviewed JuliaSyntax parity; details remain in the parser commit.
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 

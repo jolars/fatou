@@ -1,5 +1,6 @@
 use std::cell::Cell;
 
+use crate::parser::ParseOptions;
 use crate::parser::cursor;
 use crate::parser::lexer::Token;
 
@@ -23,6 +24,7 @@ const PARSER_STEP_LIMIT: u32 = 15_000_000;
 /// through the parser so navigation reads the same way everywhere.
 pub(crate) struct ParserCtx<'a> {
     tokens: &'a [Token<'a>],
+    pub(crate) options: ParseOptions,
     /// Consecutive peeks since the last frontier advance (the stuck-loop guard).
     steps: Cell<u32>,
     /// The furthest token index any peek has reached; forward progress resets
@@ -31,9 +33,15 @@ pub(crate) struct ParserCtx<'a> {
 }
 
 impl<'a> ParserCtx<'a> {
+    #[cfg(test)]
     pub(crate) fn new(tokens: &'a [Token<'a>]) -> Self {
+        Self::with_options(tokens, ParseOptions::default())
+    }
+
+    pub(crate) fn with_options(tokens: &'a [Token<'a>], options: ParseOptions) -> Self {
         Self {
             tokens,
+            options,
             steps: Cell::new(0),
             high_water: Cell::new(0),
         }
@@ -66,8 +74,8 @@ impl<'a> ParserCtx<'a> {
         self.tokens.get(i)
     }
 
-    pub(crate) fn tokens(&self) -> &'a [Token<'a>] {
-        self.tokens
+    pub(crate) fn tokens(&self) -> &Self {
+        self
     }
 
     pub(crate) fn skip_ws(&self, i: usize) -> usize {
@@ -88,6 +96,13 @@ impl<'a> ParserCtx<'a> {
     pub(crate) fn skip_trivia(&self, i: usize) -> usize {
         self.step(i);
         cursor::skip_trivia(self.tokens, i)
+    }
+}
+
+impl<'a> std::ops::Deref for ParserCtx<'a> {
+    type Target = [Token<'a>];
+    fn deref(&self) -> &Self::Target {
+        self.tokens
     }
 }
 

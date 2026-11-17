@@ -233,6 +233,15 @@ pub enum Source {
 /// Implemented for the plain harvest map and for the language server's
 /// read-only [`Analysis`](crate::incremental::Analysis) snapshot.
 pub trait PackageSource {
+    /// Grammar of the active source view. Pure callers keep the latest edition;
+    /// an Analysis snapshot supplies its immutable loading context.
+    fn syntax_options(&self) -> crate::parser::ParseOptions {
+        Default::default()
+    }
+    fn syntax_options_at(&self, _path: &std::path::Path) -> crate::parser::ParseOptions {
+        self.syntax_options()
+    }
+
     fn package(&self, name: &str) -> Option<Arc<PackageIndex>>;
 
     /// The absolute source root of package `name` (the directory its

@@ -8,7 +8,7 @@ use fatou::lsp::{
     compute_semantic_tokens,
 };
 use fatou::text::{LineIndex, PositionEncoding};
-use lsp_server::{Connection, Message, Notification, Request, RequestId};
+use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId};
 use lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
     CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
@@ -66,6 +66,7 @@ fn native_file_uri(path: &str) -> Uri {
 
 #[test]
 fn stdio_exits_after_shutdown_and_exit() {
+    let _env = ENV_LOCK.lock().unwrap();
     use std::io::BufReader;
     use std::process::{Child, Command, Stdio};
     use std::sync::mpsc;
@@ -186,6 +187,7 @@ fn macro_implicit_arguments_have_references_but_no_declaration_or_rename() {
 
 #[test]
 fn initialize_format_and_shutdown() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -393,6 +395,7 @@ fn initialize_format_and_shutdown() {
 /// definition with its signature line and binding kind, rendered as markdown.
 #[test]
 fn hovers_a_local_definition() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -511,6 +514,7 @@ fn hovers_a_local_definition() {
 /// here once cancellation landed.
 #[test]
 fn cancel_request_yields_request_cancelled() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -564,6 +568,7 @@ fn cancel_request_yields_request_cancelled() {
 /// current text instead of applying a stale result.
 #[test]
 fn stale_read_yields_content_modified() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -627,6 +632,7 @@ fn stale_read_yields_content_modified() {
 /// on.
 #[test]
 fn serves_signature_help() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -742,6 +748,7 @@ fn serves_signature_help() {
 
 #[test]
 fn serves_goto_definition() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -852,6 +859,7 @@ fn serves_goto_definition() {
 /// function returns an array with both method definition sites.
 #[test]
 fn serves_goto_definition_with_multiple_methods() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -960,6 +968,7 @@ fn serves_goto_definition_with_multiple_methods() {
 /// document.
 #[test]
 fn serves_references() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -1071,6 +1080,7 @@ fn serves_references() {
 /// a variable returns each occurrence tagged read or write.
 #[test]
 fn serves_document_highlight() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -1188,6 +1198,7 @@ fn serves_document_highlight() {
 #[allow(clippy::mutable_key_type)]
 #[test]
 fn serves_rename() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -1324,6 +1335,7 @@ fn serves_rename() {
 /// one, and a `didChange` for a never-opened document is ignored.
 #[test]
 fn applies_incremental_range_edits() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -1506,6 +1518,7 @@ fn applies_incremental_range_edits() {
 /// unambiguous.
 #[test]
 fn publishes_versioned_diagnostics_across_edits() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -1632,6 +1645,7 @@ fn publishes_versioned_diagnostics_across_edits() {
 /// end to end, complementing the pure-decision `decide` unit tests.
 #[test]
 fn coalesces_rapid_didchanges_and_gates_stale_versions() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -1798,6 +1812,7 @@ fn coalesces_rapid_didchanges_and_gates_stale_versions() {
 /// round trip.
 #[test]
 fn negotiates_utf8_position_encoding() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -2158,6 +2173,7 @@ fn document_symbol_positions_follow_the_encoding() {
 /// nested outline, and an unknown document returns null.
 #[test]
 fn serves_document_symbols() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -2281,6 +2297,7 @@ fn serves_document_symbols() {
 /// path is covered by the unit tests, as go-to-definition's is).
 #[test]
 fn serves_workspace_symbols() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -2365,6 +2382,7 @@ fn serves_workspace_symbols() {
 
 #[test]
 fn serves_completion_and_resolve() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -2763,6 +2781,7 @@ fn folding_is_best_effort_on_broken_input() {
 
 #[test]
 fn serves_folding_ranges() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -2888,6 +2907,7 @@ fn serves_folding_ranges() {
 /// targeting the resolved file; an unknown document answers null.
 #[test]
 fn serves_document_links() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -3158,6 +3178,7 @@ fn selection_is_best_effort_on_broken_input() {
 
 #[test]
 fn serves_selection_ranges() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -3457,6 +3478,7 @@ fn semantic_tokens_is_best_effort_on_broken_input() {
 
 #[test]
 fn serves_semantic_tokens() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -3950,6 +3972,7 @@ fn file_rename(old: &Path, new: &Path) -> FileRename {
 /// only sends folder renames if the `folder` pattern kind is advertised.
 #[test]
 fn advertises_rename_file_operations() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -5206,6 +5229,7 @@ fn publishes_and_clears_project_file_syntax_diagnostics() {
 /// nothing for it, rather than parsing TOML as Julia.
 #[test]
 fn publishes_project_file_diagnostics_from_the_open_buffer() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -6428,6 +6452,7 @@ fn watched_file_events_refresh_environment_and_membership() {
 /// errors, and a fixing edit clears the report.
 #[test]
 fn publishes_lint_findings_as_diagnostics() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -6579,6 +6604,7 @@ fn publishes_lint_findings_as_diagnostics() {
 /// `===`, carrying the diagnostic it fixes and a single-document edit.
 #[test]
 fn serves_quick_fix_code_actions() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -6880,6 +6906,7 @@ fn serves_project_dependency_updates_and_hints_from_the_live_buffer() {
 /// capability (every other test here) keeps the push fallback.
 #[test]
 fn serves_pull_diagnostics() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -7160,6 +7187,7 @@ fn open_document(client: &Connection, uri: &Uri, text: &str) {
 
 #[test]
 fn script_entry_points_enable_default_diagnostics_after_loading() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = TempDir::new("fatou-lsp-script-defaults");
     write_file(
         &dir.path.join("fatou.toml"),
@@ -7202,6 +7230,7 @@ fn script_entry_points_enable_default_diagnostics_after_loading() {
 
 #[test]
 fn script_eval_edits_refresh_sibling_findings_and_analysis_notices() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = TempDir::new("fatou-lsp-script-eval");
     write_file(
         &dir.path.join("fatou.toml"),
@@ -7356,6 +7385,7 @@ fn unused_imports_refresh_after_cross_file_unsaved_edits_and_close() {
 
 #[test]
 fn script_include_errors_follow_live_edits_and_unopened_dependencies() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = TempDir::new("fatou-script-include-errors");
     write_file(
         &dir.path.join("fatou.toml"),
@@ -7564,6 +7594,7 @@ fn request_formatting(
 
 #[test]
 fn safe_formatting_config_rejects_invalid_documents_and_ranges() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = TempDir::new("fatou-lsp-safe-format");
     let config_path = dir.path.join("fatou.toml");
     write_file(&config_path, "[format]\nsafe = true\n");
@@ -7622,6 +7653,7 @@ fn safe_formatting_config_rejects_invalid_documents_and_ranges() {
 
 #[test]
 fn safe_formatting_client_settings_preserve_comments_and_range_boundaries() {
+    let _env = ENV_LOCK.lock().unwrap();
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
     initialize_with_options(&client, serde_json::json!({"format": {"safe": true}}));
@@ -7656,6 +7688,7 @@ fn safe_formatting_client_settings_preserve_comments_and_range_boundaries() {
 /// leaves the client's cursor, folds, and markers where the user left them.
 #[test]
 fn formatting_edits_are_scoped_to_the_lines_that_change() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = TempDir::new("fatou-lsp-format-scope");
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
@@ -7687,6 +7720,7 @@ fn formatting_edits_are_scoped_to_the_lines_that_change() {
 /// shows up in the formatted output.
 #[test]
 fn initialization_options_set_format_style() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = TempDir::new("fatou-lsp-init-options");
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
@@ -7710,6 +7744,7 @@ fn initialization_options_set_format_style() {
 /// finding without any edit.
 #[test]
 fn did_change_configuration_reconfigures_lint() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = TempDir::new("fatou-lsp-config-change");
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
@@ -7754,6 +7789,7 @@ fn did_change_configuration_reconfigures_lint() {
 /// failing to be forwarded onto the server's own rule sets.
 #[test]
 fn client_settings_carry_per_rule_options() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = TempDir::new("fatou-lsp-rule-options");
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
@@ -7799,6 +7835,7 @@ fn client_settings_carry_per_rule_options() {
 /// `initializationOptions` one.
 #[test]
 fn fatou_toml_wins_over_client_settings() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = TempDir::new("fatou-lsp-toml-wins");
     write_file(&dir.path.join("fatou.toml"), "[format]\nindent-width = 2\n");
     let (server, client) = Connection::memory();
@@ -7823,6 +7860,7 @@ fn fatou_toml_wins_over_client_settings() {
 /// the document.
 #[test]
 fn fatou_toml_edit_invalidates_config() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = TempDir::new("fatou-lsp-toml-edit");
     let toml_path = dir.path.join("fatou.toml");
     write_file(&toml_path, "[lint]\nignore = [\"unused-binding\"]\n");
@@ -7864,6 +7902,7 @@ fn fatou_toml_edit_invalidates_config() {
 
 #[test]
 fn inherited_config_edit_invalidates_config() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = TempDir::new("fatou-lsp-inherited-config-edit");
     let base = dir.path.join("base.toml");
     let project = dir.path.join("project");
@@ -7933,6 +7972,7 @@ fn inherited_config_edit_invalidates_config() {
 /// published diagnostic's severity.
 #[test]
 fn severity_override_via_settings() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = TempDir::new("fatou-lsp-severity");
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
@@ -7954,4 +7994,782 @@ fn severity_override_via_settings() {
 
     drop(client);
     server_thread.join().unwrap();
+}
+
+#[test]
+fn unsaved_syntax_editions_refresh_unchanged_julia_and_revert_on_close() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let dir = TempDir::new("fatou-lsp-edition-buffer");
+    let project = dir.path.join("Project.toml");
+    let old = "[syntax]\njulia_version = \"1.13\"\n";
+    let new = "[syntax]\njulia_version = \"1.14\"\n";
+    write_file(&project, old);
+    let path = dir.path.join("src/Foo.jl");
+    let uri = file_uri(&path);
+    let project_uri = file_uri(&project);
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_options(&client, serde_json::Value::Null);
+    open_document(&client, &uri, "typegroup  =  1\n");
+    assert!(recv_publish_for(&client, &uri).diagnostics.is_empty());
+    open_document(&client, &project_uri, new);
+    let report = recv_publish_for(&client, &uri);
+    assert_eq!(report.version, Some(1));
+    assert!(
+        !report.diagnostics.is_empty(),
+        "unchanged Julia must use unsaved metadata"
+    );
+    let response = request_formatting(&client, &uri, 201, None);
+    assert!(response.response_result.is_err());
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didClose".into(),
+            params: serde_json::to_value(DidCloseTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri: project_uri },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let report = recv_publish_for(&client, &uri);
+    assert_eq!(report.version, Some(1));
+    assert!(
+        report.diagnostics.is_empty(),
+        "closing restores the on-disk edition: {report:?}"
+    );
+    let response = request_formatting(&client, &uri, 202, None);
+    assert!(response.response_result.is_ok());
+    drop(client);
+    thread.join().unwrap();
+}
+
+#[test]
+fn shared_script_diagnostics_keep_all_editions_and_block_conflicting_edits() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let dir = TempDir::new("fatou-lsp-shared-editions");
+    for (name, edition) in [("old", "1.13"), ("new", "1.14")] {
+        write_file(
+            &dir.path.join(name).join("Project.toml"),
+            &format!("[syntax]\njulia_version = \"{edition}\"\n"),
+        );
+        write_file(
+            &dir.path.join(name).join("main.jl"),
+            "include(\"../shared.jl\")\n",
+        );
+    }
+    write_file(
+        &dir.path.join("fatou.toml"),
+        "[project]\nentry-points = [\"old/main.jl\", \"new/main.jl\"]\n[format]\nsafe = true\n",
+    );
+    let text = "break label include(\"missing.jl\")\ntypegroup  =  1\n";
+    write_file(&dir.path.join("shared.jl"), text);
+    let uri = file_uri(&dir.path.join("shared.jl"));
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_options(&client, serde_json::Value::Null);
+    open_document(&client, &uri, text);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let (mut edition_found, mut include_found) = (false, false);
+    loop {
+        let report = recv_publish_for(&client, &uri);
+        edition_found |= report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("syntax contexts:") && diagnostic.message.contains("1.14")
+        });
+        include_found |= report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code
+                == Some(lsp_types::NumberOrString::String(
+                    "missing-include-file".into(),
+                ))
+                && diagnostic.range.start.line == 0
+        });
+        if edition_found && include_found {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "missing diagnostic context: {report:?}"
+        );
+    }
+    let response = request_formatting(&client, &uri, 203, None);
+    assert!(response.response_result.is_err());
+    drop(client);
+    thread.join().unwrap();
+}
+
+#[test]
+fn formatting_uses_direct_discovery_after_a_script_drops_an_include() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let dir = TempDir::new("fatou-lsp-removed-include-context");
+    write_file(
+        &dir.path.join("Project.toml"),
+        "[syntax]\njulia_version = '1.15'\n",
+    );
+    write_file(
+        &dir.path.join("fatou.toml"),
+        "[project]\nentry-points = ['old/main.jl']\n[format]\nsafe = true\n",
+    );
+    write_file(
+        &dir.path.join("old/Project.toml"),
+        "[syntax]\njulia_version = '1.13'\n",
+    );
+    let entry = dir.path.join("old/main.jl");
+    let shared = dir.path.join("shared.jl");
+    let program = "include(\"../shared.jl\")\n";
+    let input = "typegroup  =  1\n";
+    write_file(&entry, program);
+    write_file(&shared, input);
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_options(&client, serde_json::Value::Null);
+    let entry_uri = file_uri(&entry);
+    let shared_uri = file_uri(&shared);
+    open_document(&client, &entry_uri, program);
+    open_document(&client, &shared_uri, input);
+    let response = request_formatting(&client, &shared_uri, 301, None);
+    let edits: Vec<TextEdit> = serde_json::from_value(response.response_result.unwrap()).unwrap();
+    assert!(!edits.is_empty());
+
+    client
+        .sender
+        .send(Message::Notification(Notification::new(
+            "textDocument/didChange".into(),
+            serde_json::json!({
+                "textDocument": { "uri": entry_uri, "version": 2 },
+                "contentChanges": [{ "text": "x = 1\n" }],
+            }),
+        )))
+        .unwrap();
+    let response = request_formatting(&client, &shared_uri, 302, None);
+    assert!(response.response_result.is_err(), "{response:?}");
+    drop(client);
+    thread.join().unwrap();
+}
+
+#[test]
+fn extensionless_julia_buffers_discover_their_edition() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let dir = TempDir::new("fatou-lsp-extensionless-edition");
+    write_file(
+        &dir.path.join("Project.toml"),
+        "[syntax]\njulia_version = '1.13'\n",
+    );
+    let uri = file_uri(&dir.path.join("script"));
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_options(&client, serde_json::json!({"format": {"safe": true}}));
+    open_document(&client, &uri, "typegroup  =  1\n");
+    assert!(recv_publish_for(&client, &uri).diagnostics.is_empty());
+    let response = request_formatting(&client, &uri, 201, None);
+    let edits: Vec<TextEdit> = serde_json::from_value(response.response_result.unwrap()).unwrap();
+    assert!(!edits.is_empty());
+    drop(client);
+    thread.join().unwrap();
+}
+
+#[test]
+fn source_saves_update_the_workspace_variant_selected_by_unsaved_metadata() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let dir = TempDir::new("fatou-lsp-live-edition-save");
+    let depot = TempDir::new("fatou-lsp-live-edition-save-depot");
+    let _guard = isolate_env(&dir, &depot);
+    let project = dir.path.join("Project.toml");
+    let metadata = "name = 'MyPkg'\nuuid = '00000000-0000-0000-0000-000000000001'\n[syntax]\n";
+    write_file(&project, &format!("{metadata}julia_version = '1.14'\n"));
+    let entry = dir.path.join("src/MyPkg.jl");
+    write_file(&entry, "module MyPkg\ninclude(\"api.jl\")\nend\n");
+    let api = dir.path.join("src/api.jl");
+    let old_api = "export old_api\nold_api() = 1\n";
+    let new_api = "export new_api\nnew_api() = 1\n";
+    write_file(&api, old_api);
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_root(&client, &file_uri(&dir.path));
+    let runner = file_uri(&dir.path.join("runner.jl"));
+    let api_uri = file_uri(&api);
+    open_document(&client, &runner, "using MyPkg\nold_api()\nnew_api()\n");
+    open_document(&client, &api_uri, old_api);
+    open_document(
+        &client,
+        &file_uri(&project),
+        &format!("{metadata}julia_version = '1.13'\n"),
+    );
+    assert_eq!(
+        poll_definition(
+            &client,
+            &runner,
+            Position::new(1, 1),
+            Duration::from_secs(10)
+        )
+        .uri,
+        api_uri
+    );
+
+    write_file(&api, new_api);
+    client
+        .sender
+        .send(Message::Notification(Notification::new(
+            "textDocument/didChange".into(),
+            serde_json::json!({
+                "textDocument": { "uri": api_uri, "version": 2 },
+                "contentChanges": [{ "text": new_api }],
+            }),
+        )))
+        .unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification::new(
+            "textDocument/didSave".into(),
+            serde_json::json!({ "textDocument": { "uri": api_uri } }),
+        )))
+        .unwrap();
+    assert_eq!(
+        poll_definition(
+            &client,
+            &runner,
+            Position::new(2, 1),
+            Duration::from_secs(10)
+        )
+        .uri,
+        api_uri
+    );
+    drop(client);
+    thread.join().unwrap();
+}
+
+#[test]
+fn unsaved_manifest_editions_refresh_dependency_buffers_and_restore_on_close() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let dir = TempDir::new("fatou-lsp-manifest-editions");
+    let depot = TempDir::new("fatou-lsp-edition-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", dir.path.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+    ]);
+    write_file(
+        &dir.path.join("Project.toml"),
+        "name = \"App\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n[deps]\nFoo = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"\n",
+    );
+    write_file(
+        &dir.path.join("src/App.jl"),
+        "module App\ninclude(\"a.jl\")\ninclude(\"b.jl\")\nend\n",
+    );
+    write_file(&dir.path.join("src/a.jl"), "greet(x) = x\ngreet(1)\n");
+    write_file(&dir.path.join("src/b.jl"), "caller() = greet(2)\n");
+    let source = "module Foo\nconst typegroup = 1\nend\n";
+    write_file(&dir.path.join("dependency/src/Foo.jl"), source);
+    write_file(
+        &dir.path.join("dependency/Project.toml"),
+        "name = 'Foo'\n[syntax]\njulia_version = '1.13'\n",
+    );
+    write_file(
+        &dir.path.join("dependency/ext/TriggerExt.jl"),
+        "break label include(\"../src/helper.jl\")\n",
+    );
+    let helper = dir.path.join("dependency/src/helper.jl");
+    let helper_text = "x  =  1 +% 2\n";
+    write_file(&helper, helper_text);
+    write_file(&dir.path.join("fatou.toml"), "[format]\nsafe = true\n");
+    let manifest = dir.path.join("Manifest.toml");
+    let old = "manifest_format = \"2.0\"\njulia_version = \"1.15\"\n[[deps.Foo]]\nuuid = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"\npath = \"dependency\"\n[deps.Foo.extensions]\nTriggerExt = \"Trigger\"\n";
+    write_file(&manifest, old);
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_root(&client, &file_uri(&dir.path));
+    let entry = file_uri(&dir.path.join("src/a.jl"));
+    open_document(&client, &entry, "greet(x) = x\ngreet(1)\n");
+    recv_publish_for(&client, &entry);
+    poll_references_spanning(&client, &entry, 2, Duration::from_secs(10));
+    let dependency = file_uri(&dir.path.join("dependency/src/Foo.jl"));
+    open_document(&client, &dependency, source);
+    assert!(
+        recv_publish_for(&client, &dependency)
+            .diagnostics
+            .is_empty()
+    );
+    let manifest_uri = file_uri(&manifest);
+    open_document(
+        &client,
+        &manifest_uri,
+        &old.replace(
+            "[deps.Foo.extensions]",
+            "syntax.julia_version = \"1.14\"\n[deps.Foo.extensions]",
+        ),
+    );
+    let report = recv_publish_for(&client, &dependency);
+    assert_eq!(report.version, Some(1));
+    assert!(
+        !report.diagnostics.is_empty(),
+        "dependency grammar follows its unsaved manifest entry"
+    );
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didClose".into(),
+            params: serde_json::to_value(DidCloseTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri: manifest_uri },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    loop {
+        let report = recv_publish_for(&client, &dependency);
+        assert_eq!(report.version, Some(1));
+        if report.diagnostics.is_empty() {
+            break;
+        }
+    }
+    let helper = file_uri(&helper);
+    open_document(&client, &helper, helper_text);
+    let initial = request_formatting(&client, &helper, 923, None);
+    assert!(initial.response_result.is_err());
+    open_document(
+        &client,
+        &file_uri(&manifest),
+        &old.replace(
+            "[deps.Foo.extensions]",
+            "syntax.julia_version = '1.14'\n[deps.Foo.extensions]",
+        ),
+    );
+    let live = request_formatting(&client, &helper, 924, None);
+    assert!(
+        !serde_json::from_value::<Vec<TextEdit>>(
+            live.result().unwrap_or_else(|| panic!("{live:?}"))
+        )
+        .unwrap()
+        .is_empty()
+    );
+    drop(client);
+    thread.join().unwrap();
+}
+
+#[test]
+fn shared_package_calls_offer_both_definitions_and_reject_a_partial_rename() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let dir = TempDir::new("fatou-lsp-shared-package-bindings");
+    let depot = TempDir::new("fatou-lsp-shared-package-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", "@."),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+    ]);
+    for (name, edition, suffix) in [("Foo", "1.13", 1), ("Bar", "1.14", 2)] {
+        let root = dir.path.join(name);
+        write_file(
+            &root.join("Project.toml"),
+            &format!(
+                "name = '{name}'\nuuid = '00000000-0000-0000-0000-00000000000{suffix}'\n[syntax]\njulia_version = '{edition}'\n"
+            ),
+        );
+        write_file(
+            &root.join(format!("src/{name}.jl")),
+            &format!("module {name}\ninclude(\"f.jl\")\ninclude(\"../../shared.jl\")\nend\n"),
+        );
+        write_file(&root.join("src/f.jl"), "f() = 1\n");
+    }
+    let shared = dir.path.join("shared.jl");
+    write_file(&shared, "f()\n");
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_folders(
+        &client,
+        &[
+            &file_uri(&dir.path.join("Foo")),
+            &file_uri(&dir.path.join("Bar")),
+        ],
+    );
+    let foo = file_uri(&dir.path.join("Foo/src/f.jl"));
+    let bar = file_uri(&dir.path.join("Bar/src/f.jl"));
+    let shared = file_uri(&shared);
+    open_document(&client, &foo, "f() = 1\n");
+    open_document(&client, &shared, "f()\n");
+    poll_references_spanning(&client, &foo, 2, Duration::from_secs(10));
+
+    client
+        .sender
+        .send(Message::Request(Request::new(
+            901.into(),
+            "textDocument/rename".into(),
+            serde_json::json!({
+                "textDocument": { "uri": foo },
+                "position": { "line": 0, "character": 0 },
+                "newName": "g"
+            }),
+        )))
+        .unwrap();
+    assert_eq!(
+        recv_response(&client, 901.into())
+            .response_result
+            .unwrap_err()
+            .code,
+        ErrorCode::RequestFailed as i32
+    );
+
+    client
+        .sender
+        .send(Message::Request(Request::new(
+            902.into(),
+            "textDocument/definition".into(),
+            serde_json::json!({
+                "textDocument": { "uri": shared },
+                "position": { "line": 0, "character": 0 }
+            }),
+        )))
+        .unwrap();
+    let locations: Vec<Location> =
+        serde_json::from_value(recv_response(&client, 902.into()).result().unwrap()).unwrap();
+    assert_eq!(locations.len(), 2);
+    assert!(locations.iter().any(|location| location.uri == foo));
+    assert!(locations.iter().any(|location| location.uri == bar));
+    drop(client);
+    thread.join().unwrap();
+}
+
+#[test]
+fn unsaved_package_includes_update_the_edition_of_another_buffer() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let dir = TempDir::new("fatou-lsp-live-package-includes");
+    let depot = TempDir::new("fatou-lsp-live-package-includes-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", "@."),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+    ]);
+    write_file(
+        &dir.path.join("Project.toml"),
+        "name = 'Foo'\nuuid = '00000000-0000-0000-0000-000000000001'\n[syntax]\njulia_version = '1.14'\n",
+    );
+    write_file(
+        &dir.path.join("other/Project.toml"),
+        "[syntax]\njulia_version = '1.13'\n",
+    );
+    let entry = dir.path.join("src/Foo.jl");
+    let shared = dir.path.join("other/shared.jl");
+    let source = "typegroup  =  1\n";
+    write_file(&entry, "module Foo end\n");
+    write_file(&shared, source);
+    // The newly included bridge stays closed. Its transitive include must
+    // pick up the live loading context too.
+    write_file(
+        &dir.path.join("bridge.jl"),
+        "include(\"other/shared.jl\")\n",
+    );
+    write_file(&dir.path.join("fatou.toml"), "[format]\nsafe = true\n");
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_root(&client, &file_uri(&dir.path));
+    let entry = file_uri(&entry);
+    let shared = file_uri(&shared);
+    open_document(&client, &entry, "module Foo end\n");
+    open_document(&client, &shared, source);
+    let before = request_formatting(&client, &shared, 903, None);
+    assert!(
+        !serde_json::from_value::<Vec<TextEdit>>(before.result().unwrap())
+            .unwrap()
+            .is_empty()
+    );
+    client
+        .sender
+        .send(Message::Notification(Notification::new(
+            "textDocument/didChange".into(),
+            serde_json::json!({
+                "textDocument": { "uri": entry, "version": 2 },
+                "contentChanges": [{ "text": "module Foo\ninclude(\"../bridge.jl\")\nend\n" }]
+            }),
+        )))
+        .unwrap();
+    let after = request_formatting(&client, &shared, 904, None);
+    assert!(after.response_result.is_err(), "{after:?}");
+    client
+        .sender
+        .send(Message::Notification(Notification::new(
+            "textDocument/didClose".into(),
+            serde_json::json!({ "textDocument": { "uri": entry } }),
+        )))
+        .unwrap();
+    let reverted = request_formatting(&client, &shared, 905, None);
+    assert!(
+        !serde_json::from_value::<Vec<TextEdit>>(reverted.result().unwrap())
+            .unwrap()
+            .is_empty()
+    );
+    drop(client);
+    thread.join().unwrap();
+}
+
+#[test]
+fn a_nested_open_package_loads_external_includes_without_a_workspace_harvest() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let dir = TempDir::new("fatou-lsp-nested-package");
+    let depot = TempDir::new("fatou-lsp-nested-package-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", "@."),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+    ]);
+    write_file(
+        &dir.path.join("nested/Project.toml"),
+        "name = 'Foo'\nuuid = '00000000-0000-0000-0000-000000000001'\n",
+    );
+    let entry = dir.path.join("nested/src/Foo.jl");
+    let helper = dir.path.join("lib/helper.jl");
+    let entry_text = "module Foo\ninclude(\"../../lib/helper.jl\")\nend\n";
+    let helper_text = "typegroup  =  1\n";
+    write_file(&entry, entry_text);
+    write_file(&helper, helper_text);
+    write_file(&dir.path.join("fatou.toml"), "[format]\nsafe = true\n");
+
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_root(&client, &file_uri(&dir.path));
+    let entry = file_uri(&entry);
+    open_document(&client, &entry, entry_text);
+    let helper = file_uri(&helper);
+    open_document(&client, &helper, helper_text);
+    let response = request_formatting(&client, &helper, 906, None);
+    let edits: Vec<TextEdit> = serde_json::from_value(response.result().unwrap()).unwrap();
+    assert!(!edits.is_empty());
+    client
+        .sender
+        .send(Message::Notification(Notification::new(
+            "textDocument/didClose".into(),
+            serde_json::json!({"textDocument": {"uri": entry}}),
+        )))
+        .unwrap();
+    let response = request_formatting(&client, &helper, 907, None);
+    let edits: Vec<TextEdit> = serde_json::from_value(response.result().unwrap()).unwrap();
+    assert!(!edits.is_empty());
+    drop(client);
+    thread.join().unwrap();
+}
+
+#[test]
+fn a_failed_saved_manifest_keeps_dependency_edits_blocked() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let dir = TempDir::new("fatou-lsp-failed-manifest-reload");
+    let depot = TempDir::new("fatou-lsp-failed-manifest-depot");
+    let _guard = isolate_env(&dir, &depot);
+    let uuid = "1520ce14-60c1-5f80-bbc7-55ef81b5835c";
+    write_file(
+        &dir.path.join("Project.toml"),
+        &format!("[deps]\nFoo = '{uuid}'\n"),
+    );
+    write_file(&dir.path.join("fatou.toml"), "[format]\nsafe = true\n");
+    write_file(
+        &dir.path.join("Foo/Project.toml"),
+        "name = 'Foo'\n[syntax]\njulia_version = '1.13'\n",
+    );
+    let dep = dir.path.join("Foo/src/Foo.jl");
+    let text = "module Foo\nexport f\nf()=1+%2\nend\n";
+    write_file(&dep, text);
+    let manifest = dir.path.join("Manifest.toml");
+    let valid =
+        format!("[[deps.Foo]]\nuuid = '{uuid}'\npath = 'Foo'\nsyntax.julia_version = '1.14'\n");
+    write_file(&manifest, &valid);
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_root(&client, &file_uri(&dir.path));
+    let dep = file_uri(&dep);
+    let manifest_uri = file_uri(&manifest);
+    open_document(&client, &dep, text);
+    let before = request_formatting(&client, &dep, 906, None);
+    assert!(
+        !serde_json::from_value::<Vec<TextEdit>>(before.result().unwrap())
+            .unwrap()
+            .is_empty()
+    );
+    open_document(&client, &manifest_uri, "[");
+    client
+        .sender
+        .send(Message::Notification(Notification::new(
+            "textDocument/didChange".into(),
+            serde_json::json!({
+                "textDocument": { "uri": dep, "version": 2 },
+                "contentChanges": [{ "text": "module Foo\nf()=1\nend\n" }]
+            }),
+        )))
+        .unwrap();
+    assert!(
+        request_formatting(&client, &dep, 907, None)
+            .result()
+            .unwrap()
+            .is_null()
+    );
+
+    write_file(&manifest, "[");
+    client
+        .sender
+        .send(Message::Notification(Notification::new(
+            "textDocument/didSave".into(),
+            serde_json::json!({ "textDocument": { "uri": manifest_uri } }),
+        )))
+        .unwrap();
+    assert!(
+        request_formatting(&client, &dep, 908, None)
+            .result()
+            .unwrap()
+            .is_null()
+    );
+
+    write_file(&manifest, &valid);
+    client
+        .sender
+        .send(Message::Notification(Notification::new(
+            "textDocument/didChange".into(),
+            serde_json::json!({
+                "textDocument": { "uri": manifest_uri, "version": 2 },
+                "contentChanges": [{ "text": valid }]
+            }),
+        )))
+        .unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification::new(
+            "textDocument/didSave".into(),
+            serde_json::json!({ "textDocument": { "uri": manifest_uri } }),
+        )))
+        .unwrap();
+    let recovered = request_formatting(&client, &dep, 909, None);
+    assert!(
+        !serde_json::from_value::<Vec<TextEdit>>(recovered.result().unwrap())
+            .unwrap()
+            .is_empty()
+    );
+    drop(client);
+    thread.join().unwrap();
+}
+
+#[test]
+fn correcting_project_metadata_reseeds_the_cached_edition() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let dir = TempDir::new("fatou-lsp-cached-edition-reseed");
+    let depot = TempDir::new("fatou-lsp-cached-edition-depot");
+    let _guard = isolate_env(&dir, &depot);
+    let project = dir.path.join("Project.toml");
+    let base = "name = 'Foo'\nuuid = '00000000-0000-0000-0000-000000000001'\n[syntax]\n";
+    write_file(&project, &format!("{base}julia_version = 14\n"));
+    write_file(
+        &dir.path.join("src/Foo.jl"),
+        "module Foo\ninclude(\"f.jl\")\ninclude(\"call.jl\")\nend\n",
+    );
+    let definition = dir.path.join("src/f.jl");
+    write_file(&definition, "f() = 1\n");
+    let call = dir.path.join("src/call.jl");
+    write_file(&call, "f()\n");
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_root(&client, &file_uri(&dir.path));
+    let call = file_uri(&call);
+    open_document(&client, &call, "f()\n");
+    assert!(
+        request_formatting(&client, &call, 910, None)
+            .result()
+            .unwrap()
+            .is_null()
+    );
+    client
+        .sender
+        .send(Message::Request(Request::new(
+            912.into(),
+            "workspace/willRenameFiles".into(),
+            RenameFilesParams {
+                files: vec![file_rename(&definition, &definition.with_file_name("g.jl"))],
+            },
+        )))
+        .unwrap();
+    assert_eq!(
+        recv_response(&client, 912.into())
+            .response_result
+            .unwrap_err()
+            .code,
+        ErrorCode::RequestFailed as i32
+    );
+    open_document(
+        &client,
+        &file_uri(&project),
+        &format!("{base}julia_version = '1.13'\n"),
+    );
+    assert_eq!(
+        poll_definition(&client, &call, Position::new(0, 0), Duration::from_secs(3)).uri,
+        file_uri(&definition)
+    );
+    drop(client);
+    thread.join().unwrap();
+}
+
+#[test]
+fn relative_julia_project_selects_the_live_script_edition() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let cwd = std::env::current_dir().unwrap();
+    let env = tempfile::tempdir_in(&cwd).unwrap();
+    let relative = env.path().strip_prefix(&cwd).unwrap();
+    let scripts = TempDir::new("fatou-lsp-relative-project-scripts");
+    let depot = TempDir::new("fatou-lsp-relative-project-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", relative.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+    ]);
+    write_file(
+        &env.path().join("Project.toml"),
+        "[syntax]\njulia_version = '1.13'\n",
+    );
+    let uri = file_uri(&scripts.path.join("script.jl"));
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_options(&client, serde_json::json!({"format": {"safe": true}}));
+    open_document(&client, &uri, "typegroup  =  1\n");
+    let reply = request_formatting(&client, &uri, 911, None);
+    assert!(
+        !serde_json::from_value::<Vec<TextEdit>>(reply.result().unwrap())
+            .unwrap()
+            .is_empty()
+    );
+    drop(client);
+    thread.join().unwrap();
+}
+
+#[test]
+fn single_file_dependency_uses_the_active_manifest_edition() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let dir = TempDir::new("fatou-lsp-single-file-manifest");
+    let depot = TempDir::new("fatou-lsp-single-file-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", dir.path.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+    ]);
+    write_file(&dir.path.join("Project.toml"), "[deps]\n");
+    write_file(
+        &dir.path.join("Manifest.toml"),
+        "[[deps.Foo]]\nuuid = '1520ce14-60c1-5f80-bbc7-55ef81b5835c'\npath = 'checkout'\nsyntax.julia_version = '1.14'\n",
+    );
+    write_file(
+        &dir.path.join("checkout/Project.toml"),
+        "name = 'Foo'\n[syntax]\njulia_version = '1.13'\n",
+    );
+    let entry = dir.path.join("checkout/src/Foo.jl");
+    let text = "module Foo\nx  =  1 +% 2\nend\n";
+    write_file(&entry, text);
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_options(&client, serde_json::json!({"format": {"safe": true}}));
+    let uri = file_uri(&entry);
+    open_document(&client, &uri, text);
+    let response = request_formatting(&client, &uri, 1, None);
+    assert!(
+        !serde_json::from_value::<Vec<TextEdit>>(
+            response.result().unwrap_or_else(|| panic!("{response:?}"))
+        )
+        .unwrap()
+        .is_empty()
+    );
+    drop(client);
+    thread.join().unwrap();
 }

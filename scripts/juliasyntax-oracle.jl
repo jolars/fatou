@@ -11,10 +11,10 @@ const ORACLE_SYNTAX_VERSION = let
     VersionNumber(version.major, version.minor)
 end
 
-function render_oracle(src::AbstractString)
+function render_oracle(src::AbstractString; version = ORACLE_SYNTAX_VERSION)
     node = JuliaSyntax.parseall(
         JuliaSyntax.SyntaxNode, src;
-        version = ORACLE_SYNTAX_VERSION, ignore_errors = true,
+        version, ignore_errors = true,
     )
     sprint(print, node)
 end

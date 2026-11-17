@@ -1,0 +1,1 @@
+(toplevel (module A (block (= typegroup 1) (call typegroup x) (= x typegroup) (public foo))))

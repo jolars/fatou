@@ -40,8 +40,17 @@ pub fn harvest_package(source_root: &Path) -> PackageIndex {
 /// Harvest the package named `name` rooted at `source_root`, entering at
 /// `src/<name>.jl`.
 pub fn harvest_package_named(source_root: &Path, name: &str) -> PackageIndex {
+    harvest_package_with_options(source_root, name, crate::parser::ParseOptions::default())
+}
+
+/// Harvest a package and its static includes under the loader-selected edition.
+pub fn harvest_package_with_options(
+    source_root: &Path,
+    name: &str,
+    options: crate::parser::ParseOptions,
+) -> PackageIndex {
     let entry = source_root.join("src").join(format!("{name}.jl"));
-    harvest_entry(source_root, &entry, name)
+    harvest_entry_with_options(source_root, &entry, name, options)
 }
 
 /// Harvest the module named `name` rooted at `source_root`, entering at the
@@ -50,13 +59,32 @@ pub fn harvest_package_named(source_root: &Path, name: &str) -> PackageIndex {
 /// `base/boot.jl`) get the same depot-relative `DefLocation`s as ordinary
 /// packages entered through [`harvest_package_named`].
 pub fn harvest_entry(source_root: &Path, entry: &Path, name: &str) -> PackageIndex {
-    harvest_entry_with_base_includes(source_root, entry, name, false)
+    harvest_entry_with_options(
+        source_root,
+        entry,
+        name,
+        crate::parser::ParseOptions::default(),
+    )
+}
+
+/// Harvest an explicit entry and all includes under one syntax edition.
+pub fn harvest_entry_with_options(
+    source_root: &Path,
+    entry: &Path,
+    name: &str,
+    options: crate::parser::ParseOptions,
+) -> PackageIndex {
+    harvest_entry_with_base_includes(source_root, entry, name, false, options)
 }
 
 /// Base's bootstrap `include` resolves from the Base source directory, while
 /// nested modules retain their ordinary file-relative `include` functions.
-pub(super) fn harvest_base_entry(base_dir: &Path, entry: &Path) -> PackageIndex {
-    harvest_entry_with_base_includes(base_dir, entry, "Base", true)
+pub(super) fn harvest_base_entry(
+    base_dir: &Path,
+    entry: &Path,
+    options: crate::parser::ParseOptions,
+) -> PackageIndex {
+    harvest_entry_with_base_includes(base_dir, entry, "Base", true, options)
 }
 
 fn harvest_entry_with_base_includes(
@@ -64,8 +92,10 @@ fn harvest_entry_with_base_includes(
     entry: &Path,
     name: &str,
     base_includes: bool,
+    options: crate::parser::ParseOptions,
 ) -> PackageIndex {
     let mut harvester = Harvester {
+        options,
         root: source_root.to_path_buf(),
         visited: HashSet::new(),
         members: Vec::new(),
@@ -135,6 +165,7 @@ fn harvest_entry_with_base_includes(
 /// workspace index would lag.
 pub fn harvest_tree(cst: &SyntaxNode) -> ModuleIndex {
     let mut harvester = Harvester {
+        options: crate::parser::ParseOptions::default(),
         root: PathBuf::new(),
         visited: HashSet::new(),
         members: Vec::new(),
@@ -171,6 +202,7 @@ pub fn harvest_tree(cst: &SyntaxNode) -> ModuleIndex {
 }
 
 struct Harvester {
+    options: crate::parser::ParseOptions,
     /// The package source root, for relativizing [`DefLocation::file`].
     root: PathBuf,
     /// Canonicalized files already walked — the cycle and duplicate guard.
@@ -237,7 +269,7 @@ impl Harvester {
         self.member_modules
             .insert(rel.clone(), self.module_path.clone());
         self.members.push(rel);
-        let parsed = crate::parser::parse(text);
+        let parsed = crate::parser::parse_with_options(text, self.options);
         if !parsed.diagnostics.is_empty() {
             self.diagnostics.push(HarvestDiagnostic::ParseError {
                 path: file.to_path_buf(),
@@ -1325,6 +1357,7 @@ mod tests {
     /// root module — the filesystem-free path into the harvester.
     fn harvest_str(text: &str, name: &str) -> ModuleIndex {
         let mut harvester = Harvester {
+            options: crate::parser::ParseOptions::default(),
             root: PathBuf::from("/pkg"),
             visited: HashSet::new(),
             members: Vec::new(),

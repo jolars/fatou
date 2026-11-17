@@ -17,7 +17,8 @@ use std::path::Path;
 use lsp_types::Diagnostic;
 
 use crate::incremental::{Analysis, normalize_path};
-use crate::parser::parse;
+use crate::parse_context::{EditionSelection, SourceContext};
+use crate::parser::parse_with_options;
 use crate::text::{PositionEncoding, TextBuffer};
 
 use super::format::parse_diagnostics_to_lsp;
@@ -30,12 +31,13 @@ use super::lint::{ServerRules, lint_diagnostics_via_db};
 /// findings on a clean tree, and the file's include-graph problems. Reads warm
 /// off the snapshot's cached parse when the tracked buffer for `path` still
 /// matches `text`; a cache miss or racing write falls back to a fresh parse.
-pub(crate) fn document_diagnostics_via_db(
+fn document_diagnostics_single(
     snapshot: &Analysis,
     path: &Path,
     text: &TextBuffer,
     encoding: PositionEncoding,
     rules: &ServerRules,
+    include_graph: bool,
 ) -> Vec<Diagnostic> {
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
@@ -52,7 +54,11 @@ pub(crate) fn document_diagnostics_via_db(
     let mut diags = match cached {
         Ok(Some(diags)) => diags,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => parse_diagnostics_to_lsp(&parse(text).diagnostics, text, encoding),
+        Ok(None) | Err(_) => parse_diagnostics_to_lsp(
+            &parse_with_options(text, snapshot.options_for_path(path)).diagnostics,
+            text,
+            encoding,
+        ),
     };
     // Lint findings join the report on a clean tree only, exactly like the
     // push path: rules would misfire on error-recovered shapes.
@@ -61,8 +67,122 @@ pub(crate) fn document_diagnostics_via_db(
             snapshot, path, text, encoding, rules,
         ));
     }
-    diags.extend(graph_diagnostics_for(snapshot, path, text, encoding, rules));
+    if include_graph {
+        diags.extend(graph_diagnostics_for(snapshot, path, text, encoding, rules));
+    }
     diags
+}
+
+/// The same source may load in several programs. Preserve every diagnostic,
+/// label findings confined to some contexts, and deduplicate shared findings.
+pub(crate) fn document_diagnostics_via_db(
+    snapshot: &Analysis,
+    path: &Path,
+    text: &TextBuffer,
+    encoding: PositionEncoding,
+    rules: &ServerRules,
+    contexts: &[(SourceContext, EditionSelection)],
+) -> Vec<Diagnostic> {
+    diagnostics_via_db(snapshot, path, text, encoding, rules, true, contexts)
+}
+
+pub(crate) fn source_diagnostics_via_db(
+    snapshot: &Analysis,
+    path: &Path,
+    text: &TextBuffer,
+    encoding: PositionEncoding,
+    rules: &ServerRules,
+) -> Vec<Diagnostic> {
+    let contexts = snapshot
+        .lookup_file(path)
+        .map_or(&[][..], |file| snapshot.source_editions(file).as_slice());
+    diagnostics_via_db(snapshot, path, text, encoding, rules, false, contexts)
+}
+
+fn diagnostics_via_db(
+    snapshot: &Analysis,
+    path: &Path,
+    text: &TextBuffer,
+    encoding: PositionEncoding,
+    rules: &ServerRules,
+    include_graph: bool,
+    contexts: &[(SourceContext, EditionSelection)],
+) -> Vec<Diagnostic> {
+    if contexts.is_empty() {
+        return document_diagnostics_single(snapshot, path, text, encoding, rules, include_graph);
+    }
+    let reports = contexts.iter().map(|(context, selected)| {
+        document_diagnostics_single(
+            &snapshot.with_context(context.clone(), selected.options),
+            path,
+            text,
+            encoding,
+            rules,
+            include_graph,
+        )
+    });
+    let mut merged = if contexts.len() == 1 {
+        reports.into_iter().next().unwrap()
+    } else {
+        let mut groups = Vec::<(Diagnostic, Vec<usize>)>::new();
+        let mut keys = std::collections::HashMap::new();
+        for (context, report) in reports.enumerate() {
+            for diagnostic in report {
+                let key = serde_json::to_vec(&diagnostic).expect("diagnostic serializes");
+                let index = *keys.entry(key).or_insert_with(|| {
+                    let index = groups.len();
+                    groups.push((diagnostic, Vec::new()));
+                    index
+                });
+                let indices = &mut groups[index].1;
+                if indices.last() != Some(&context) {
+                    indices.push(context);
+                }
+            }
+        }
+        groups
+            .into_iter()
+            .map(|(mut diagnostic, indices)| {
+                if indices.len() != contexts.len() {
+                    let labels = indices
+                        .into_iter()
+                        .map(|index| {
+                            let (context, selection) = &contexts[index];
+                            format!(
+                                "{} ({})",
+                                context.entry.display(),
+                                selection.options.syntax_edition
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    diagnostic
+                        .message
+                        .push_str(&format!(" [syntax contexts: {labels}]"));
+                }
+                diagnostic
+            })
+            .collect()
+    };
+    for (_, selected) in contexts {
+        if let Some(issue) = &selected.issue {
+            let diagnostic = Diagnostic {
+                range: lsp_types::Range::default(),
+                severity: Some(lsp_types::DiagnosticSeverity::ERROR),
+                source: Some("fatou".into()),
+                message: format!(
+                    "syntax edition is uncertain: {}: {}",
+                    issue.path.display(),
+                    issue.message
+                ),
+                ..Default::default()
+            };
+            if !merged.contains(&diagnostic) {
+                merged.push(diagnostic);
+            }
+        }
+    }
+    merged
 }
 
 /// The include-graph diagnostics attaching to `path`, re-derived from the
@@ -120,6 +240,38 @@ mod tests {
     use lsp_types::{DiagnosticSeverity, NumberOrString};
     use std::path::PathBuf;
 
+    fn document_diagnostics(
+        snapshot: &Analysis,
+        path: &Path,
+        text: &TextBuffer,
+        encoding: PositionEncoding,
+        rules: &ServerRules,
+    ) -> Vec<Diagnostic> {
+        let contexts = snapshot.capture_source_editions(path);
+        document_diagnostics_via_db(snapshot, path, text, encoding, rules, &contexts)
+    }
+
+    #[test]
+    fn loose_includes_do_not_create_a_package_graph() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.jl");
+        std::fs::write(dir.path().join("helper.jl"), "f(x) = x\n").unwrap();
+        let text = TextBuffer::new("include(\"helper.jl\")\n");
+        let mut db = IncrementalDatabase::default();
+        db.upsert_file(&path, text.text_arc());
+        let rules = ServerRules::defaults();
+        assert!(
+            document_diagnostics(
+                &db.snapshot(),
+                &path,
+                &text,
+                PositionEncoding::Utf16,
+                &rules
+            )
+            .is_empty()
+        );
+    }
+
     #[test]
     fn script_include_failures_are_reported_until_repaired() {
         use std::collections::BTreeMap;
@@ -138,7 +290,7 @@ mod tests {
                 (dir.path().join(target), Err("unreadable".into())),
             ]);
             db.set_script_sources(&rules.entry_points, &sources, &Default::default());
-            let diagnostics = document_diagnostics_via_db(
+            let diagnostics = document_diagnostics(
                 &db.snapshot(),
                 &entry,
                 &text,
@@ -146,6 +298,17 @@ mod tests {
                 &rules,
             );
             assert_eq!(diagnostics.len(), 1, "{target:?}: {diagnostics:?}");
+            let push = source_diagnostics_via_db(
+                &db.snapshot(),
+                &entry,
+                &text,
+                PositionEncoding::Utf16,
+                &rules,
+            );
+            assert!(
+                push.is_empty(),
+                "the script worker owns push graph findings: {push:?}"
+            );
             assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::ERROR));
             assert_eq!(diagnostics[0].range.start.line, 0);
             assert!(diagnostics[0].message.contains("include"));
@@ -156,7 +319,7 @@ mod tests {
             (helper, Ok(Arc::from("provided = 1\n"))),
         ]);
         db.set_script_sources(&rules.entry_points, &sources, &Default::default());
-        let diagnostics = document_diagnostics_via_db(
+        let diagnostics = document_diagnostics(
             &db.snapshot(),
             &entry,
             &text,
@@ -171,7 +334,7 @@ mod tests {
         let path = PathBuf::from("/work/a.jl");
         let mut db = IncrementalDatabase::default();
         db.upsert_file(&path, text.to_string());
-        document_diagnostics_via_db(
+        document_diagnostics(
             &db.snapshot(),
             &path,
             &TextBuffer::new(text.to_string()),
@@ -213,7 +376,7 @@ mod tests {
     fn falls_back_when_the_db_lags() {
         let text = "function f(x)\n    tmp = x + 1\n    return x\nend\n";
         let db = IncrementalDatabase::default();
-        let diags = document_diagnostics_via_db(
+        let diags = document_diagnostics(
             &db.snapshot(),
             Path::new("/work/never-seen.jl"),
             &TextBuffer::new(text.to_string()),

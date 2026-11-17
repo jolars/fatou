@@ -1,0 +1,107 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..147
+  FOR_EXPR@0..146
+    FOR_KW@0..3 "for"
+    WHITESPACE@3..4 " "
+    FOR_BINDING@4..11
+      NAME@4..5
+        IDENT@4..5 "x"
+      WHITESPACE@5..6 " "
+      IDENT@6..8 "in"
+      WHITESPACE@8..9 " "
+      NAME@9..11
+        IDENT@9..11 "xs"
+    BLOCK@11..143
+      NEWLINE@11..12 "\n"
+      WHITESPACE@12..16 "    "
+      CALL_EXPR@16..27
+        NAME@16..17
+          IDENT@16..17 "f"
+        ARG_LIST@17..27
+          LPAREN@17..18 "("
+          ARG@18..23
+            BREAK_EXPR@18..23
+              BREAK_KW@18..23 "break"
+          COMMA@23..24 ","
+          WHITESPACE@24..25 " "
+          ARG@25..26
+            NAME@25..26
+              IDENT@25..26 "x"
+          RPAREN@26..27 ")"
+      NEWLINE@27..28 "\n"
+      WHITESPACE@28..32 "    "
+      CALL_EXPR@32..60
+        NAME@32..33
+          IDENT@32..33 "f"
+        ARG_LIST@33..60
+          LPAREN@33..34 "("
+          ARG@34..42
+            CONTINUE_EXPR@34..42
+              CONTINUE_KW@34..42 "continue"
+          WHITESPACE@42..43 " "
+          BLOCK_COMMENT@43..56 "#= comment =#"
+          COMMA@56..57 ","
+          WHITESPACE@57..58 " "
+          ARG@58..59
+            NAME@58..59
+              IDENT@58..59 "x"
+          RPAREN@59..60 ")"
+      NEWLINE@60..61 "\n"
+      WHITESPACE@61..65 "    "
+      VECT_EXPR@65..72
+        LBRACKET@65..66 "["
+        ARG@66..71
+          BREAK_EXPR@66..71
+            BREAK_KW@66..71 "break"
+        RBRACKET@71..72 "]"
+      NEWLINE@72..73 "\n"
+      WHITESPACE@73..77 "    "
+      BRACES@77..87
+        LBRACE@77..78 "{"
+        ARG@78..86
+          CONTINUE_EXPR@78..86
+            CONTINUE_KW@78..86 "continue"
+        RBRACE@86..87 "}"
+      NEWLINE@87..88 "\n"
+      WHITESPACE@88..92 "    "
+      PAREN_EXPR@92..99
+        LPAREN@92..93 "("
+        BREAK_EXPR@93..98
+          BREAK_KW@93..98 "break"
+        RPAREN@98..99 ")"
+      NEWLINE@99..100 "\n"
+      WHITESPACE@100..104 "    "
+      TERNARY_EXPR@104..128
+        NAME@104..109
+          IDENT@104..109 "ready"
+        WHITESPACE@109..110 " "
+        QUESTION@110..111 "?"
+        WHITESPACE@111..112 " "
+        BREAK_EXPR@112..117
+          BREAK_KW@112..117 "break"
+        WHITESPACE@117..118 " "
+        COLON@118..119 ":"
+        WHITESPACE@119..120 " "
+        CONTINUE_EXPR@120..128
+          CONTINUE_KW@120..128 "continue"
+      NEWLINE@128..129 "\n"
+      WHITESPACE@129..133 "    "
+      BINARY_EXPR@133..142
+        BREAK_EXPR@133..138
+          BREAK_KW@133..138 "break"
+        WHITESPACE@138..139 " "
+        COLON@139..140 ":"
+        WHITESPACE@140..141 " "
+        NAME@141..142
+          IDENT@141..142 "x"
+      NEWLINE@142..143 "\n"
+    END_KW@143..146 "end"
+  NEWLINE@146..147 "\n"
+
+diagnostic [23..23]: unexpected token after `break`
+diagnostic [42..42]: unexpected token after `continue`
+diagnostic [71..71]: unexpected token after `break`
+diagnostic [86..86]: unexpected token after `continue`

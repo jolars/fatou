@@ -22,7 +22,7 @@ use crate::incremental::Analysis;
 use crate::linter::docs::rule_doc_url;
 use crate::linter::rules::{ResolutionContext, is_shipped_rule};
 use crate::linter::{self, ResolvedRules, Severity};
-use crate::parser::parse;
+use crate::parser::{ParseOptions, parse_with_options};
 use crate::resolve::PackageSource;
 use crate::semantic::SemanticModel;
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
@@ -129,12 +129,15 @@ pub(crate) fn lint_findings_via_db(
             &[],
             scripts.as_ref(),
             import_usage.as_ref(),
+            snapshot.options_for_path(path),
         ))
     }));
     match cached {
         Ok(Some(findings)) => findings,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => lint_findings_with_context(text, rules, true),
+        Ok(None) | Err(_) => {
+            lint_findings_with_context(text, rules, true, snapshot.options_for_path(path))
+        }
     }
 }
 
@@ -144,9 +147,13 @@ struct ScriptPackages<'a>(&'a Analysis);
 
 impl PackageSource for ScriptPackages<'_> {
     fn package(&self, name: &str) -> Option<Arc<crate::index::PackageIndex>> {
-        self.0
-            .package(name)
-            .or_else(|| crate::linter::check::system_snapshot().get(name).cloned())
+        self.0.package(name).or_else(|| {
+            self.0
+                .package_root(name)
+                .is_none()
+                .then(|| crate::linter::check::system_snapshot().get(name).cloned())
+                .flatten()
+        })
     }
 }
 
@@ -156,15 +163,16 @@ impl PackageSource for ScriptPackages<'_> {
 /// library would flash false positives — missing them for one round trip is
 /// the safe failure.
 fn lint_findings(text: &str, rules: &ServerRules) -> Vec<linter::Diagnostic> {
-    lint_findings_with_context(text, rules, false)
+    lint_findings_with_context(text, rules, false, ParseOptions::default())
 }
 
 fn lint_findings_with_context(
     text: &str,
     rules: &ServerRules,
     pending: bool,
+    options: ParseOptions,
 ) -> Vec<linter::Diagnostic> {
-    let parsed = parse(text);
+    let parsed = parse_with_options(text, options);
     if !parsed.diagnostics.is_empty() {
         return Vec::new();
     }
@@ -182,6 +190,7 @@ fn lint_findings_with_context(
         &[],
         None,
         pending.then_some(&usage),
+        options,
     )
 }
 
@@ -364,6 +373,7 @@ mod tests {
             std::fs::write(path, text).unwrap();
         }
         let mut library = HarvestedLibrary {
+            syntax: Default::default(),
             packages: build_system_index(None),
             roots: BTreeMap::from([("MyPkg".into(), dir.path().to_path_buf())]),
             workspaces: vec!["MyPkg".into()],

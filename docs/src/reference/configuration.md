@@ -115,6 +115,31 @@ and leaves the setting unset.
 version = "1.6"
 ```
 
+## Julia syntax editions
+
+Syntax editions are Julia project metadata, separate from the runtime range
+above. They do not add a key to `fatou.toml`.
+
+  | Source context             | Selection order                                                               | Default                  |
+  | -------------------------- | ----------------------------------------------------------------------------- | ------------------------ |
+  | Package source             | Owning `Project.toml` `[syntax].julia_version`, then minimum `[compat].julia` | 1.13                     |
+  | Script                     | Active project's `[syntax].julia_version`, then minimum `[compat].julia`      | Latest supported edition |
+  | Manifest dependency        | Matching dependency entry's `syntax.julia_version`                            | 1.13                     |
+  | Standalone source or stdin | `--syntax-edition` when supplied                                              | Latest supported edition |
+
+Supported editions are **1.13, 1.14, and 1.15**. Project and manifest versions
+normalize to the greatest supported edition at or below the given version,
+clamped to the supported range. The top-level manifest `julia_version` never
+selects source grammar.
+
+`--syntax-edition {1.13,1.14,1.15}` overrides source edition selection for
+`parse`, `format`, `lint`, and `debug format`. It leaves runtime compatibility
+checking unchanged. Dependencies keep their own recorded editions.
+
+See [Choosing a syntax
+edition](../guide/configuration.md#choosing-a-syntax-edition) for examples,
+include-context behavior, and unsaved editor metadata.
+
 ## `[format]`
 
   | Key            | Type    | Default  | Description                                                |

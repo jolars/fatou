@@ -1,0 +1,27 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..17
+  CALL_EXPR@0..16
+    NAME@0..1
+      IDENT@0..1 "f"
+    ARG_LIST@1..16
+      LPAREN@1..2 "("
+      PARAMETERS@2..15
+        SEMICOLON@2..3 ";"
+        WHITESPACE@3..4 " "
+        ARG@4..15
+          TYPEGROUP_DEF@4..15
+            IDENT@4..13 "typegroup"
+            BLOCK@13..14
+              ERROR@13..14
+                OPERATOR_ATOM@13..14
+                  EQ@13..14 "="
+            ERROR@14..15
+              INTEGER@14..15 "1"
+      RPAREN@15..16 ")"
+  NEWLINE@16..17 "\n"
+
+diagnostic [13..14]: operator is not a valid value
+diagnostic [14..15]: trailing tokens after statement

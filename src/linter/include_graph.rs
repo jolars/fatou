@@ -32,10 +32,14 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::incremental::normalize_path;
+use crate::parse_context::{ContextCatalog, normalized_include_edges};
+#[cfg(test)]
 use crate::parser::parse;
-use crate::project::include_edges;
+use crate::parser::{ParseOptions, parse_with_options};
+use crate::project::IncludeEdge;
 use crate::syntax::SyntaxNode;
 
 /// What is wrong with one static `include("path")` site of a linted file. The
@@ -69,95 +73,133 @@ pub enum IncludeProblemKind {
     Duplicate,
 }
 
-/// The memoized edge store: normalized path -> that file's resolved include
-/// targets (normalized). Seeds are answered from their parsed trees; other
-/// paths are read and parsed from disk once. `None` marks an unloadable file
-/// (unreadable, or a directory), a dead end for the cycle walk.
-struct EdgeStore<'a> {
-    seeded: HashMap<PathBuf, &'a SyntaxNode>,
-    cache: HashMap<PathBuf, Option<Vec<PathBuf>>>,
+type LoadedEdges = Result<Arc<[IncludeEdge]>, IncludeProblemKind>;
+
+/// Memoize normalized include edges and failures across all seeds in one edition.
+struct EdgeStore<F> {
+    load: F,
+    cache: HashMap<PathBuf, LoadedEdges>,
 }
 
-impl<'a> EdgeStore<'a> {
-    fn targets(&mut self, path: &Path) -> Option<&[PathBuf]> {
-        if !self.cache.contains_key(path) {
-            let loaded = match self.seeded.get(path) {
-                Some(root) => Some(resolved_targets(root, path)),
-                None => std::fs::read_to_string(path)
-                    .ok()
-                    .map(|text| resolved_targets(&parse(&text).cst, path)),
-            };
-            self.cache.insert(path.to_path_buf(), loaded);
+impl<F: FnMut(&Path) -> LoadedEdges> EdgeStore<F> {
+    fn edges(&mut self, path: &Path) -> LoadedEdges {
+        if let Some(cached) = self.cache.get(path) {
+            return cached.clone();
         }
-        self.cache.get(path).unwrap().as_deref()
-    }
-
-    /// Whether `path` exists as loadable source: seeded, or a file on disk.
-    fn exists(&self, path: &Path) -> bool {
-        self.seeded.contains_key(path) || path.is_file()
+        let loaded = (self.load)(path);
+        self.cache.insert(path.to_path_buf(), loaded.clone());
+        loaded
     }
 }
 
-/// The resolved include targets of one parsed file, normalized. Unresolvable
-/// edges (none for an absolute, normalized `path`, whose parent always exists)
-/// are dropped.
-fn resolved_targets(root: &SyntaxNode, path: &Path) -> Vec<PathBuf> {
-    include_edges(root, path.parent())
-        .into_iter()
-        .filter_map(|edge| edge.target.as_deref().map(normalize_path))
-        .collect()
-}
-
-/// Compute each seed's include problems, keyed by the seed's path as given
-/// (what the lint driver looks its report up under). A seed's problems all sit on
-/// its own `include` calls; problems of files merely reached by the walk are
-/// not reported (they are not being linted).
+/// Compute each seed's include problems, keyed by the seed's path as given.
+/// Each problem sits on an include of a seed, even when the offending cycle
+/// closes through files that are outside the lint set.
 pub fn include_problems(seeds: &[(PathBuf, SyntaxNode)]) -> BTreeMap<PathBuf, Vec<IncludeProblem>> {
+    include_problems_with_options(seeds, ParseOptions::default())
+}
+
+pub fn include_problems_with_options(
+    seeds: &[(PathBuf, SyntaxNode)],
+    options: ParseOptions,
+) -> BTreeMap<PathBuf, Vec<IncludeProblem>> {
+    let seeded: HashMap<_, _> = seeds
+        .iter()
+        .map(|(path, root)| (normalize_path(path), root))
+        .collect();
+    problems_for_seeds(seeds.iter().map(|(path, _)| path), |path| {
+        if let Some(root) = seeded.get(path) {
+            return Ok(normalized_include_edges(root, path));
+        }
+        edges_from_disk(path, options)
+    })
+}
+
+/// Use the discovery pass's edges for files that were already parsed and its
+/// saved source text for files seen in another edition. Fix passes replace
+/// their current seed's edges while still sharing the unchanged descendants.
+pub(crate) fn include_problems_from_catalog(
+    paths: &[PathBuf],
+    options: ParseOptions,
+    catalog: &ContextCatalog,
+    changed: Option<(&Path, &SyntaxNode)>,
+) -> BTreeMap<PathBuf, Vec<IncludeProblem>> {
+    let edges = catalog.edges.get(&options);
+    problems_for_seeds(paths, |path| {
+        if let Some((seed, root)) = changed
+            && seed == path
+        {
+            return Ok(normalized_include_edges(root, path));
+        }
+        if let Some(edges) = edges.and_then(|entries| entries.get(path)) {
+            return Ok(Arc::clone(edges));
+        }
+        match catalog.sources.get(path) {
+            Some(Ok(text)) => Ok(normalized_include_edges(
+                &parse_with_options(text, options).cst,
+                path,
+            )),
+            Some(Err(_)) => Err(unreadable_kind(path)),
+            None => edges_from_disk(path, options),
+        }
+    })
+}
+
+fn unreadable_kind(path: &Path) -> IncludeProblemKind {
+    if path.is_file() {
+        IncludeProblemKind::Unreadable
+    } else {
+        IncludeProblemKind::Missing
+    }
+}
+
+fn edges_from_disk(path: &Path, options: ParseOptions) -> LoadedEdges {
+    if !path.is_file() {
+        return Err(IncludeProblemKind::Missing);
+    }
+    let text = std::fs::read_to_string(path).map_err(|_| IncludeProblemKind::Unreadable)?;
+    Ok(normalized_include_edges(
+        &parse_with_options(&text, options).cst,
+        path,
+    ))
+}
+
+fn problems_for_seeds<'a>(
+    paths: impl IntoIterator<Item = &'a PathBuf>,
+    load: impl FnMut(&Path) -> LoadedEdges,
+) -> BTreeMap<PathBuf, Vec<IncludeProblem>> {
     let mut store = EdgeStore {
-        seeded: seeds
-            .iter()
-            .map(|(path, root)| (normalize_path(path), root))
-            .collect(),
+        load,
         cache: HashMap::new(),
     };
-
     let mut out = BTreeMap::new();
-    for (path, root) in seeds {
+    for path in paths {
         let norm = normalize_path(path);
+        let Ok(edges) = store.edges(&norm) else {
+            continue;
+        };
         let mut problems = Vec::new();
-        // The targets this seed has already pulled in, per host module: the
-        // same file included into two different modules runs into two
-        // namespaces and is not a repeat.
-        let mut included: HashSet<(PathBuf, Vec<String>)> = HashSet::new();
-        for (index, edge) in include_edges(root, norm.parent()).into_iter().enumerate() {
-            let Some(target) = edge.target.as_deref().map(normalize_path) else {
+        // The same file included into two different modules runs into two
+        // namespaces, so only repeated targets in the same host are duplicates.
+        let mut included = HashSet::new();
+        for (index, edge) in edges.iter().enumerate() {
+            let Some(target) = &edge.target else {
                 continue;
             };
-            let repeated = !included.insert((target.clone(), edge.host_suffix));
-            if !store.exists(&target) {
+            let problem = match store.edges(target) {
+                Err(kind) => Some(kind),
+                Ok(_) if reaches(&mut store, target, &norm) => Some(IncludeProblemKind::Cycle),
+                Ok(_) => None,
+            };
+            let repeated = !included.insert((target, &edge.host_suffix));
+            for kind in problem
+                .into_iter()
+                .chain(repeated.then_some(IncludeProblemKind::Duplicate))
+            {
                 problems.push(IncludeProblem {
                     path: edge.path.clone(),
                     edge: index,
-                    kind: IncludeProblemKind::Missing,
-                });
-            } else if store.targets(&target).is_none() {
-                problems.push(IncludeProblem {
-                    path: edge.path.clone(),
-                    edge: index,
-                    kind: IncludeProblemKind::Unreadable,
-                });
-            } else if reaches(&mut store, &target, &norm) {
-                problems.push(IncludeProblem {
-                    path: edge.path.clone(),
-                    edge: index,
-                    kind: IncludeProblemKind::Cycle,
-                });
-            }
-            if repeated {
-                problems.push(IncludeProblem {
-                    path: edge.path,
-                    edge: index,
-                    kind: IncludeProblemKind::Duplicate,
+                    kind,
                 });
             }
         }
@@ -168,9 +210,12 @@ pub fn include_problems(seeds: &[(PathBuf, SyntaxNode)]) -> BTreeMap<PathBuf, Ve
     out
 }
 
-/// Whether `goal` is reachable from `from` (inclusive) along include edges — a
-/// plain DFS over the memoized edge store.
-fn reaches(store: &mut EdgeStore<'_>, from: &Path, goal: &Path) -> bool {
+/// Whether `goal` is reachable from `from` (inclusive) along include edges.
+fn reaches<F: FnMut(&Path) -> LoadedEdges>(
+    store: &mut EdgeStore<F>,
+    from: &Path,
+    goal: &Path,
+) -> bool {
     let mut stack = vec![from.to_path_buf()];
     let mut visited = HashSet::new();
     while let Some(path) = stack.pop() {
@@ -180,8 +225,8 @@ fn reaches(store: &mut EdgeStore<'_>, from: &Path, goal: &Path) -> bool {
         if !visited.insert(path.clone()) {
             continue;
         }
-        if let Some(targets) = store.targets(&path) {
-            stack.extend(targets.iter().cloned());
+        if let Ok(edges) = store.edges(&path) {
+            stack.extend(edges.iter().filter_map(|edge| edge.target.clone()));
         }
     }
     false
@@ -237,6 +282,33 @@ mod tests {
         let main = dir.path().join("main.jl");
         let problems = include_problems(&[seed(&main, "include(\"a.jl\")\n")]);
         assert_eq!(problems[&main][0].kind, IncludeProblemKind::Cycle);
+    }
+
+    #[test]
+    fn batch_uses_the_catalog_edges_and_reprojects_a_changed_seed() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main.jl");
+        let sibling = dir.path().join("sibling.jl");
+        let paths = [main.clone(), sibling.clone()];
+        let options = ParseOptions::default();
+        std::fs::write(&main, "include(\"sibling.jl\")\n").unwrap();
+        std::fs::write(&sibling, "include(\"main.jl\")\n").unwrap();
+        let catalog = ContextCatalog::discover(&paths, &[], &BTreeMap::new(), None);
+        std::fs::write(&sibling, "x = 1\n").unwrap();
+
+        let problems = include_problems_from_catalog(&paths, options, &catalog, None);
+        assert_eq!(problems[&main][0].kind, IncludeProblemKind::Cycle);
+        assert_eq!(problems[&sibling][0].kind, IncludeProblemKind::Cycle);
+
+        let changed = parse("include(\"absent.jl\")\n").cst;
+        let problems = include_problems_from_catalog(
+            std::slice::from_ref(&sibling),
+            options,
+            &catalog,
+            Some((&sibling, &changed)),
+        );
+        assert_eq!(problems[&sibling][0].kind, IncludeProblemKind::Missing);
+        assert_eq!(problems[&sibling][0].path, "absent.jl");
     }
 
     #[test]

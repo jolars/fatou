@@ -67,6 +67,7 @@ fn project(b_contents: &str) -> (TempDir, TempDir, HarvestedLibrary) {
     let pkg_index = harvest_package_named(pkg.path(), "M");
 
     let library = HarvestedLibrary {
+        syntax: Default::default(),
         packages: BTreeMap::from([
             ("M".to_string(), Arc::new(pkg_index)),
             ("SparseArrays".to_string(), Arc::new(dep_index)),
@@ -181,6 +182,7 @@ fn generated_imported_constructors_remain_types_in_sibling_files() {
         packages.insert("SparseArrays".into(), Arc::clone(&dep_index));
         packages.insert("M".into(), Arc::new(index));
         let library = HarvestedLibrary {
+            syntax: Default::default(),
             packages,
             roots: BTreeMap::from([("M".into(), pkg.path().to_path_buf())]),
             workspaces: vec!["M".into()],
@@ -232,6 +234,7 @@ fn generated_only_groups_do_not_establish_non_type_identity() {
         .expect("generated constructor is harvested");
     assert!(constructor.methods.iter().all(|method| method.is_generated));
     let library = HarvestedLibrary {
+        syntax: Default::default(),
         packages: BTreeMap::from([("M".into(), Arc::new(index))]),
         roots: BTreeMap::from([("M".into(), pkg.path().to_path_buf())]),
         workspaces: vec!["M".into()],
@@ -274,6 +277,7 @@ fn project_with_deps() -> (TempDir, HarvestedLibrary) {
     let pkg_index = harvest_package_named(pkg.path(), "M");
 
     let library = HarvestedLibrary {
+        syntax: Default::default(),
         packages: BTreeMap::from([("M".to_string(), Arc::new(pkg_index))]),
         roots: BTreeMap::from([("M".to_string(), pkg.path().to_path_buf())]),
         workspaces: vec!["M".to_string()],

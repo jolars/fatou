@@ -201,6 +201,12 @@ pub(crate) fn include_target(call: &CallExpr) -> Option<String> {
     literal_path(&include_literal(call)?)
 }
 
+/// A cheap gate for editor updates. Static include discovery requires the
+/// exact callee spelling, and a changed buffer that contains it needs parsing.
+pub(crate) fn may_contain_static_include(text: &str) -> bool {
+    text.contains("include")
+}
+
 /// The path a string literal denotes: its content tokens' source text with
 /// Julia's backslash escapes decoded, so `include("sub\\a.jl")` resolves against
 /// the one separator character it denotes rather than the two source bytes.

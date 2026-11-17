@@ -69,7 +69,7 @@ fn op_can_lead_array_element(op: &Token) -> bool {
 /// row separator handled by the caller, not part of the element). Array literals
 /// are square-bracketed, so `end` is the index marker here.
 pub(super) fn parse_element(
-    tokens: &[Token],
+    tokens: &ParserCtx<'_>,
     start: usize,
     // Whether `end`/`begin` are index markers in this element, inherited from an
     // enclosing indexing bracket. A bare literal (`[1 2 end]`) is an array

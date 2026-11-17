@@ -1,10 +1,11 @@
 //! Main-loop state: open documents, request/notification dispatch, and the
 //! version-gated diagnostic publish.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crossbeam_channel::Sender;
 use lsp_server::{ErrorCode, Message, Notification, Request, RequestId, Response};
@@ -47,7 +48,6 @@ use crate::text::{PositionEncoding, TextBuffer, apply_content_changes};
 use super::analysis_thread::{AnalysisRequest, SyncMessage};
 use super::config::{ConfigStore, ResolvedConfig};
 use super::read_jobs::{ReadJob, ReadReply};
-use super::server::HarvestSignal;
 use super::uri;
 
 /// An open document's live buffer, client-reported version, and kind.
@@ -71,8 +71,8 @@ enum DocumentKind {
     /// also carries the file's own TOML diagnostics.
     Project,
     /// A `Manifest.toml` flavor. Diagnostics, plus the document links on its
-    /// `path` entries — the one feature needing no environment resolve, which
-    /// is otherwise the harvester's job and never reads a buffer.
+    /// `path` entries. Its tracked text also selects dependency syntax editions,
+    /// while package resolution and harvest stay on the background worker.
     Manifest,
     /// A TOML file that is neither: a `fatou.toml`, a `Manifest-vfoo.toml` that
     /// names no version, a `Project.toml` flavor this server does not know.
@@ -117,8 +117,10 @@ pub(crate) enum Outbound {
     /// Per-file parse diagnostics for `uri` at `version`; published only if still
     /// current (the open buffer is still at that version).
     Diagnostics {
+        context_epoch: u64,
         uri: Uri,
         version: i32,
+        text: Arc<TextBuffer>,
         diags: Vec<Diagnostic>,
     },
     /// Project-level include-graph diagnostics (unresolved includes, cycles) for
@@ -148,7 +150,10 @@ pub(crate) enum Outbound {
     /// environment file also carries the text-only findings of its own buffer
     /// (`buffer_diags`), which arrive on the main loop rather than through this
     /// channel. [`GlobalState::publish_merged`] is where the two cadences meet.
-    EnvironmentDiagnostics { uri: Uri, diags: Vec<Diagnostic> },
+    EnvironmentDiagnostics {
+        uri: Uri,
+        diags: Vec<Diagnostic>,
+    },
     /// A re-harvest changed the include graph: a pull-model client should
     /// re-pull its open documents (`workspace/diagnostic/refresh`). Sent once
     /// per harvest; the main loop forwards it only when the client supports
@@ -165,13 +170,17 @@ pub(crate) enum Outbound {
     /// edit anyway. The spec has this request force a *global* recalculation,
     /// which is worth spending once per harvest and not once per keystroke.
     InlayHintsRefresh,
+    SemanticTokensRefresh,
     /// A finished read job (hover, format, …). The worker routes its response
     /// here instead of straight to the client so the main loop can version-gate
     /// it against the buffer the read was dispatched on (stale → `ContentModified`)
     /// and drop it when a `$/cancelRequest` already answered the request. Always
     /// a `Message::Response`; the request id rides inside it. See
     /// [`GlobalState::on_read_reply`].
-    ReadReply { message: Message },
+    ReadReply {
+        message: Message,
+        membership_generation: Option<u64>,
+    },
 }
 
 /// What an in-flight read was dispatched against, kept in
@@ -179,11 +188,19 @@ pub(crate) enum Outbound {
 /// `$/cancelRequest` can find and cancel it. A non-document read (e.g.
 /// `workspace/symbol`) carries `None`: it is cancellable but never stale.
 struct ReadMeta {
+    context_epoch: u64,
     uri: Option<Uri>,
     version: Option<i32>,
+    text: Option<Arc<TextBuffer>>,
+    rewrite_epoch: Option<u64>,
 }
 
 pub(crate) struct GlobalState {
+    context_epoch: u64,
+    rewrite_epoch: u64,
+    membership_generation: Arc<AtomicU64>,
+    script_documents: HashSet<Uri>,
+    metadata_signatures: HashMap<PathBuf, crate::parse_context::MetadataSignature>,
     project_updates: Option<super::project_updates::ProjectUpdates>,
     documents: HashMap<Uri, Document>,
     sender: Sender<Message>,
@@ -198,22 +215,13 @@ pub(crate) struct GlobalState {
     /// dropped — the main loop is the sole responder, so every id is answered
     /// exactly once.
     inflight_reads: HashMap<RequestId, ReadMeta>,
-    analysis_tx: Sender<AnalysisRequest>,
     /// Channel to the analysis thread for read-only jobs (formatting). The
     /// analysis thread owns the salsa db, so it mints a short-lived clone per
     /// job and runs the read off-thread against the cached parse. See
     /// [`run_read`](super::read_jobs::run_read).
     read_tx: Sender<ReadJob>,
-    /// Harvest signals to the workspace harvester: a changed source file's
-    /// path (it re-harvests the workspace package owning the file) or an
-    /// environment-file change (it re-resolves every workspace environment).
-    harvest_tx: Sender<HarvestSignal>,
-    /// Text writes to the analysis thread for files the analysis pipeline does
-    /// not own: a revert to on-disk text when a document closes (a discarded
-    /// buffer must not linger in the reverse-occurrence index) or when a
-    /// watched file changes outside any open buffer (the stale seeded text must
-    /// catch up with disk), and an open project file's buffer, which is not
-    /// Julia but whose `[deps]` the linter reads.
+    /// Ordered writes to the analysis thread, including open-buffer analyses,
+    /// closes, and disk changes that can alter loading contexts.
     sync_tx: Sender<SyncMessage>,
     /// The position encoding negotiated at initialize, fixed for the session.
     encoding: PositionEncoding,
@@ -231,6 +239,7 @@ pub(crate) struct GlobalState {
     /// no push channel: without this an open `Project.toml` shows no version
     /// beside a UUID until the user happens to edit or scroll it.
     inlay_hint_refresh: bool,
+    pub(crate) semantic_tokens_refresh: bool,
     /// Sequence number for server-to-client refresh requests, so each carries
     /// a fresh JSON-RPC id.
     refresh_seq: u64,
@@ -269,9 +278,8 @@ impl GlobalState {
     pub(crate) fn new(
         sender: Sender<Message>,
         out_tx: Sender<Outbound>,
-        analysis_tx: Sender<AnalysisRequest>,
         read_tx: Sender<ReadJob>,
-        harvest_tx: Sender<HarvestSignal>,
+        membership_generation: Arc<AtomicU64>,
         sync_tx: Sender<SyncMessage>,
         encoding: PositionEncoding,
         pull_diagnostics: bool,
@@ -281,6 +289,11 @@ impl GlobalState {
     ) -> Self {
         let (config, warnings) = ConfigStore::new(initialization_options);
         let state = Self {
+            context_epoch: 0,
+            rewrite_epoch: 0,
+            membership_generation,
+            script_documents: HashSet::new(),
+            metadata_signatures: HashMap::new(),
             project_updates: None,
             documents: HashMap::new(),
             parse_diags: HashMap::new(),
@@ -291,14 +304,13 @@ impl GlobalState {
             sender,
             out_tx,
             inflight_reads: HashMap::new(),
-            analysis_tx,
             read_tx,
-            harvest_tx,
             sync_tx,
             encoding,
             pull_diagnostics,
             diagnostic_refresh,
             inlay_hint_refresh,
+            semantic_tokens_refresh: false,
             refresh_seq: 0,
             config,
         };
@@ -421,7 +433,7 @@ impl GlobalState {
             return;
         }
         let rules = Arc::clone(&self.config_for(&uri).rules);
-        let reply = self.read_reply(id.clone(), Some(&uri));
+        let reply = self.rewrite_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::CodeAction {
             id,
             path: path_for(&uri),
@@ -445,7 +457,7 @@ impl GlobalState {
             return;
         };
         let config = self.config_for(&uri);
-        let reply = self.read_reply(id.clone(), Some(&uri));
+        let reply = self.rewrite_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::Format {
             id,
             path: path_for(&uri),
@@ -469,7 +481,7 @@ impl GlobalState {
             return;
         };
         let config = self.config_for(&uri);
-        let reply = self.read_reply(id.clone(), Some(&uri));
+        let reply = self.rewrite_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::FormatRange {
             id,
             path: path_for(&uri),
@@ -867,7 +879,7 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
-        let reply = self.read_reply(id.clone(), Some(&uri));
+        let reply = self.rewrite_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::Rename {
             id,
             path: path_for(&uri),
@@ -895,7 +907,7 @@ impl GlobalState {
             .filter(|(_, doc)| doc.kind == DocumentKind::Julia)
             .filter_map(|(uri, _)| uri::to_path(uri))
             .collect::<Vec<_>>();
-        let reply = self.read_reply(id.clone(), None);
+        let reply = self.rewrite_reply(id.clone(), None);
         self.dispatch_read(ReadJob::WillRenameFiles {
             id,
             files: params.files,
@@ -1086,12 +1098,28 @@ impl GlobalState {
     /// the reply be version-gated ([`Self::on_read_reply`]) and lets a
     /// `$/cancelRequest` find it; a non-document read passes `uri: None`.
     fn read_reply(&mut self, id: RequestId, uri: Option<&Uri>) -> ReadReply {
-        let version = uri.and_then(|uri| self.documents.get(uri).map(|doc| doc.version));
+        self.record_read(id, uri, None)
+    }
+
+    fn rewrite_reply(&mut self, id: RequestId, uri: Option<&Uri>) -> ReadReply {
+        self.record_read(id, uri, Some(self.rewrite_epoch))
+    }
+
+    fn record_read(
+        &mut self,
+        id: RequestId,
+        uri: Option<&Uri>,
+        rewrite_epoch: Option<u64>,
+    ) -> ReadReply {
+        let document = uri.and_then(|uri| self.documents.get(uri));
         self.inflight_reads.insert(
             id,
             ReadMeta {
+                context_epoch: self.context_epoch,
                 uri: uri.cloned(),
-                version,
+                version: document.map(|doc| doc.version),
+                text: document.map(|doc| Arc::clone(&doc.text)),
+                rewrite_epoch,
             },
         );
         ReadReply::new(self.out_tx.clone())
@@ -1123,6 +1151,10 @@ impl GlobalState {
                     note.extract::<DidOpenTextDocumentParams>(DidOpenTextDocument::METHOD)
                 {
                     let uri = params.text_document.uri;
+                    let kind = DocumentKind::of(&uri);
+                    if kind == DocumentKind::Julia {
+                        self.rewrite_epoch += 1;
+                    }
                     self.documents.insert(
                         uri.clone(),
                         Document {
@@ -1130,7 +1162,7 @@ impl GlobalState {
                             version: params.text_document.version,
                             // The one place a document's kind is decided; every
                             // later fork reads the tag rather than the path.
-                            kind: DocumentKind::of(&uri),
+                            kind,
                         },
                     );
                     // A pull client takes over an opened document's
@@ -1148,31 +1180,45 @@ impl GlobalState {
                     note.extract::<DidChangeTextDocumentParams>(DidChangeTextDocument::METHOD)
                 {
                     let uri = params.text_document.uri;
+                    let has_other_rewrite = self.inflight_reads.values().any(|read| {
+                        read.rewrite_epoch.is_some() && read.uri.as_ref() != Some(&uri)
+                    });
                     // A change for a never-opened document has no buffer to
                     // splice into; drop it.
                     let Some(doc) = self.documents.get_mut(&uri) else {
                         return;
                     };
+                    let check_includes = has_other_rewrite && doc.kind == DocumentKind::Julia;
+                    let had_include =
+                        check_includes && crate::project::may_contain_static_include(&doc.text);
                     let edits = apply_content_changes(
                         Arc::make_mut(&mut doc.text),
                         params.content_changes,
                         self.encoding,
                     );
                     doc.version = params.text_document.version;
+                    // The background loader may not have processed this
+                    // update when a rewrite of another document arrives.
+                    if check_includes
+                        && (had_include || crate::project::may_contain_static_include(&doc.text))
+                    {
+                        self.rewrite_epoch += 1;
+                    }
                     self.route_document(uri, edits);
                 }
             }
             DidSaveTextDocument::METHOD => {
                 if let Ok(params) =
                     note.extract::<DidSaveTextDocumentParams>(DidSaveTextDocument::METHOD)
+                    && let Some(path) = uri::to_path(&params.text_document.uri)
                 {
-                    // Signal the workspace harvester with the saved path; it
-                    // re-harvests the workspace package if the file belongs to
-                    // it, or re-resolves the environment if the save touched a
-                    // project or manifest file. A dead channel (no workspace)
-                    // is a no-op.
-                    if let Some(path) = uri::to_path(&params.text_document.uri) {
-                        let _ = self.harvest_tx.send(harvest_signal(path));
+                    if is_environment_file(&path) {
+                        self.send_disk_change(SyncMessage::RefreshLibrary);
+                    } else {
+                        if self.julia_text(&params.text_document.uri).is_none() {
+                            let _ = self.sync_tx.send(SyncMessage::Revert(path.clone()));
+                        }
+                        self.send_disk_change(SyncMessage::SourceChanged(path));
                     }
                 }
             }
@@ -1206,12 +1252,28 @@ impl GlobalState {
                     note.extract::<DidCloseTextDocumentParams>(DidCloseTextDocument::METHOD)
                 {
                     let uri = params.text_document.uri;
-                    self.documents.remove(&uri);
-                    // Revert the tracked input to on-disk text: the closed
-                    // buffer's (possibly unsaved) edits must not linger in the
-                    // reverse-occurrence index. A dead channel is a no-op.
-                    if let Some(path) = uri::to_path(&uri) {
-                        let _ = self.sync_tx.send(SyncMessage::Revert(path));
+                    let closed = self.documents.remove(&uri);
+                    // Revert the discarded buffer on the same channel that
+                    // carried its analyses, including for untitled buffers.
+                    match closed.map(|doc| doc.kind) {
+                        Some(DocumentKind::Julia) => {
+                            self.rewrite_epoch += 1;
+                            self.script_documents.remove(&uri);
+                            let _ = self.sync_tx.send(SyncMessage::Revert(path_for(&uri)));
+                        }
+                        Some(DocumentKind::Project | DocumentKind::Manifest) => {
+                            if let Some(path) = uri::to_path(&uri) {
+                                self.update_metadata_epoch(
+                                    &path,
+                                    std::fs::read_to_string(&path).ok().as_deref(),
+                                );
+                                let _ = self.sync_tx.send(SyncMessage::MetadataRevert {
+                                    path,
+                                    context_epoch: self.context_epoch,
+                                });
+                            }
+                        }
+                        _ => {}
                     }
                     // Drop what the buffer produced — its parse diagnostics, and
                     // an environment file's live findings — but keep the
@@ -1278,17 +1340,38 @@ impl GlobalState {
                 continue;
             }
             if !self.documents.contains_key(&event.uri) {
-                let _ = self.sync_tx.send(SyncMessage::Revert(path.clone()));
+                if is_env {
+                    // The first disk event may already have replaced the file.
+                    // Its previous selection is unknown, so reject outstanding
+                    // reads conservatively and remember the new signature.
+                    if !self.metadata_signatures.contains_key(&path) {
+                        self.metadata_signatures.insert(
+                            path.clone(),
+                            crate::parse_context::MetadataSignature::Missing,
+                        );
+                        self.context_epoch += 1;
+                    }
+                    self.update_metadata_epoch(
+                        &path,
+                        std::fs::read_to_string(&path).ok().as_deref(),
+                    );
+                    let _ = self.sync_tx.send(SyncMessage::MetadataRevert {
+                        path: path.clone(),
+                        context_epoch: self.context_epoch,
+                    });
+                } else {
+                    let _ = self.sync_tx.send(SyncMessage::Revert(path.clone()));
+                }
             }
             // An environment event sets `environment_changed`, so this arm is
             // the `.jl` one: a project file re-resolves as a batch below rather
             // than naming a package to re-harvest on its own.
             if !environment_changed {
-                let _ = self.harvest_tx.send(HarvestSignal::Source(path));
+                self.send_disk_change(SyncMessage::SourceChanged(path));
             }
         }
         if environment_changed {
-            let _ = self.harvest_tx.send(HarvestSignal::Environment);
+            self.send_disk_change(SyncMessage::RefreshLibrary);
         }
     }
 
@@ -1349,7 +1432,6 @@ impl GlobalState {
             let _ = self.sync_tx.send(SyncMessage::RenamedProjects {
                 files: params.files.clone(),
                 open_projects,
-                harvest: self.harvest_tx.clone(),
             });
         }
         for path in sources {
@@ -1359,12 +1441,17 @@ impl GlobalState {
                 let _ = self.sync_tx.send(SyncMessage::Revert(path.clone()));
             }
             if !environment_changed {
-                let _ = self.harvest_tx.send(HarvestSignal::Source(path));
+                self.send_disk_change(SyncMessage::SourceChanged(path));
             }
         }
         if environment_changed {
-            let _ = self.harvest_tx.send(HarvestSignal::Environment);
+            self.send_disk_change(SyncMessage::RefreshLibrary);
         }
+    }
+
+    fn send_disk_change(&mut self, change: SyncMessage) {
+        self.rewrite_epoch += 1;
+        let _ = self.sync_tx.send(change);
     }
 
     /// Ask the client to watch the files whose external changes matter: `.jl`
@@ -1412,8 +1499,10 @@ impl GlobalState {
     pub(crate) fn on_outbound(&mut self, outbound: Outbound) {
         match outbound {
             Outbound::Diagnostics {
+                context_epoch,
                 uri,
                 version,
+                text,
                 diags,
             } => {
                 // A pull client fetches these itself; the push path is off for
@@ -1425,7 +1514,9 @@ impl GlobalState {
                 // Stale results (a newer edit superseded this analysis, or the
                 // document closed) are dropped: the newer version's analysis
                 // will produce its own `Outbound`.
-                if !matches!(self.documents.get(&uri), Some(d) if d.version == version) {
+                if context_epoch != self.context_epoch
+                    || !matches!(self.documents.get(&uri), Some(d) if d.version == version && Arc::ptr_eq(&d.text, &text))
+                {
                     return;
                 }
                 self.parse_diags.insert(uri.clone(), diags);
@@ -1471,7 +1562,25 @@ impl GlobalState {
             }
             Outbound::DiagnosticsRefresh => self.refresh_open_diagnostics(),
             Outbound::InlayHintsRefresh => self.send_inlay_hint_refresh(),
-            Outbound::ReadReply { message } => self.on_read_reply(message),
+            Outbound::SemanticTokensRefresh => {
+                if self.semantic_tokens_refresh {
+                    self.refresh_seq += 1;
+                    let _ = self.sender.send(Message::Request(Request {
+                        id: RequestId::from(format!(
+                            "fatou-semantic-tokens-refresh-{}",
+                            self.refresh_seq
+                        )),
+                        method: "workspace/semanticTokens/refresh".into(),
+                        params: serde_json::Value::Null,
+                    }));
+                }
+            }
+            Outbound::ReadReply {
+                message,
+                membership_generation,
+            } => {
+                self.on_read_reply(message, membership_generation);
+            }
         }
     }
 
@@ -1485,15 +1594,28 @@ impl GlobalState {
     ///   the document closed) → `ContentModified`, so the client re-requests
     ///   against the current buffer instead of applying a stale result.
     /// - otherwise → forward the worker's response unchanged.
-    fn on_read_reply(&mut self, message: Message) {
+    fn on_read_reply(&mut self, message: Message, membership_generation: Option<u64>) {
         let Message::Response(response) = message else {
             return;
         };
         let Some(meta) = self.inflight_reads.remove(&response.id) else {
             return;
         };
-        if let (Some(uri), Some(version)) = (&meta.uri, meta.version)
-            && !matches!(self.documents.get(uri), Some(doc) if doc.version == version)
+        if meta.context_epoch != self.context_epoch
+            || meta
+                .rewrite_epoch
+                .is_some_and(|epoch| epoch != self.rewrite_epoch)
+            || membership_generation.is_some_and(|generation| {
+                generation != self.membership_generation.load(Ordering::Acquire)
+            })
+            || (if let (Some(uri), Some(version), Some(text)) =
+                (&meta.uri, meta.version, &meta.text)
+            {
+                !matches!(self.documents.get(uri), Some(doc)
+                    if doc.version == version && Arc::ptr_eq(&doc.text, text))
+            } else {
+                false
+            })
         {
             let stale = Response::new_err(
                 response.id,
@@ -1571,8 +1693,8 @@ impl GlobalState {
     /// additionally writes its text to the database, because the linter derives
     /// the package's declared dependencies from it — that is what lets an
     /// unsaved `[deps]` edit reach `unresolved-import` across the package. A
-    /// manifest sends no text: nothing reads one without an environment
-    /// resolve, which is the harvester's job. A TOML file that is neither is
+    /// manifest also writes its text so dependency editions follow unsaved
+    /// edits. A TOML file that is neither is
     /// not this server's to describe, and takes no route at all.
     ///
     /// `edits` belong to the Julia route alone (see
@@ -1580,9 +1702,11 @@ impl GlobalState {
     fn route_document(&mut self, uri: Uri, edits: Option<Vec<Edit>>) {
         match self.documents.get(&uri).map(|doc| doc.kind) {
             None | Some(DocumentKind::Other) => {}
-            Some(DocumentKind::Julia) => self.send_analysis(uri, edits),
+            Some(DocumentKind::Julia) => {
+                self.send_analysis(uri, edits, true);
+            }
             Some(kind) => {
-                if kind == DocumentKind::Project {
+                if matches!(kind, DocumentKind::Project | DocumentKind::Manifest) {
                     self.send_project_text(&uri);
                 }
                 self.refresh_buffer_diagnostics(uri);
@@ -1592,14 +1716,41 @@ impl GlobalState {
 
     /// Write an open project file's buffer to the database as text, so the
     /// linter's declared dependencies follow the editor rather than the disk.
-    fn send_project_text(&self, uri: &Uri) {
-        let (Some(path), Some(doc)) = (uri::to_path(uri), self.documents.get(uri)) else {
+    fn send_project_text(&mut self, uri: &Uri) {
+        let Some(path) = uri::to_path(uri) else {
             return;
         };
+        let Some(text) = self.project_text(uri).or_else(|| self.manifest_text(uri)) else {
+            return;
+        };
+        let changed = self.update_metadata_epoch(&path, Some(text.text()));
         let _ = self.sync_tx.send(SyncMessage::SetText {
             path,
-            text: doc.text.text().to_string(),
+            text: text.text_arc(),
+            context_epoch: self.context_epoch,
+            edition_changed: changed,
         });
+    }
+
+    fn update_metadata_epoch(&mut self, path: &Path, text: Option<&str>) -> bool {
+        let signature = crate::parse_context::metadata_signature(path, text);
+        let previous = self
+            .metadata_signatures
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| {
+                crate::parse_context::metadata_signature(
+                    path,
+                    std::fs::read_to_string(path).ok().as_deref(),
+                )
+            });
+        let changed = previous != signature;
+        if changed {
+            self.context_epoch += 1;
+        }
+        self.metadata_signatures
+            .insert(path.to_path_buf(), signature);
+        changed
     }
 
     /// Re-derive an open environment file's own diagnostics from its buffer and
@@ -1615,11 +1766,8 @@ impl GlobalState {
             return;
         };
         let version = doc.version;
-        let diags = super::environment_diagnostics::buffer_diagnostics(
-            &path,
-            doc.text.text(),
-            self.encoding,
-        );
+        let diags =
+            super::environment_diagnostics::buffer_diagnostics(&path, &doc.text, self.encoding);
         let had = self.buffer_diags.remove(&uri).is_some();
         if diags.is_empty() {
             if !had {
@@ -1639,19 +1787,29 @@ impl GlobalState {
     /// means the transform is unknown — a fresh `didOpen`, a whole-buffer
     /// replacement, or a re-analysis of unchanged text under new rules — and
     /// the reparse falls back to diffing the two texts.
-    fn send_analysis(&mut self, uri: Uri, edits: Option<Vec<Edit>>) {
+    fn send_analysis(&mut self, uri: Uri, edits: Option<Vec<Edit>>, changed: bool) {
         let rules = Arc::clone(&self.config_for(&uri).rules);
         let Some(doc) = self.documents.get(&uri) else {
             return;
         };
-        let _ = self.analysis_tx.send(AnalysisRequest {
+        let had_scripts = !self.script_documents.is_empty();
+        if rules.entry_points.is_empty() {
+            self.script_documents.remove(&uri);
+        } else {
+            self.script_documents.insert(uri.clone());
+        }
+        if changed && (had_scripts || !self.script_documents.is_empty()) {
+            self.rewrite_epoch += 1;
+        }
+        let _ = self.sync_tx.send(SyncMessage::Analyze(AnalysisRequest {
+            context_epoch: self.context_epoch,
             path: path_for(&uri),
             text: Arc::clone(&doc.text),
             version: doc.version,
             rules,
             edits,
             uri,
-        });
+        }));
     }
 
     /// Resolve the configuration for `uri`, logging any warnings its load
@@ -1701,6 +1859,7 @@ impl GlobalState {
     /// Re-derive the open documents' diagnostics after a configuration change
     /// (editor-pushed settings, or a `fatou.toml` event).
     fn on_config_changed(&mut self) {
+        self.rewrite_epoch += 1;
         // Pull refreshes do not enqueue analysis, but script configuration must
         // reach the writer before a new graph can be loaded.
         if self.pull_diagnostics {
@@ -1711,7 +1870,7 @@ impl GlobalState {
                 .map(|(uri, _)| uri.clone())
                 .collect();
             for uri in uris {
-                self.send_analysis(uri, None);
+                self.send_analysis(uri, None, false);
             }
         }
         self.refresh_open_diagnostics();
@@ -1743,7 +1902,7 @@ impl GlobalState {
                 .map(|(uri, _)| uri.clone())
                 .collect();
             for uri in uris {
-                self.send_analysis(uri, None);
+                self.send_analysis(uri, None, false);
             }
         }
     }
@@ -1826,16 +1985,6 @@ fn path_for(uri: &Uri) -> PathBuf {
     uri::to_path_or_synthetic(uri)
 }
 
-/// Classify a changed path for the harvester: an environment file warrants a
-/// full re-resolve, anything else a re-harvest of the package owning it.
-fn harvest_signal(path: PathBuf) -> HarvestSignal {
-    if is_environment_file(&path) {
-        HarvestSignal::Environment
-    } else {
-        HarvestSignal::Source(path)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1859,9 +2008,7 @@ mod tests {
     /// read pool, the harvester, and the disk-sync worker.
     struct TestChannels {
         client: Receiver<Message>,
-        analysis: Receiver<AnalysisRequest>,
         read: Receiver<ReadJob>,
-        harvest: Receiver<HarvestSignal>,
         sync: Receiver<SyncMessage>,
     }
 
@@ -1869,16 +2016,13 @@ mod tests {
     fn test_state_with_channels() -> (GlobalState, TestChannels) {
         let (client_tx, client_rx) = unbounded();
         let (out_tx, _out_rx) = unbounded();
-        let (analysis_tx, analysis_rx) = unbounded();
         let (read_tx, read_rx) = unbounded();
-        let (harvest_tx, harvest_rx) = unbounded();
         let (sync_tx, sync_rx) = unbounded();
         let state = GlobalState::new(
             client_tx,
             out_tx,
-            analysis_tx,
             read_tx,
-            harvest_tx,
+            Default::default(),
             sync_tx,
             PositionEncoding::Utf16,
             false,
@@ -1892,9 +2036,7 @@ mod tests {
             state,
             TestChannels {
                 client: client_rx,
-                analysis: analysis_rx,
                 read: read_rx,
-                harvest: harvest_rx,
                 sync: sync_rx,
             },
         )
@@ -1904,15 +2046,11 @@ mod tests {
         Uri::from_str(path).unwrap()
     }
 
-    /// The paths a batch of sync messages reverts to disk, in order.
-    fn reverted(sync: &Receiver<SyncMessage>) -> Vec<PathBuf> {
+    fn analyses(sync: &Receiver<SyncMessage>) -> Vec<AnalysisRequest> {
         sync.try_iter()
-            .map(|msg| match msg {
-                SyncMessage::Revert(path) => path,
-                SyncMessage::SetText { path, .. } => {
-                    panic!("expected a revert, got a text write for {}", path.display())
-                }
-                SyncMessage::RenamedProjects { .. } => panic!("expected a revert, got a rename"),
+            .filter_map(|msg| match msg {
+                SyncMessage::Analyze(req) => Some(req),
+                _ => None,
             })
             .collect()
     }
@@ -1925,6 +2063,43 @@ mod tests {
                 version,
                 kind: DocumentKind::of(uri),
             },
+        );
+    }
+
+    #[test]
+    fn metadata_edits_gate_replies_at_the_same_julia_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("Project.toml");
+        let old = "[syntax]\njulia_version = \"1.13\"\n";
+        let new = "[syntax]\njulia_version = \"1.14\"\n";
+        std::fs::write(&project, old).unwrap();
+        let uri = super::uri::from_path(&dir.path().join("shared.jl")).unwrap();
+        let (mut state, rx) = test_state();
+        open(&mut state, &uri, 1);
+        let _reply = state.read_reply(1.into(), Some(&uri));
+        assert!(state.update_metadata_epoch(&project, Some(new)));
+        state.on_read_reply(ok_reply(1), None);
+        let Message::Response(response) = rx.try_recv().unwrap() else {
+            panic!("expected response");
+        };
+        assert_eq!(
+            response.response_result.unwrap_err().code,
+            ErrorCode::ContentModified as i32
+        );
+        assert!(!state.update_metadata_epoch(&project, Some(&format!("# comment\n{new}"))));
+    }
+
+    #[test]
+    fn an_installed_membership_supersedes_outstanding_edit_replies() {
+        let (mut state, rx) = test_state();
+        let doc = uri("file:///work/shared.jl");
+        open(&mut state, &doc, 1);
+        let _reply = state.rewrite_reply(7.into(), Some(&doc));
+        let previous = state.membership_generation.fetch_add(1, Ordering::Release);
+        state.on_read_reply(ok_reply(7), Some(previous));
+        assert_eq!(
+            next_error_code(&rx),
+            Some(ErrorCode::ContentModified as i32)
         );
     }
 
@@ -2036,7 +2211,7 @@ mod tests {
         open(&mut state, &doc, 1);
         let _reply = state.read_reply(RequestId::from(1), Some(&doc));
 
-        state.on_read_reply(ok_reply(1));
+        state.on_read_reply(ok_reply(1), None);
 
         assert_eq!(
             next_error_code(&rx),
@@ -2055,7 +2230,7 @@ mod tests {
         // A newer edit lands while the read was in flight.
         state.documents.get_mut(&doc).unwrap().version = 2;
 
-        state.on_read_reply(ok_reply(1));
+        state.on_read_reply(ok_reply(1), None);
 
         assert_eq!(
             next_error_code(&rx),
@@ -2072,7 +2247,7 @@ mod tests {
         let _reply = state.read_reply(RequestId::from(1), Some(&doc));
         state.documents.remove(&doc);
 
-        state.on_read_reply(ok_reply(1));
+        state.on_read_reply(ok_reply(1), None);
 
         assert_eq!(
             next_error_code(&rx),
@@ -2097,7 +2272,7 @@ mod tests {
         assert!(state.inflight_reads.is_empty());
 
         // The worker's late reply finds no entry and is dropped: exactly once.
-        state.on_read_reply(ok_reply(1));
+        state.on_read_reply(ok_reply(1), None);
         assert!(
             rx.try_recv().is_err(),
             "a cancelled request is not answered twice"
@@ -2170,7 +2345,7 @@ mod tests {
         );
 
         // Document-less, so no version can supersede it.
-        state.on_read_reply(ok_reply(7));
+        state.on_read_reply(ok_reply(7), None);
         assert_eq!(next_error_code(&channels.client), None);
     }
 
@@ -2201,19 +2376,14 @@ mod tests {
             channels.sync.try_recv().unwrap(),
             SyncMessage::RenamedProjects { open_projects, .. } if open_projects.is_empty()
         ));
-        assert_eq!(
-            reverted(&channels.sync),
-            vec![old_path.clone(), new_path.clone()]
-        );
-        let signals: Vec<HarvestSignal> = channels.harvest.try_iter().collect();
-        assert_eq!(
-            signals,
-            vec![
-                HarvestSignal::Source(old_path),
-                HarvestSignal::Source(new_path),
-            ],
-            "the vacated and the occupied path each re-harvest their package"
-        );
+        for expected in [old_path, new_path] {
+            assert!(
+                matches!(channels.sync.try_recv().unwrap(), SyncMessage::Revert(path) if path == expected)
+            );
+            assert!(
+                matches!(channels.sync.try_recv().unwrap(), SyncMessage::SourceChanged(path) if path == expected)
+            );
+        }
     }
 
     #[test]
@@ -2250,12 +2420,13 @@ mod tests {
             }],
         });
 
-        assert_eq!(reverted(&channels.sync), vec![path]);
-        assert_eq!(
-            channels.harvest.try_iter().collect::<Vec<_>>(),
-            vec![HarvestSignal::Environment],
-            "and it still escalates to a full re-resolve"
+        assert!(
+            matches!(channels.sync.try_recv().unwrap(), SyncMessage::MetadataRevert { path: reverted, .. } if reverted == path)
         );
+        assert!(matches!(
+            channels.sync.try_recv().unwrap(),
+            SyncMessage::RefreshLibrary
+        ));
     }
 
     /// An open buffer stays authoritative: the editor owns the text until it
@@ -2274,7 +2445,10 @@ mod tests {
             }],
         });
 
-        assert!(channels.sync.try_recv().is_err());
+        assert!(matches!(
+            channels.sync.try_recv().unwrap(),
+            SyncMessage::RefreshLibrary
+        ));
     }
 
     #[test]
@@ -2287,8 +2461,10 @@ mod tests {
             files: vec![lsp_types::FileRename { old_uri, new_uri }],
         });
 
-        let signals: Vec<HarvestSignal> = channels.harvest.try_iter().collect();
-        assert_eq!(signals, vec![HarvestSignal::Environment]);
+        assert!(matches!(
+            channels.sync.try_iter().last(),
+            Some(SyncMessage::RefreshLibrary)
+        ));
     }
 
     #[test]
@@ -2297,7 +2473,7 @@ mod tests {
         // A `workspace/symbol`-style read: no uri, no version.
         let _reply = state.read_reply(RequestId::from(1), None);
 
-        state.on_read_reply(ok_reply(1));
+        state.on_read_reply(ok_reply(1), None);
         assert_eq!(
             next_error_code(&rx),
             None,
@@ -2398,7 +2574,7 @@ mod tests {
             "the buffer is still tracked"
         );
         assert!(
-            channels.analysis.try_recv().is_err(),
+            analyses(&channels.sync).is_empty(),
             "a TOML buffer must not be parsed as Julia"
         );
     }
@@ -2413,7 +2589,7 @@ mod tests {
         did_open(&mut state, &source, "x = 1\n");
 
         assert!(
-            channels.analysis.try_recv().is_ok(),
+            !analyses(&channels.sync).is_empty(),
             "a Julia buffer analyzes as before"
         );
         assert!(
@@ -2436,7 +2612,7 @@ mod tests {
             .try_recv()
             .expect("the open buffer is written");
         assert!(
-            matches!(&opened, SyncMessage::SetText { text, .. } if text == "[deps]\n"),
+            matches!(&opened, SyncMessage::SetText { text, .. } if text.as_ref() == "[deps]\n"),
             "didOpen sends the buffer text"
         );
 
@@ -2460,21 +2636,23 @@ mod tests {
             "didChange sends the edited buffer text"
         );
         assert!(
-            channels.analysis.try_recv().is_err(),
+            analyses(&channels.sync).is_empty(),
             "and still never as a Julia analysis"
         );
     }
 
-    /// A manifest takes neither fork: nothing reads it without an environment
-    /// resolve, which is the harvester's job and reads disk.
+    /// Manifest buffers update tracked dependency editions without running the
+    /// Julia analysis pipeline.
     #[test]
-    fn a_manifest_buffer_is_not_written_to_the_database() {
+    fn a_manifest_buffer_updates_the_database_without_julia_analysis() {
         let (mut state, channels) = test_state_with_channels();
 
         did_open(&mut state, &uri("file:///work/Manifest.toml"), "[deps]\n");
 
-        assert!(channels.sync.try_recv().is_err());
-        assert!(channels.analysis.try_recv().is_err());
+        assert!(
+            matches!(channels.sync.try_recv(), Ok(SyncMessage::SetText { text, .. }) if text.as_ref() == "[deps]\n")
+        );
+        assert!(analyses(&channels.sync).is_empty());
     }
 
     /// The diagnostics published for `uri`, from the next `publishDiagnostics`
@@ -2514,7 +2692,10 @@ mod tests {
 
         state.on_outbound(Outbound::DiagnosticsRefresh);
 
-        let requested: Vec<Uri> = channels.analysis.try_iter().map(|req| req.uri).collect();
+        let requested: Vec<Uri> = analyses(&channels.sync)
+            .into_iter()
+            .map(|req| req.uri)
+            .collect();
         assert_eq!(requested, vec![source]);
         assert!(
             channels.sync.try_recv().is_err(),
@@ -2543,8 +2724,10 @@ mod tests {
         // The same URI opened and parsed: both sources publish together.
         open(&mut state, &doc, 7);
         state.on_outbound(Outbound::Diagnostics {
+            context_epoch: 0,
             uri: doc.clone(),
             version: 7,
+            text: Arc::clone(&state.documents[&doc].text),
             diags: vec![diag("parse error")],
         });
         let (diags, version) = next_publish(&channels.client);
@@ -2646,8 +2829,8 @@ mod tests {
         assert_eq!(version, Some(1), "tagged with the buffer it describes");
     }
 
-    /// A manifest buffer takes the same route: nothing reads it without a
-    /// resolve, but its syntax is text-only and so is the buffer's to answer.
+    /// A broken manifest reports its syntax error and updates tracked text so
+    /// dependency editions use their deterministic uncertain fallback.
     #[test]
     fn a_broken_manifest_buffer_publishes_its_syntax_error() {
         let (mut state, channels) = test_state_with_channels();
@@ -2660,8 +2843,8 @@ mod tests {
             vec!["toml-syntax"]
         );
         assert!(
-            channels.sync.try_recv().is_err(),
-            "and still never reaches the database"
+            matches!(channels.sync.try_recv(), Ok(SyncMessage::SetText { text, .. }) if text.as_ref() == "[[deps\n"),
+            "the malformed buffer is authoritative for edition selection"
         );
     }
 
@@ -2870,7 +3053,7 @@ mod tests {
         let source = uri("file:///work/a.jl");
         did_open(&mut state, &source, "x = 1\n");
         // Drain the analysis the open dispatched.
-        let _ = channels.analysis.try_recv();
+        let _ = analyses(&channels.sync);
 
         state.on_request(inlay_hint_request(1, &source));
 
@@ -3014,7 +3197,7 @@ mod tests {
             "[[deps\n",
         );
 
-        assert!(channels.analysis.try_recv().is_err(), "no Julia analysis");
+        assert!(analyses(&channels.sync).is_empty(), "no Julia analysis");
         assert!(channels.sync.try_recv().is_err(), "nothing reaches the db");
         assert!(channels.client.try_recv().is_err(), "and nothing published");
     }

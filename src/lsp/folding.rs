@@ -16,7 +16,7 @@ use lsp_types::{FoldingRange, FoldingRangeKind, Position, Range};
 use rowan::ast::AstNode as _;
 
 use crate::incremental::Analysis;
-use crate::parser::parse;
+use crate::parser::{ParseOptions, parse_with_options};
 use crate::semantic::SemanticModel;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
@@ -29,9 +29,13 @@ use fatou_parser::documentation::syntax::SyntaxKind as DocSyntaxKind;
 /// Best-effort, with no clean-parse gate: folds for the intact parts of a
 /// broken buffer are still useful while the user types.
 pub fn compute_folding_ranges(text: &str) -> Vec<FoldingRange> {
-    let root = parse(text).cst;
+    compute_folding_ranges_with_options(text, ParseOptions::default())
+}
+
+pub fn compute_folding_ranges_with_options(text: &str, options: ParseOptions) -> Vec<FoldingRange> {
+    let root = parse_with_options(text, options).cst;
     let model = SemanticModel::build(&root);
-    folds_for_tree(&root, &model, text)
+    folds_for_tree(&root, &model, text, options)
 }
 
 /// Compute folding ranges off the snapshot's cached parse when the db's
@@ -51,28 +55,41 @@ pub(crate) fn folding_ranges_via_db(
         }
         let root = snapshot.parsed_tree(file);
         let model = snapshot.semantic_model(file);
-        Some(folds_for_tree(&root, model, text))
+        Some(folds_for_tree(
+            &root,
+            model,
+            text,
+            snapshot.options_for_path(path),
+        ))
     }));
     match cached {
         Ok(Some(folds)) => folds,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_folding_ranges(text),
+        Ok(None) | Err(_) => {
+            compute_folding_ranges_with_options(text, snapshot.options_for_path(path))
+        }
     }
 }
 
 /// Shared entry point for the fresh-parse and cached-tree paths: `root` must be
 /// the parse tree of exactly `text`.
-fn folds_for_tree(root: &SyntaxNode, model: &SemanticModel, text: &str) -> Vec<FoldingRange> {
-    let mut out = julia_folds(root, text);
-    collect_documentation_folds(model, &Ctx::new(text), &mut out);
+fn folds_for_tree(
+    root: &SyntaxNode,
+    model: &SemanticModel,
+    text: &str,
+    options: ParseOptions,
+) -> Vec<FoldingRange> {
+    let mut out = julia_folds(root, text, options);
+    collect_documentation_folds(model, &Ctx::new(text, options), &mut out);
     out
 }
 
 /// The Julia-only folds of `root`, without the documentation pass. A Markdown
 /// fence body reaches this directly: it needs no semantic model, and building
 /// one per fence would re-decode every docstring the fence contains.
-fn julia_folds(root: &SyntaxNode, text: &str) -> Vec<FoldingRange> {
+fn julia_folds(root: &SyntaxNode, text: &str, options: ParseOptions) -> Vec<FoldingRange> {
     let ctx = Ctx {
+        options,
         text,
         line_index: LineIndex::new(text),
     };
@@ -165,7 +182,11 @@ fn collect_documentation_folds(model: &SemanticModel, ctx: &Ctx<'_>, out: &mut V
                 continue;
             };
             let code_index = LineIndex::new(code);
-            for fold in julia_folds(&parse(code).cst, code) {
+            for fold in julia_folds(
+                &parse_with_options(code, ctx.options).cst,
+                code,
+                ctx.options,
+            ) {
                 let relative = Range::new(
                     Position::new(fold.start_line, 0),
                     Position::new(fold.end_line.saturating_add(1), 0),
@@ -188,13 +209,15 @@ fn collect_documentation_folds(model: &SemanticModel, ctx: &Ctx<'_>, out: &mut V
 }
 
 struct Ctx<'a> {
+    options: ParseOptions,
     text: &'a str,
     line_index: LineIndex<'a>,
 }
 
 impl<'a> Ctx<'a> {
-    fn new(text: &'a str) -> Self {
+    fn new(text: &'a str, options: ParseOptions) -> Self {
         Self {
+            options,
             text,
             line_index: LineIndex::new(text),
         }

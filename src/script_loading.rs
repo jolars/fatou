@@ -6,12 +6,19 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::incremental::normalize_path;
-use crate::project::include_edges;
 use crate::project::scripts::{ScriptAnalysis, ScriptSources};
 
 /// Load an explicit program set, rejecting unreadable entry files.
 pub fn analyze(entries: &[PathBuf]) -> Result<ScriptAnalysis, String> {
-    let sources = load_sources(entries, &BTreeMap::new());
+    analyze_with_edition(entries, None)
+}
+
+pub fn analyze_with_edition(
+    entries: &[PathBuf],
+    edition: Option<crate::parser::SyntaxEdition>,
+) -> Result<ScriptAnalysis, String> {
+    let catalog = load_contexts(entries, &BTreeMap::new(), edition);
+    let sources = &catalog.sources;
     for entry in entries {
         if let Some(Err(error)) = sources.get(&normalize_path(entry)) {
             return Err(format!(
@@ -20,33 +27,21 @@ pub fn analyze(entries: &[PathBuf]) -> Result<ScriptAnalysis, String> {
             ));
         }
     }
-    Ok(ScriptAnalysis::from_sources(entries, &sources))
+    Ok(ScriptAnalysis::from_catalog(entries, &catalog))
 }
 
 /// Load only the include closure. Open buffers override disk, including files
 /// that have not been saved yet. Errors remain explicit graph inputs.
 pub fn load_sources(entries: &[PathBuf], buffers: &BTreeMap<PathBuf, Arc<str>>) -> ScriptSources {
-    let mut sources = BTreeMap::new();
-    let mut pending = entries.to_vec();
-    while let Some(path) = pending.pop() {
-        let path = normalize_path(&path);
-        if sources.contains_key(&path) {
-            continue;
-        }
-        let text = buffers.get(&path).cloned().map(Ok).unwrap_or_else(|| {
-            std::fs::read_to_string(&path)
-                .map(Arc::from)
-                .map_err(|error| error.to_string())
-        });
-        if let Ok(text) = &text {
-            let parsed = crate::parser::parse(text);
-            pending.extend(
-                include_edges(&parsed.cst, path.parent())
-                    .into_iter()
-                    .filter_map(|edge| edge.target),
-            );
-        }
-        sources.insert(path, text);
-    }
-    sources
+    load_contexts(entries, buffers, None).sources
+}
+
+/// Load a program set under each entry's project-selected edition. The catalog
+/// retains both include membership and shared text for the analysis adapter.
+pub fn load_contexts(
+    entries: &[PathBuf],
+    buffers: &BTreeMap<PathBuf, Arc<str>>,
+    override_edition: Option<crate::parser::SyntaxEdition>,
+) -> crate::parse_context::ContextCatalog {
+    crate::parse_context::ContextCatalog::discover(&[], entries, buffers, override_edition)
 }

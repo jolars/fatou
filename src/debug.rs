@@ -9,8 +9,8 @@
 use std::path::Path;
 
 use crate::cli::DebugChecksArg;
-use crate::formatter::{FormatStyle, format_with_style};
-use crate::parser::{parse, reconstruct};
+use crate::formatter::{FormatOptions, FormatStyle, format_with_options};
+use crate::parser::parse_with_options;
 
 /// One invariant (or the failure to even run it) checked per file.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -229,10 +229,27 @@ pub fn run_debug_checks_for_file(
     style: FormatStyle,
     checks: DebugChecksArg,
 ) -> DebugArtifacts {
+    run_debug_checks_with_options(
+        content,
+        FormatOptions {
+            style,
+            ..FormatOptions::default()
+        },
+        checks,
+    )
+}
+
+/// Check invariants using the selected edition for every parse and format pass.
+pub fn run_debug_checks_with_options(
+    content: &str,
+    options: FormatOptions,
+    checks: DebugChecksArg,
+) -> DebugArtifacts {
     let mut artifacts = DebugArtifacts::default();
+    let parsed = parse_with_options(content, options.parse_options);
 
     if matches!(checks, DebugChecksArg::Losslessness | DebugChecksArg::All) {
-        let reconstructed = reconstruct(content);
+        let reconstructed = parsed.cst.text().to_string();
         artifacts.losslessness = Some((content.to_string(), reconstructed.clone()));
         if reconstructed != content {
             artifacts.failures.push(DebugFailure {
@@ -244,7 +261,7 @@ pub fn run_debug_checks_for_file(
     }
 
     if matches!(checks, DebugChecksArg::Idempotency | DebugChecksArg::All) {
-        let diagnostics = parse(content).diagnostics;
+        let diagnostics = parsed.diagnostics;
         if let Some(first) = diagnostics.first() {
             artifacts.failures.push(DebugFailure {
                 kind: CheckKind::FormatError,
@@ -259,14 +276,14 @@ pub fn run_debug_checks_for_file(
             });
             return artifacts;
         }
-        match format_with_style(content, style) {
+        match format_with_options(content, options) {
             Err(err) => artifacts.failures.push(DebugFailure {
                 kind: CheckKind::FormatError,
                 left: err.to_string(),
                 right: String::new(),
             }),
             Ok(once) => {
-                let once_diags = parse(&once).diagnostics;
+                let once_diags = parse_with_options(&once, options.parse_options).diagnostics;
                 if let Some(first) = once_diags.first() {
                     artifacts.idempotency =
                         Some((content.to_string(), once.clone(), String::new()));
@@ -280,7 +297,7 @@ pub fn run_debug_checks_for_file(
                     });
                     return artifacts;
                 }
-                match format_with_style(&once, style) {
+                match format_with_options(&once, options) {
                     Ok(twice) => {
                         artifacts.idempotency =
                             Some((content.to_string(), once.clone(), twice.clone()));

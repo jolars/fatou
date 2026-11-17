@@ -34,7 +34,8 @@
 //! and attributable.
 
 use fatou_parser::parser::{
-    ParseDiagnostic, ParseOutput, parse, sexpr_tokens, to_juliasyntax_sexpr,
+    ParseDiagnostic, ParseOptions, ParseOutput, parse_with_options, sexpr_tokens,
+    to_juliasyntax_sexpr_with_options,
 };
 use fatou_parser::syntax::SyntaxKind;
 
@@ -120,6 +121,7 @@ struct OpaqueLeaf {
 }
 
 pub(crate) struct VerificationBaseline {
+    options: ParseOptions,
     strict_shape: String,
     comparable_shape: Option<Shape>,
     opaque_leaves: Vec<OpaqueLeaf>,
@@ -133,13 +135,23 @@ pub(crate) struct VerificationBaseline {
 /// defined, meaning-preserving canonicalizations. It fails closed when either
 /// text cannot be compared.
 pub fn verify_format(input: &str, formatted: &str) -> Result<(), VerificationError> {
-    let parsed = parse(input);
-    let baseline = verification_baseline(&parsed)?;
+    verify_format_with_options(input, formatted, ParseOptions::default())
+}
+
+/// Compare input and output under one explicitly selected syntax edition.
+pub fn verify_format_with_options(
+    input: &str,
+    formatted: &str,
+    options: ParseOptions,
+) -> Result<(), VerificationError> {
+    let parsed = parse_with_options(input, options);
+    let baseline = verification_baseline(&parsed, options)?;
     verify_against(&baseline, formatted)
 }
 
 pub(crate) fn verification_baseline(
     parsed: &ParseOutput,
+    options: ParseOptions,
 ) -> Result<VerificationBaseline, VerificationError> {
     if !parsed.diagnostics.is_empty() {
         return Err(VerificationError::InputSyntax {
@@ -147,8 +159,9 @@ pub(crate) fn verification_baseline(
         });
     }
     let (strict_shape, comparable_shape) =
-        projected_shapes(parsed).ok_or(VerificationError::UnsupportedInput)?;
+        projected_shapes(parsed, options).ok_or(VerificationError::UnsupportedInput)?;
     Ok(VerificationBaseline {
+        options,
         strict_shape,
         comparable_shape,
         opaque_leaves: opaque_leaves(&parsed.cst),
@@ -160,14 +173,14 @@ pub(crate) fn verify_against(
     baseline: &VerificationBaseline,
     formatted: &str,
 ) -> Result<(), VerificationError> {
-    let output = parse(formatted);
+    let output = parse_with_options(formatted, baseline.options);
     if !output.diagnostics.is_empty() {
         return Err(VerificationError::OutputSyntax {
             diagnostics: output.diagnostics,
         });
     }
     let (strict_shape, comparable_shape) =
-        projected_shapes(&output).ok_or(VerificationError::UnsupportedOutput)?;
+        projected_shapes(&output, baseline.options).ok_or(VerificationError::UnsupportedOutput)?;
     if baseline.opaque_leaves != opaque_leaves(&output.cst) {
         return Err(VerificationError::ChangedProgram);
     }
@@ -186,8 +199,11 @@ pub(crate) fn verify_against(
     Ok(())
 }
 
-fn projected_shapes(output: &ParseOutput) -> Option<(String, Option<Shape>)> {
-    let raw = to_juliasyntax_sexpr(&output.cst, &output.diagnostics);
+fn projected_shapes(
+    output: &ParseOutput,
+    options: ParseOptions,
+) -> Option<(String, Option<Shape>)> {
+    let raw = to_juliasyntax_sexpr_with_options(&output.cst, &output.diagnostics, options);
     shapes_from_projection(&raw)
 }
 
@@ -532,11 +548,16 @@ fn opaque_leaves(root: &fatou_parser::syntax::SyntaxNode) -> Vec<OpaqueLeaf> {
 /// docstring still has a preserved shape. Comment preservation needs its own
 /// check; this one cannot see it.
 pub fn ast_shape(text: &str) -> Option<String> {
-    let output = parse(text);
+    ast_shape_with_options(text, ParseOptions::default())
+}
+
+/// Inspect a source shape under its selected syntax edition.
+pub fn ast_shape_with_options(text: &str, options: ParseOptions) -> Option<String> {
+    let output = parse_with_options(text, options);
     if !output.diagnostics.is_empty() {
         return None;
     }
-    let raw = to_juliasyntax_sexpr(&output.cst, &output.diagnostics);
+    let raw = to_juliasyntax_sexpr_with_options(&output.cst, &output.diagnostics, options);
     let mut tokens = sexpr_tokens(&raw);
     if tokens
         .iter()

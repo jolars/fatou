@@ -17,8 +17,10 @@ use rayon::prelude::*;
 use crate::environment::JuliaInstall;
 
 use super::HarvestedLibrary;
-use super::cache::{CacheKey, IndexCache};
-use super::harvest::{harvest_base_entry, harvest_entry, harvest_package_named};
+use super::cache::{CacheKey, IndexCache, system_parse_options};
+use super::harvest::{
+    harvest_base_entry, harvest_entry_with_options, harvest_package_with_options,
+};
 use super::model::{DefLocation, ExportedName, ModuleIndex, PackageIndex, Span, Visibility};
 
 /// Base's harvest entry files. Julia 1.12 split the `module Base` opener and
@@ -139,31 +141,114 @@ fn harvest_system_one(
     work: &SystemWork,
     install: &JuliaInstall,
     cache: Option<&IndexCache>,
-) -> (String, Arc<PackageIndex>, PathBuf) {
-    let key = CacheKey::for_system(install);
+) -> (
+    String,
+    Arc<PackageIndex>,
+    PathBuf,
+    crate::parser::ParseOptions,
+) {
+    let options = match work.kind {
+        SystemKind::Stdlib => crate::environment::project_file_in(&work.root)
+            .and_then(|path| {
+                std::fs::read_to_string(&path).ok().map(|text| {
+                    crate::parse_context::project_edition(
+                        &path,
+                        &text,
+                        crate::parse_context::SourceRole::Package,
+                    )
+                    .options
+                })
+            })
+            .unwrap_or(crate::parser::ParseOptions {
+                syntax_edition: crate::parser::SyntaxEdition::OLDEST,
+            }),
+        SystemKind::Base | SystemKind::Core => system_parse_options(install),
+    };
+    let key = CacheKey::for_system_with_options(install, options);
     if let Some(index) = cache.and_then(|cache| cache.load(&work.name, &key)) {
-        return (work.name.clone(), Arc::new(index), work.root.clone());
+        return (
+            work.name.clone(),
+            Arc::new(index),
+            work.root.clone(),
+            options,
+        );
     }
     let index = match work.kind {
-        SystemKind::Base => harvest_base(&work.root),
-        SystemKind::Core => harvest_entry(&work.root, &work.root.join("boot.jl"), "Core"),
-        SystemKind::Stdlib => harvest_package_named(&work.root, &work.name),
+        SystemKind::Base => harvest_base(&work.root, options),
+        SystemKind::Core => {
+            harvest_entry_with_options(&work.root, &work.root.join("boot.jl"), "Core", options)
+        }
+        SystemKind::Stdlib => harvest_package_with_options(&work.root, &work.name, options),
     };
     if let Some(cache) = cache {
         cache.store(&work.name, &key, &index);
     }
-    (work.name.clone(), Arc::new(index), work.root.clone())
+    (
+        work.name.clone(),
+        Arc::new(index),
+        work.root.clone(),
+        options,
+    )
 }
 
 /// Fold harvested `(name, index, root)` triples into a [`HarvestedLibrary`].
-fn assemble(results: Vec<(String, Arc<PackageIndex>, PathBuf)>) -> HarvestedLibrary {
+fn assemble(
+    results: Vec<(
+        String,
+        Arc<PackageIndex>,
+        PathBuf,
+        crate::parser::ParseOptions,
+    )>,
+) -> HarvestedLibrary {
     let mut packages = BTreeMap::new();
     let mut roots = BTreeMap::new();
-    for (name, index, root) in results {
+    let mut syntax = super::LibrarySyntax::default();
+    for (name, index, root, options) in results {
+        let source = if name == "Base" || name == "Core" {
+            crate::parse_context::EditionSource::Fixed(options.syntax_edition)
+        } else {
+            crate::environment::project_file_in(&root)
+                .map(|path| crate::parse_context::EditionSource::Project {
+                    path,
+                    role: crate::parse_context::SourceRole::Package,
+                })
+                .unwrap_or(crate::parse_context::EditionSource::Fixed(
+                    options.syntax_edition,
+                ))
+        };
+        let context = crate::parse_context::SourceContext {
+            entry: root.join(if name == "Base" {
+                "Base.jl".to_string()
+            } else if name == "Core" {
+                "boot.jl".to_string()
+            } else {
+                format!("src/{name}.jl")
+            }),
+            source: source.clone(),
+        };
+        for member in &index.members {
+            syntax
+                .files
+                .entry(crate::incremental::normalize_path(&root.join(member)))
+                .or_default()
+                .push(context.clone());
+        }
+        syntax
+            .variants
+            .insert((name.clone(), options), Arc::clone(&index));
+        syntax.packages.insert(
+            name.clone(),
+            super::PackageSyntax {
+                root: root.clone(),
+                source,
+                options,
+            },
+        );
         packages.insert(name.clone(), index);
         roots.insert(name, root);
     }
     HarvestedLibrary {
+        syntax,
         packages,
         roots,
         workspaces: Vec::new(),
@@ -176,6 +261,7 @@ fn assemble(results: Vec<(String, Arc<PackageIndex>, PathBuf)>) -> HarvestedLibr
 /// The baked-in fallback library, used when no installation is located.
 fn fallback_library() -> HarvestedLibrary {
     HarvestedLibrary {
+        syntax: Default::default(),
         packages: fallback_system(),
         roots: BTreeMap::new(),
         workspaces: Vec::new(),
@@ -186,14 +272,14 @@ fn fallback_library() -> HarvestedLibrary {
 }
 
 /// Harvest Base by merging every present [`BASE_ENTRIES`] file into one index.
-fn harvest_base(base_dir: &Path) -> PackageIndex {
+fn harvest_base(base_dir: &Path, options: crate::parser::ParseOptions) -> PackageIndex {
     let mut merged: Option<PackageIndex> = None;
     for entry in BASE_ENTRIES {
         let file = base_dir.join(entry);
         if !file.is_file() {
             continue;
         }
-        let index = harvest_base_entry(base_dir, &file);
+        let index = harvest_base_entry(base_dir, &file, options);
         match &mut merged {
             None => merged = Some(index),
             Some(acc) => merge_index(acc, index),
@@ -201,7 +287,7 @@ fn harvest_base(base_dir: &Path) -> PackageIndex {
     }
     // No entry present: harvest the canonical name for a proper missing-file
     // diagnostic rather than a silent empty index.
-    merged.unwrap_or_else(|| harvest_base_entry(base_dir, &base_dir.join(BASE_ENTRIES[0])))
+    merged.unwrap_or_else(|| harvest_base_entry(base_dir, &base_dir.join(BASE_ENTRIES[0]), options))
 }
 
 /// Fold `other`'s root items and diagnostics into `acc`. Function methods merge

@@ -25,7 +25,7 @@
 //! Its UUID stays stable. A move outside the package's new `src/` directory
 //! cannot be repaired by changing its name; `missing-entry-file` reports it.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -35,7 +35,7 @@ use lsp_types::{FileRename, Range, TextEdit, Uri, WorkspaceEdit};
 use crate::ast::{AstNode, AstToken, DocAttachment, Expr, ModuleDef, Root};
 use crate::environment::{is_project_file, parse_project_str};
 use crate::incremental::{Analysis, SourceFile, normalize_path};
-use crate::parser::parse;
+use crate::parser::{ParseOptions, SyntaxEdition, parse_with_options};
 use crate::project::{include_sites, resolve_target};
 use crate::text::{LineIndex, PositionEncoding};
 
@@ -52,19 +52,21 @@ pub(crate) fn will_rename_files_via_db(
     files: &[FileRename],
     open_docs: &[PathBuf],
     encoding: PositionEncoding,
-) -> Option<WorkspaceEdit> {
-    let map = RenameMap::from_files(files)?;
+) -> Result<Option<WorkspaceEdit>, String> {
+    let Some(map) = RenameMap::from_files(files) else {
+        return Ok(None);
+    };
     // A write racing the read trips `salsa::Cancelled`. Unlike the per-document
     // handlers there is no client-supplied text to re-parse from, so a race
-    // simply answers `null`; the client re-requests on the next rename.
+    // must report failure so the client can retry before moving the files.
     let changes = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         collect_edits(snapshot, &map, open_docs, encoding)
     }))
-    .ok()?;
-    (!changes.is_empty()).then(|| WorkspaceEdit {
+    .map_err(|_| "source state changed during file rename".to_string())??;
+    Ok((!changes.is_empty()).then(|| WorkspaceEdit {
         changes: Some(changes),
         ..Default::default()
-    })
+    }))
 }
 
 /// Every file whose `include` literals the batch could disturb, paired with its
@@ -81,7 +83,7 @@ fn scan_set(snapshot: &Analysis, open_docs: &[PathBuf]) -> Vec<(SourceFile, Path
             scan.push((file, path));
         }
     };
-    for file in snapshot.workspace_files() {
+    for file in snapshot.file_rename_sources() {
         if let Some(path) = snapshot.file_path_of(file) {
             push(file, normalize_path(&path));
         }
@@ -102,49 +104,86 @@ fn collect_edits(
     map: &RenameMap,
     open_docs: &[PathBuf],
     encoding: PositionEncoding,
-) -> HashMap<Uri, Vec<TextEdit>> {
+) -> Result<HashMap<Uri, Vec<TextEdit>>, String> {
     let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
     for (file, old_path) in scan_set(snapshot, open_docs) {
         let new_path = map.map(&old_path);
-        // The cheap gate, off the cached `include_edges` firewall: a file
-        // matters only if it moved (its own relative includes must rebase) or
-        // one of its targets moved. `IncludeEdge::target` is a plain join, so
-        // it must be normalized before it can match a rename key.
-        let disturbed = new_path != old_path
-            || snapshot.include_edges(file).iter().any(|edge| {
-                edge.target.as_deref().is_some_and(|target| {
-                    let target = normalize_path(target);
-                    map.map(&target) != target
-                })
-            });
-        if !disturbed {
-            continue;
-        }
         let (Some(old_dir), Some(new_dir)) = (old_path.parent(), new_path.parent()) else {
             continue;
         };
-        let text = snapshot.file_text_of(file);
-        let line_index = LineIndex::new(text);
-        let edits: Vec<TextEdit> = include_sites(&snapshot.parsed_tree(file))
-            .into_iter()
-            .filter_map(|site| {
-                let content = site.content?;
-                let new_text = rewritten_literal(&site.path, old_dir, new_dir, map)?;
-                Some(TextEdit {
-                    range: Range::new(
-                        line_index.byte_to_position(content.start().into(), encoding),
-                        line_index.byte_to_position(content.end().into(), encoding),
-                    ),
-                    new_text,
-                })
-            })
-            .collect();
-        insert_edits(&mut changes, &old_path, edits);
+        let contexts = snapshot.source_editions(file);
+        let uncertain = contexts.iter().any(|(_, selected)| !selected.certain);
+        let options: BTreeSet<_> = if uncertain {
+            // A fallback grammar may hide a relevant include. If any edition
+            // sees a required edit, the move needs a known loading context.
+            SyntaxEdition::ALL
+                .into_iter()
+                .map(|syntax_edition| ParseOptions { syntax_edition })
+                .collect()
+        } else if contexts.is_empty() {
+            BTreeSet::from([snapshot.parse_options(file)])
+        } else {
+            contexts
+                .iter()
+                .map(|(_, selected)| selected.options)
+                .collect()
+        };
+        let mut candidate = None;
+        for options in options {
+            let view = snapshot.with_options(options);
+            let edits = include_edits(&view, file, old_dir, new_dir, map, encoding);
+            if (uncertain && !edits.is_empty())
+                || candidate
+                    .as_ref()
+                    .is_some_and(|previous| *previous != edits)
+            {
+                return Err(format!(
+                    "could not validate required include edits in {}",
+                    old_path.display()
+                ));
+            }
+            candidate = Some(edits);
+        }
+        insert_edits(&mut changes, &old_path, candidate.unwrap_or_default());
     }
     for package in snapshot.workspace_packages() {
-        collect_package_edits(snapshot, &package, map, encoding, &mut changes);
+        collect_package_edits(snapshot, &package, map, encoding, &mut changes)?;
     }
-    changes
+    Ok(changes)
+}
+
+fn include_edits(
+    snapshot: &Analysis,
+    file: SourceFile,
+    old_dir: &Path,
+    new_dir: &Path,
+    map: &RenameMap,
+    encoding: PositionEncoding,
+) -> Vec<TextEdit> {
+    // The range-free edges avoid opening a CST and building a line index for
+    // files with no affected include sites.
+    if !snapshot
+        .include_edges(file)
+        .iter()
+        .any(|edge| rewritten_literal(&edge.path, old_dir, new_dir, map).is_some())
+    {
+        return Vec::new();
+    }
+    let line_index = LineIndex::new(snapshot.file_text_of(file));
+    include_sites(&snapshot.parsed_tree(file))
+        .into_iter()
+        .filter_map(|site| {
+            let content = site.content?;
+            let new_text = rewritten_literal(&site.path, old_dir, new_dir, map)?;
+            Some(TextEdit {
+                range: Range::new(
+                    line_index.byte_to_position(content.start().into(), encoding),
+                    line_index.byte_to_position(content.end().into(), encoding),
+                ),
+                new_text,
+            })
+        })
+        .collect()
 }
 
 /// Use the registered project input, never a guessed filename or a fresh disk
@@ -155,40 +194,46 @@ fn collect_package_edits(
     map: &RenameMap,
     encoding: PositionEncoding,
     changes: &mut HashMap<Uri, Vec<TextEdit>>,
-) {
+) -> Result<(), String> {
     let Some(file) = snapshot.project_file_of(package) else {
-        return;
+        return Ok(());
     };
     let text = snapshot.file_text_of(file);
     let Some(project) = parse_project_str(text) else {
-        return;
+        return Ok(());
     };
     let (Some(name), Some(_uuid)) = (project.name, project.uuid) else {
-        return;
+        return Ok(());
     };
     let Some(project_path) = snapshot.file_path_of(file) else {
-        return;
+        return Ok(());
     };
     let new_project_path = map.map(&project_path);
     let (Some(root), Some(new_root)) = (project_path.parent(), new_project_path.parent()) else {
-        return;
+        return Ok(());
     };
-    if !is_project_file(&new_project_path) || !is_package_name(name.as_ref()) {
-        return;
-    }
     let entry = root.join("src").join(format!("{}.jl", name.as_ref()));
     let new_entry = map.map(&entry);
     let Some(new_name) = new_entry.file_stem().and_then(|stem| stem.to_str()) else {
-        return;
+        return Ok(());
     };
     // A renamed folder preserves the package name, while moving an entry away
     // from `src/` cannot be made loadable by a name edit alone.
     if new_name == name.as_ref()
         || new_entry.extension().is_none_or(|ext| ext != "jl")
         || new_entry.parent() != Some(new_root.join("src").as_path())
-        || !is_package_name(new_name)
+        || !is_project_file(&new_project_path)
     {
-        return;
+        return Ok(());
+    }
+    let selected = crate::parse_context::project_edition(
+        &project_path,
+        text,
+        crate::parse_context::SourceRole::Package,
+    );
+    let options = selected.require_certain()?;
+    if !is_package_name(name.as_ref(), options) || !is_package_name(new_name, options) {
+        return Ok(());
     }
     let index = LineIndex::new(text);
     let span = name.span();
@@ -205,13 +250,16 @@ fn collect_package_edits(
     );
 
     let Some(entry_file) = snapshot.lookup_file(&entry) else {
-        return;
+        return Ok(());
     };
     if !snapshot.parse_diagnostics(entry_file).is_empty() {
-        return;
+        return Err(format!(
+            "could not validate required module edits in {}",
+            entry.display()
+        ));
     }
     let Some(root) = Root::cast(snapshot.parsed_tree(entry_file)) else {
-        return;
+        return Ok(());
     };
     let index = LineIndex::new(snapshot.file_text_of(entry_file));
     let edits = root
@@ -231,12 +279,13 @@ fn collect_package_edits(
         })
         .collect();
     insert_edits(changes, &entry, edits);
+    Ok(())
 }
 
 /// Ask the parser to recognize a plain name so keywords, operators, and
 /// Unicode identifiers obey Julia's lexical rules without a second whitelist.
-fn is_package_name(name: &str) -> bool {
-    let parsed = parse(name);
+fn is_package_name(name: &str, options: ParseOptions) -> bool {
+    let parsed = parse_with_options(name, options);
     if !parsed.diagnostics.is_empty() || name.chars().all(|ch| ch == '_') {
         return false;
     }
@@ -730,7 +779,8 @@ mod db_tests {
         open_docs: &[PathBuf],
     ) -> BTreeMap<String, Vec<(u32, u32, String)>> {
         let edit =
-            will_rename_files_via_db(&db.snapshot(), renames, open_docs, PositionEncoding::Utf16);
+            will_rename_files_via_db(&db.snapshot(), renames, open_docs, PositionEncoding::Utf16)
+                .unwrap();
         let Some(edit) = edit else {
             return BTreeMap::new();
         };
@@ -926,6 +976,7 @@ mod db_tests {
                     &[],
                     encoding,
                 )
+                .unwrap()
                 .expect("renaming the entry must keep the package name in sync");
                 let project = apply_file_edit(&edit, &project_path, text, encoding);
                 assert_eq!(project, text.replace("'MyPkg'", "\"NewPkg\""));
@@ -1023,6 +1074,7 @@ mod db_tests {
                 &[],
                 encoding,
             )
+            .unwrap()
             .expect("a Unicode package entry rename");
             assert_eq!(
                 apply_file_edit(&edit, &project_path, project, encoding),

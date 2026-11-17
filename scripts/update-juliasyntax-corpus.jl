@@ -30,7 +30,9 @@ function main()
     for slug in slugs
         input = joinpath(CORPUS_DIR, slug, "input.jl")
         isfile(input) || continue
-        sexpr = render_oracle(read(input, String))
+        edition = joinpath(CORPUS_DIR, slug, "edition.txt")
+        version = isfile(edition) ? VersionNumber(strip(read(edition, String))) : ORACLE_SYNTAX_VERSION
+        sexpr = render_oracle(read(input, String); version)
         open(joinpath(CORPUS_DIR, slug, "expected.sexpr"), "w") do io
             print(io, sexpr)
             print(io, '\n')

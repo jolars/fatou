@@ -70,9 +70,9 @@
 
 use rowan::{GreenNode, GreenToken, TextRange, TextSize, TokenAtOffset};
 
-use crate::parser::ParseDiagnostic;
 use crate::parser::diagnostics::DIAGNOSTIC_STREAMS;
-use crate::parser::lexer::lex;
+use crate::parser::{ParseDiagnostic, ParseOptions};
+
 use crate::parser::tree_builder::syntax_kind_for;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
@@ -134,7 +134,8 @@ pub struct Reparsed {
 /// not: one that does not fit `prev_text` — a stale range, a buffer that moved
 /// underneath it — is rejected here rather than applied at offsets that would
 /// panic on a slice.
-pub fn reparse(
+fn reparse_same_options(
+    options: ParseOptions,
     prev_text: &str,
     prev_green: &GreenNode,
     prev_diags: &[ParseDiagnostic],
@@ -144,8 +145,8 @@ pub fn reparse(
     if !fits(prev_text, edit) {
         return None;
     }
-    let result = reparse_impl(prev_text, prev_green, prev_diags, edit, new_text)?;
-    assert_matches_full_parse(&result, new_text);
+    let result = reparse_impl(options, prev_text, prev_green, prev_diags, edit, new_text)?;
+    assert_matches_full_parse(options, &result, new_text);
     Some(result)
 }
 
@@ -179,7 +180,8 @@ pub fn reparse(
 /// to redo every `replace_range` the loop below already does, which costs the
 /// same order as the splice it is guarding (`benches/reparse.rs`,
 /// `precise_chain`).
-pub fn reparse_edits(
+fn reparse_edits_same_options(
+    options: ParseOptions,
     prev_text: &str,
     prev_green: &GreenNode,
     prev_diags: &[ParseDiagnostic],
@@ -201,7 +203,7 @@ pub fn reparse_edits(
         if suffix != &prev_text[edit.range.end..] {
             return None;
         }
-        return reparse(prev_text, prev_green, prev_diags, edit, new_text);
+        return reparse_same_options(options, prev_text, prev_green, prev_diags, edit, new_text);
     }
 
     let mut text = prev_text.to_string();
@@ -214,7 +216,7 @@ pub fn reparse_edits(
             return None;
         }
         let next = edit.apply(&text);
-        let step = reparse_impl(&text, &green, &diagnostics, edit, &next)?;
+        let step = reparse_impl(options, &text, &green, &diagnostics, edit, &next)?;
         tier = tier.max(step.tier);
         text = next;
         green = step.green;
@@ -234,7 +236,7 @@ pub fn reparse_edits(
         diagnostics,
         tier,
     };
-    assert_matches_full_parse(&result, new_text);
+    assert_matches_full_parse(options, &result, new_text);
     Some(result)
 }
 
@@ -246,8 +248,8 @@ pub fn reparse_edits(
 /// asserts once on its composed result rather than once per step, which would
 /// otherwise make a debug-build language server unusable on a large file.
 #[cfg(debug_assertions)]
-fn assert_matches_full_parse(result: &Reparsed, new_text: &str) {
-    let full = crate::parser::parse(new_text);
+fn assert_matches_full_parse(options: ParseOptions, result: &Reparsed, new_text: &str) {
+    let full = crate::parser::parse_with_options(new_text, options);
     debug_assert_eq!(
         fingerprint(&SyntaxNode::new_root(result.green.clone())),
         fingerprint(&full.cst),
@@ -262,7 +264,7 @@ fn assert_matches_full_parse(result: &Reparsed, new_text: &str) {
 }
 
 #[cfg(not(debug_assertions))]
-fn assert_matches_full_parse(_result: &Reparsed, _new_text: &str) {}
+fn assert_matches_full_parse(_options: ParseOptions, _result: &Reparsed, _new_text: &str) {}
 
 /// Whether `edit`'s range is a well-formed byte range of `text`. All tiers
 /// slice `prev_text` at the edit's offsets, so an edit that does not fit is a
@@ -276,15 +278,16 @@ fn fits(text: &str, edit: &Edit) -> bool {
 
 /// Tier dispatch: cheapest first.
 fn reparse_impl(
+    options: ParseOptions,
     prev_text: &str,
     prev_green: &GreenNode,
     prev_diags: &[ParseDiagnostic],
     edit: &Edit,
     new_text: &str,
 ) -> Option<Reparsed> {
-    reparse_token(prev_text, prev_green, prev_diags, edit)
-        .or_else(|| reparse_block(prev_text, prev_green, prev_diags, edit, new_text))
-        .or_else(|| reparse_toplevel(prev_text, prev_green, prev_diags, edit, new_text))
+    reparse_token(options, prev_text, prev_green, prev_diags, edit)
+        .or_else(|| reparse_block(options, prev_text, prev_green, prev_diags, edit, new_text))
+        .or_else(|| reparse_toplevel(options, prev_text, prev_green, prev_diags, edit, new_text))
 }
 
 /// Leaf kinds proved by the isolated single-token relex plus the two join
@@ -349,6 +352,7 @@ const CONTEXTUAL_IDENTS: &[&str] = &[
 /// oracle arbitrate tree equality. Any guard failure returns `None`, which
 /// the caller answers with a full parse, so every bail here is safe.
 fn reparse_token(
+    options: ParseOptions,
     prev_text: &str,
     prev_green: &GreenNode,
     prev_diags: &[ParseDiagnostic],
@@ -372,20 +376,23 @@ fn reparse_token(
 
     candidates
         .into_iter()
-        .find_map(|token| try_splice_token(prev_text, prev_diags, edit, &token))
+        .find_map(|token| try_splice_token(options, prev_text, prev_diags, edit, &token))
 }
 
 /// Dispatch one candidate leaf to the proof its kind takes.
 fn try_splice_token(
+    options: ParseOptions,
     prev_text: &str,
     prev_diags: &[ParseDiagnostic],
     edit: &Edit,
     token: &SyntaxToken,
 ) -> Option<Reparsed> {
     match token.kind() {
-        SyntaxKind::STRING_CONTENT => try_splice_string_content(prev_text, prev_diags, edit, token),
+        SyntaxKind::STRING_CONTENT => {
+            try_splice_string_content(options, prev_text, prev_diags, edit, token)
+        }
         kind if TOKEN_REPARSE_KINDS.contains(&kind) => {
-            try_splice_plain_token(prev_text, prev_diags, edit, token)
+            try_splice_plain_token(options, prev_text, prev_diags, edit, token)
         }
         _ => None,
     }
@@ -393,6 +400,7 @@ fn try_splice_token(
 
 /// Run the stage-2 guards against one candidate leaf and splice on success.
 fn try_splice_plain_token(
+    options: ParseOptions,
     prev_text: &str,
     prev_diags: &[ParseDiagnostic],
     edit: &Edit,
@@ -419,7 +427,7 @@ fn try_splice_plain_token(
     // Isolated relex: still exactly one token, same kind, spanning all of it.
     // This alone rejects kind flips (ident ⇒ keyword, whitespace ⇒ newline)
     // and splits (`=#` typed into a block comment).
-    let relexed = lex(&new_leaf);
+    let relexed = lex_for_options(options, &new_leaf);
     let [only] = relexed.as_slice() else {
         return None;
     };
@@ -444,7 +452,7 @@ fn try_splice_plain_token(
     let next_char = prev_text[t1..].chars().next().unwrap_or('\n');
     let mut probe = new_leaf.clone();
     probe.push(next_char);
-    let first = lex(&probe).into_iter().next()?;
+    let first = lex_for_options(options, &probe).into_iter().next()?;
     if first.end != new_leaf.len() || syntax_kind_for(first.kind) != token.kind() {
         return None;
     }
@@ -458,7 +466,7 @@ fn try_splice_plain_token(
         let mut probe = prev.text().to_string();
         let boundary = probe.len();
         probe.push_str(&new_leaf);
-        let relexed = lex(&probe);
+        let relexed = lex_for_options(options, &probe);
         let [a, b] = relexed.as_slice() else {
             return None;
         };
@@ -527,11 +535,12 @@ fn literal_token_ends(node: &SyntaxNode) -> Vec<(SyntaxKind, usize)> {
 /// names the index whose end — and every end after it — is expected to have
 /// moved by that delta.
 fn relex_matches(
+    options: ParseOptions,
     text: &str,
     expected: &[(SyntaxKind, usize)],
     grown: Option<(usize, isize)>,
 ) -> bool {
-    let tokens = lex(text);
+    let tokens = lex_for_options(options, text);
     if tokens.len() != expected.len() {
         return false;
     }
@@ -575,6 +584,7 @@ fn relex_matches(
 /// boundary moves. Diagnostics are byte offsets and do not care about lines.
 /// That is what puts Enter in a docstring on this tier.
 fn try_splice_string_content(
+    options: ParseOptions,
     prev_text: &str,
     prev_diags: &[ParseDiagnostic],
     edit: &Edit,
@@ -624,12 +634,12 @@ fn try_splice_string_content(
     }
 
     let old_node_text = &prev_text[n0..n1];
-    if !relex_matches(old_node_text, &expected, None) {
+    if !relex_matches(options, old_node_text, &expected, None) {
         return None;
     }
     let delta = edit.delta();
     let edited = edited_slice(old_node_text, n0, edit);
-    if !relex_matches(&edited, &expected, Some((leaf, delta))) {
+    if !relex_matches(options, &edited, &expected, Some((leaf, delta))) {
         return None;
     }
 
@@ -908,6 +918,7 @@ fn splice_diagnostics(
 /// folds, forward absorption by an unterminated block, and lexical fusion.
 /// Diagnostics splice last (see [`splice_diagnostics`]).
 fn reparse_toplevel(
+    options: ParseOptions,
     prev_text: &str,
     prev_green: &GreenNode,
     prev_diags: &[ParseDiagnostic],
@@ -915,10 +926,11 @@ fn reparse_toplevel(
     new_text: &str,
 ) -> Option<Reparsed> {
     let root = SyntaxNode::new_root(prev_green.clone());
-    reparse_statements(prev_text, prev_diags, edit, new_text, &root, None)
+    reparse_statements(options, prev_text, prev_diags, edit, new_text, &root, None)
 }
 
 fn reparse_block(
+    options: ParseOptions,
     prev_text: &str,
     prev_green: &GreenNode,
     prev_diags: &[ParseDiagnostic],
@@ -952,9 +964,15 @@ fn reparse_block(
     }
     for block in node.ancestors().filter(|n| n.kind() == SyntaxKind::BLOCK) {
         let owner = block.parent()?.kind();
-        if let Some(result) =
-            reparse_statements(prev_text, prev_diags, edit, new_text, &block, Some(owner))
-        {
+        if let Some(result) = reparse_statements(
+            options,
+            prev_text,
+            prev_diags,
+            edit,
+            new_text,
+            &block,
+            Some(owner),
+        ) {
             return Some(result);
         }
     }
@@ -964,7 +982,9 @@ fn reparse_block(
 /// Share seam and diagnostic checks between root statements and nested bodies.
 /// A nested run needs untouched statements on both sides: this keeps the owner
 /// header, clause terminators, and body-dependent signature flags unchanged.
+#[allow(clippy::too_many_arguments)]
 fn reparse_statements(
+    options: ParseOptions,
     prev_text: &str,
     prev_diags: &[ParseDiagnostic],
     edit: &Edit,
@@ -973,8 +993,8 @@ fn reparse_statements(
     owner: Option<SyntaxKind>,
 ) -> Option<Reparsed> {
     let parse_fragment = |text: &str| match owner {
-        Some(kind) => super::core::parse_block_fragment(text, kind),
-        None => Some(crate::parser::parse(text)),
+        Some(kind) => super::core::parse_block_fragment(text, kind, options),
+        None => Some(crate::parser::parse_with_options(text, options)),
     };
     let selection;
     let edit_region = if owner.is_some() {
@@ -1271,6 +1291,105 @@ fn reparse_statements(
     })
 }
 
+/// The parse options and source from which an incremental reparse starts.
+/// `green` and `diagnostics` must come from parsing `text` with `options`.
+#[derive(Clone, Copy)]
+pub struct ReparseBase<'a> {
+    pub text: &'a str,
+    pub green: &'a GreenNode,
+    pub diagnostics: &'a [ParseDiagnostic],
+    pub options: ParseOptions,
+}
+
+/// Incrementally reparse a tree produced with the default parsing options.
+pub fn reparse(
+    prev_text: &str,
+    prev_green: &GreenNode,
+    prev_diags: &[ParseDiagnostic],
+    edit: &Edit,
+    new_text: &str,
+) -> Option<Reparsed> {
+    let options = ParseOptions::default();
+    reparse_with_options(
+        ReparseBase {
+            text: prev_text,
+            green: prev_green,
+            diagnostics: prev_diags,
+            options,
+        },
+        edit,
+        new_text,
+        options,
+    )
+}
+
+/// Reparse under the selected edition, declining a base from another edition.
+pub fn reparse_with_options(
+    base: ReparseBase<'_>,
+    edit: &Edit,
+    new_text: &str,
+    options: ParseOptions,
+) -> Option<Reparsed> {
+    if base.options != options {
+        return None;
+    }
+    reparse_same_options(
+        options,
+        base.text,
+        base.green,
+        base.diagnostics,
+        edit,
+        new_text,
+    )
+}
+
+/// Replay edits against a tree produced with the default parsing options.
+pub fn reparse_edits(
+    prev_text: &str,
+    prev_green: &GreenNode,
+    prev_diags: &[ParseDiagnostic],
+    edits: &[Edit],
+    new_text: &str,
+) -> Option<Reparsed> {
+    let options = ParseOptions::default();
+    reparse_edits_with_options(
+        ReparseBase {
+            text: prev_text,
+            green: prev_green,
+            diagnostics: prev_diags,
+            options,
+        },
+        edits,
+        new_text,
+        options,
+    )
+}
+
+/// Replay an edit chain under the selected edition. Edition changes require a
+/// full parse, even when the source text has not changed.
+pub fn reparse_edits_with_options(
+    base: ReparseBase<'_>,
+    edits: &[Edit],
+    new_text: &str,
+    options: ParseOptions,
+) -> Option<Reparsed> {
+    if base.options != options {
+        return None;
+    }
+    reparse_edits_same_options(
+        options,
+        base.text,
+        base.green,
+        base.diagnostics,
+        edits,
+        new_text,
+    )
+}
+
+fn lex_for_options(options: ParseOptions, text: &str) -> Vec<super::lexer::Token<'_>> {
+    super::core::lex_for_options(text, options)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1408,7 +1527,16 @@ mod tests {
 
         let e = edit(12..13, "X");
         let new = e.apply(old);
-        assert!(try_splice_string_content(old, &parsed.diagnostics, &e, &token).is_none());
+        assert!(
+            try_splice_string_content(
+                ParseOptions::default(),
+                old,
+                &parsed.diagnostics,
+                &e,
+                &token
+            )
+            .is_none()
+        );
         // The statement tier may still answer it (the in-crate Tenet-4 assert
         // validates that splice); what matters is that the token tier declined.
         let tier = reparse(old, &green, &parsed.diagnostics, &e, &new).map(|r| r.tier);

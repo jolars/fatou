@@ -1,0 +1,98 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+assertion_line: 49
+expression: rendered
+---
+ROOT@0..114
+  MODULE_DEF@0..113
+    MODULE_KW@0..6 "module"
+    WHITESPACE@6..7 " "
+    SIGNATURE@7..8
+      NAME@7..8
+        IDENT@7..8 "A"
+    BLOCK@8..110
+      NEWLINE@8..9 "\n"
+      TYPEGROUP_DEF@9..35
+        IDENT@9..18 "typegroup"
+        BLOCK@18..32
+          NEWLINE@18..19 "\n"
+          STRUCT_DEF@19..31
+            STRUCT_KW@19..25 "struct"
+            WHITESPACE@25..26 " "
+            SIGNATURE@26..27
+              NAME@26..27
+                IDENT@26..27 "B"
+            BLOCK@27..28
+              WHITESPACE@27..28 " "
+            END_KW@28..31 "end"
+          NEWLINE@31..32 "\n"
+        END_KW@32..35 "end"
+      NEWLINE@35..36 "\n"
+      INDEX_EXPR@36..49
+        NAME@36..37
+          IDENT@36..37 "a"
+        ARG_LIST@37..49
+          LBRACKET@37..38 "["
+          ARG@38..48
+            RETURN_EXPR@38..48
+              RETURN_KW@38..44 "return"
+              WHITESPACE@44..45 " "
+              END_MARKER@45..48
+                END_KW@45..48 "end"
+          RBRACKET@48..49 "]"
+      NEWLINE@49..50 "\n"
+      TERNARY_EXPR@50..64
+        NAME@50..51
+          IDENT@50..51 "x"
+        WHITESPACE@51..52 " "
+        QUESTION@52..53 "?"
+        WHITESPACE@53..54 " "
+        RETURN_EXPR@54..60
+          RETURN_KW@54..60 "return"
+        WHITESPACE@60..61 " "
+        COLON@61..62 ":"
+        WHITESPACE@62..63 " "
+        NAME@63..64
+          IDENT@63..64 "y"
+      NEWLINE@64..65 "\n"
+      PAREN_EXPR@65..87
+        LPAREN@65..66 "("
+        MACRO_CALL@66..86
+          MACRO_NAME@66..71
+            AT@66..67 "@"
+            IDENT@67..71 "info"
+          WHITESPACE@71..72 " "
+          STRING_LITERAL@72..81
+            STRING_DELIM_OPEN@72..73 "\""
+            STRING_CONTENT@73..80 "message"
+            STRING_DELIM_CLOSE@80..81 "\""
+          NEWLINE@81..82 "\n"
+          WHITESPACE@82..83 " "
+          ASSIGNMENT_EXPR@83..86
+            NAME@83..84
+              IDENT@83..84 "x"
+            EQ@84..85 "="
+            LITERAL@85..86
+              INTEGER@85..86 "1"
+        RPAREN@86..87 ")"
+      NEWLINE@87..88 "\n"
+      BREAK_EXPR@88..101
+        BREAK_KW@88..93 "break"
+        WHITESPACE@93..94 " "
+        NAME@94..99
+          IDENT@94..99 "outer"
+        WHITESPACE@99..100 " "
+        LITERAL@100..101
+          INTEGER@100..101 "1"
+      NEWLINE@101..102 "\n"
+      ASSIGNMENT_EXPR@102..109
+        NAME@102..103
+          IDENT@102..103 "x"
+        WHITESPACE@103..104 " "
+        PLUS_PERCENT_EQ@104..107 "+%="
+        WHITESPACE@107..108 " "
+        LITERAL@108..109
+          INTEGER@108..109 "1"
+      NEWLINE@109..110 "\n"
+    END_KW@110..113 "end"
+  NEWLINE@113..114 "\n"

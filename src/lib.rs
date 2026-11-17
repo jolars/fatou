@@ -12,6 +12,7 @@ pub mod index;
 pub mod julia_version;
 pub mod linter;
 pub mod lsp;
+pub mod parse_context;
 pub mod project;
 pub mod project_files;
 mod registry;

@@ -190,7 +190,15 @@ impl ScriptFile {
     }
 
     pub fn parse(path: &Path, text: &str) -> Self {
-        let parsed = crate::parser::parse(text);
+        Self::parse_with_options(path, text, crate::parser::ParseOptions::default())
+    }
+
+    pub fn parse_with_options(
+        path: &Path,
+        text: &str,
+        options: crate::parser::ParseOptions,
+    ) -> Self {
+        let parsed = crate::parser::parse_with_options(text, options);
         Self::project(
             &parsed.cst,
             &SemanticModel::build(&parsed.cst),
@@ -211,6 +219,7 @@ pub(crate) enum ScriptFileState {
 /// One program's globals. Membership deliberately includes the host module.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScriptProgram {
+    pub parse_options: crate::parser::ParseOptions,
     pub entry: PathBuf,
     pub modules: BTreeMap<ModulePath, ScriptModule>,
     pub members: BTreeMap<PathBuf, BTreeSet<ModulePath>>,
@@ -224,6 +233,11 @@ pub struct ScriptProgram {
 }
 
 impl ScriptProgram {
+    pub fn with_parse_options(mut self, options: crate::parser::ParseOptions) -> Self {
+        self.parse_options = options;
+        self
+    }
+
     /// Build from known projections. An absent projection leaves analysis
     /// incomplete, without asserting that a filesystem read has failed.
     pub fn build(entry: &Path, mut file: impl FnMut(&Path) -> Option<Arc<ScriptFile>>) -> Self {
@@ -423,27 +437,83 @@ impl ScriptAnalysis {
             })
     }
 
-    pub fn from_sources(entries: &[PathBuf], sources: &ScriptSources) -> Self {
-        let files: BTreeMap<_, _> = sources
+    pub fn from_catalog(
+        entries: &[PathBuf],
+        catalog: &crate::parse_context::ContextCatalog,
+    ) -> Self {
+        let contexts: Vec<_> = entries
             .iter()
-            .map(|(path, text)| {
-                let state = match text {
-                    Ok(text) => ScriptFileState::Available(Arc::new(ScriptFile::parse(path, text))),
-                    Err(_) => ScriptFileState::Failed,
-                };
-                (path.clone(), state)
+            .map(|entry| {
+                let entry = normalize_path(entry);
+                let options = catalog
+                    .selections(&entry)
+                    .iter()
+                    .find(|(context, _)| context.entry == entry)
+                    .or_else(|| catalog.selections(&entry).first())
+                    .map(|(_, selection)| selection.options)
+                    .unwrap_or_default();
+                (entry, options)
             })
             .collect();
+        Self::from_sources_with_options(&contexts, &catalog.sources)
+    }
+
+    pub fn from_sources(entries: &[PathBuf], sources: &ScriptSources) -> Self {
+        Self::from_sources_with_options(
+            &entries
+                .iter()
+                .cloned()
+                .map(|entry| (entry, crate::parser::ParseOptions::default()))
+                .collect::<Vec<_>>(),
+            sources,
+        )
+    }
+
+    pub fn from_sources_with_options(
+        entries: &[(PathBuf, crate::parser::ParseOptions)],
+        sources: &ScriptSources,
+    ) -> Self {
+        let mut files = BTreeMap::new();
+        for (_, options) in entries {
+            for (path, text) in sources {
+                files
+                    .entry((path.clone(), *options))
+                    .or_insert_with(|| match text {
+                        Ok(text) => ScriptFileState::Available(Arc::new(
+                            ScriptFile::parse_with_options(path, text, *options),
+                        )),
+                        Err(_) => ScriptFileState::Failed,
+                    });
+            }
+        }
         Self {
             programs: entries
                 .iter()
-                .map(|entry| {
-                    Arc::new(ScriptProgram::build_with_availability(entry, |path| {
-                        files.get(path).cloned().unwrap_or(ScriptFileState::Pending)
-                    }))
+                .map(|(entry, options)| {
+                    Arc::new(
+                        ScriptProgram::build_with_availability(entry, |path| {
+                            files
+                                .get(&(path.to_path_buf(), *options))
+                                .cloned()
+                                .unwrap_or(ScriptFileState::Pending)
+                        })
+                        .with_parse_options(*options),
+                    )
                 })
                 .collect(),
             pending: false,
+        }
+    }
+
+    pub fn for_options(&self, options: crate::parser::ParseOptions) -> Self {
+        Self {
+            programs: self
+                .programs
+                .iter()
+                .filter(|program| program.parse_options == options)
+                .cloned()
+                .collect(),
+            pending: self.pending,
         }
     }
 }

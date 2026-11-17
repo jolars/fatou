@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fatou_parser::parser::{parse, reconstruct};
+use fatou_parser::parser::{ParseOptions, parse, parse_with_options, reconstruct};
 
 fn fixture_cases() -> Vec<PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/parser");
@@ -24,13 +24,17 @@ fn parser_fixtures() {
         let name = case.file_name().unwrap().to_string_lossy().to_string();
         let input = fs::read_to_string(case.join("input.jl")).expect("read input.jl");
 
+        let options = fs::read_to_string(case.join("edition.txt"))
+            .map(|v| ParseOptions {
+                syntax_edition: v.trim().parse().unwrap(),
+            })
+            .unwrap_or_default();
+        let output = parse_with_options(&input, options);
         assert_eq!(
-            reconstruct(&input),
+            output.cst.text().to_string(),
             input,
             "losslessness failed for `{name}`"
         );
-
-        let output = parse(&input);
         let mut rendered = format!("{:#?}", output.cst);
         // Rust's Unicode tables change which new characters Debug escapes.
         // Normalize this fixture so snapshots also work on older toolchains.
@@ -515,5 +519,24 @@ fn labeled_keyword_break_values_keep_boundaries() {
             "{input}",
         );
         assert_eq!(reconstruct(input), input);
+    }
+}
+
+#[test]
+fn bare_return_leaves_the_array_separator() {
+    use fatou_parser::parser::SyntaxEdition;
+    use fatou_parser::parser::to_juliasyntax_sexpr;
+
+    let input = "f() = [return, 1]";
+    for syntax_edition in [
+        SyntaxEdition::Julia113,
+        SyntaxEdition::Julia114,
+        SyntaxEdition::Julia115,
+    ] {
+        let parsed = parse_with_options(input, ParseOptions { syntax_edition });
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        assert!(
+            to_juliasyntax_sexpr(&parsed.cst, &parsed.diagnostics).contains("(vect (return) 1)")
+        );
     }
 }

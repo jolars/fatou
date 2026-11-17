@@ -883,9 +883,9 @@ fn version_compat_runtime_target_is_independent_of_syntax_edition() {
     .unwrap();
 
     for (compat, edition, expected) in [
-        (Some("1.13"), "1.14", 1),
-        (Some("1.14"), "1.13", 0),
-        (None, "1.14", 0),
+        (Some("1.13"), "1.14", Some("julia-version-compat")),
+        (Some("1.14"), "1.13", Some("parse-error")),
+        (None, "1.14", None),
     ] {
         let mut project = format!("[syntax]\njulia_version = '{edition}'\n");
         if let Some(compat) = compat {
@@ -899,13 +899,17 @@ fn version_compat_runtime_target_is_independent_of_syntax_edition() {
         );
         assert_eq!(
             output.status.code(),
-            Some(if expected == 0 { 0 } else { 1 }),
+            Some(if expected.is_none() { 0 } else { 1 }),
             "{output:?}"
         );
         let diagnostics: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(diagnostics.len(), expected, "{diagnostics:?}");
-        if expected != 0 {
-            assert_eq!(diagnostics[0]["rule"], "julia-version-compat");
+        assert_eq!(
+            diagnostics.len(),
+            usize::from(expected.is_some()),
+            "{diagnostics:?}"
+        );
+        if let Some(rule) = expected {
+            assert_eq!(diagnostics[0]["rule"], rule);
         }
     }
 }

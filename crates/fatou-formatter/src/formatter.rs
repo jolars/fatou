@@ -15,7 +15,9 @@ pub mod rules;
 pub mod style;
 
 pub use core::{
-    FormatError, RangeFormatted, VerifiedFormatError, format, format_node, format_range,
-    format_verified, format_verified_with_style, format_with_style, print_document,
+    FormatError, FormatOptions, RangeFormatted, VerifiedFormatError, format, format_node,
+    format_node_with_options, format_range, format_range_with_options, format_verified,
+    format_verified_with_options, format_verified_with_style, format_with_options,
+    format_with_style, print_document,
 };
 pub use style::{FormatStyle, LineEnding};

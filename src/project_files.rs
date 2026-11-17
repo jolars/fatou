@@ -33,9 +33,10 @@ use toml::Spanned;
 
 use crate::environment::{
     Environment, EnvironmentError, PackageKind, ProjectFile, Uuid, is_project_file,
-    manifest_path_entries, parse_project_str, parse_project_text,
+    manifest_path_entries, parse_manifest_table, parse_project_str, parse_project_text,
 };
 use crate::linter::Severity;
+use crate::parse_context::{SourceRole, manifest_issues, project_edition_from_metadata};
 
 /// One project-file finding, anchored to a byte range in a named file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,24 +57,36 @@ pub struct ProjectFinding {
 ///
 /// The file name picks the schema: a project file is read against the typed
 /// `ProjectFile`, so a wrong-typed `name` is caught alongside a malformed
-/// table; a manifest is read against a plain table, since nothing anchors
-/// inside a manifest beyond its syntax.
+/// table. A manifest uses a spanned table for both supported layouts.
 pub fn syntax_findings(path: &Path, text: &str) -> Vec<ProjectFinding> {
-    let parsed = if is_project_file(path) {
-        parse_project_text(path, text).map(|_| ())
+    let issues = if is_project_file(path) {
+        parse_project_text(path, text).map(|project| {
+            project_edition_from_metadata(path, &project, SourceRole::Package)
+                .issue
+                .into_iter()
+                .collect()
+        })
     } else {
-        toml::from_str::<toml::Table>(text)
-            .map(|_| ())
-            .map_err(|err| EnvironmentError::Parse {
-                path: path.to_path_buf(),
-                message: err.message().to_string(),
-                span: err.span(),
-            })
+        parse_manifest_table(path, text).map(|table| manifest_issues(path, table.get_ref()))
     };
-    let Err(error) = parsed else {
-        return Vec::new();
+    let issues = match issues {
+        Ok(issues) => issues,
+        Err(error) => return vec![syntax_finding(path, text, &error)],
     };
-    vec![syntax_finding(path, text, &error)]
+    issues
+        .into_iter()
+        .map(|issue| ProjectFinding {
+            check: "syntax-edition",
+            severity: Severity::Error,
+            path: issue.path,
+            range: if issue.range.is_empty() {
+                first_line(text)
+            } else {
+                to_range(issue.range.start, issue.range.end)
+            },
+            message: issue.message,
+        })
+        .collect()
 }
 
 /// Turn a read or parse failure into the finding that reports it. Public so the

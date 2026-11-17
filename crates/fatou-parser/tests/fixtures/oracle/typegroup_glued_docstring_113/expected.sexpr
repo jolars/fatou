@@ -1,0 +1,1 @@
+(toplevel (error (typegroup (block (doc (string-s "doc") (struct T (block)))))))

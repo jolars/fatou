@@ -75,6 +75,48 @@ uuid = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
 version = "0.4.5"
 "#;
 
+#[test]
+fn malformed_syntax_metadata_keeps_the_project_and_manifest() {
+    let dir = TempDir::new();
+    let project = dir.path().join("Project.toml");
+    let manifest = dir.path().join("Manifest.toml");
+    for syntax in [
+        "syntax = false\n",
+        "[syntax]\n",
+        "[syntax]\njulia_version = 14\n",
+    ] {
+        let text = "name = 'Foo'\nuuid = '00000000-0000-0000-0000-000000000001'\n\
+                    [deps]\nAbstractTrees = '1520ce14-60c1-5f80-bbc7-55ef81b5835c'\n";
+        // A scalar declaration belongs to the top level.
+        let text = if syntax.starts_with("syntax ") {
+            format!("{syntax}{text}")
+        } else {
+            format!("{text}{syntax}")
+        };
+        write(&project, &text);
+        write(&dir.path().join("src/Foo.jl"), "module Foo end\n");
+        write(&manifest, ABSTRACT_TREES_MANIFEST);
+
+        let env = environment::resolve(&bare_ctx(dir.path().to_path_buf()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(env.dev_package().unwrap().name, "Foo");
+        assert!(env.declared_deps.contains("AbstractTrees"));
+        assert_eq!(env.manifest_file.as_deref(), Some(manifest.as_path()));
+        assert_eq!(env.packages[0].name, "AbstractTrees");
+
+        let findings = fatou::project_files::syntax_findings(&project, &text);
+        assert_eq!(findings.len(), 1, "{syntax:?}");
+        assert_eq!(findings[0].check, "syntax-edition");
+        if syntax.ends_with("14\n") {
+            assert_eq!(
+                &text[std::ops::Range::<usize>::from(findings[0].range)],
+                "14"
+            );
+        }
+    }
+}
+
 /// Lay out `<depot>/packages/AbstractTrees/Ftf8W/src/` so the registered
 /// package resolves to a real directory.
 fn make_abstract_trees_depot(depot: &Path) {

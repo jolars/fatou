@@ -16,7 +16,7 @@ use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 use crate::environment::{Environment, EnvironmentError};
 use crate::linter::Severity;
 use crate::project_files::{self, ProjectFinding};
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 /// Every finding of one resolve pass, grouped by the file it attaches to. A
 /// file with no findings is absent rather than mapped to an empty vector; the
@@ -54,15 +54,11 @@ pub(crate) fn environment_diagnostics(
 /// sit on the main loop at all.
 pub(crate) fn buffer_diagnostics(
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Vec<Diagnostic> {
-    let findings = project_files::syntax_findings(path, text);
-    if findings.is_empty() {
-        return Vec::new();
-    }
-    let line_index = LineIndex::new(text);
-    findings
+    let line_index = text.line_index();
+    project_files::syntax_findings(path, text.text())
         .iter()
         .map(|finding| to_lsp(finding, &line_index, encoding))
         .collect()
@@ -173,8 +169,8 @@ mod tests {
     #[test]
     fn the_buffer_route_reports_syntax_alone() {
         let path = PathBuf::from("/work/Project.toml");
-        let diags =
-            buffer_diagnostics(&path, "name = \"Demo\"\nuuid = \n", PositionEncoding::Utf16);
+        let text = TextBuffer::new("name = \"Demo\"\nuuid = \n");
+        let diags = buffer_diagnostics(&path, &text, PositionEncoding::Utf16);
         let [diag] = &diags[..] else {
             panic!("expected one diagnostic, got {diags:?}");
         };
@@ -189,7 +185,9 @@ mod tests {
         assert!(
             buffer_diagnostics(
                 &path,
-                "name = \"Demo\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+                &TextBuffer::new(
+                    "name = \"Demo\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n"
+                ),
                 PositionEncoding::Utf16,
             )
             .is_empty()

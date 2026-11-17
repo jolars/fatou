@@ -29,9 +29,11 @@ use std::path::Path;
 use lsp_types::{Position, PrepareRenameResponse, Range, TextEdit, Uri, WorkspaceEdit};
 use rowan::{TextRange, TextSize};
 
-use crate::incremental::Analysis;
+use crate::incremental::{Analysis, SourceFile};
+#[cfg(test)]
 use crate::parser::parse;
-use crate::resolve::Resolver;
+use crate::parser::{ParseOptions, parse_with_options};
+use crate::resolve::{OccurrenceKey, Resolver};
 use crate::semantic::{BindingId, SemanticModel};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
@@ -46,7 +48,16 @@ pub fn compute_prepare_rename(
     position: Position,
     encoding: PositionEncoding,
 ) -> Option<PrepareRenameResponse> {
-    let model = SemanticModel::build(&parse(text).cst);
+    compute_prepare_rename_with_options(text, position, encoding, ParseOptions::default())
+}
+
+pub fn compute_prepare_rename_with_options(
+    text: &str,
+    position: Position,
+    encoding: PositionEncoding,
+    options: ParseOptions,
+) -> Option<PrepareRenameResponse> {
+    let model = SemanticModel::build(&parse_with_options(text, options).cst);
     let line_index = LineIndex::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     prepare_for(&model, &line_index, offset, encoding)
@@ -63,8 +74,26 @@ pub fn compute_rename(
     new_name: &str,
     encoding: PositionEncoding,
 ) -> Result<Option<WorkspaceEdit>, String> {
+    compute_rename_with_options(
+        uri,
+        text,
+        position,
+        new_name,
+        encoding,
+        ParseOptions::default(),
+    )
+}
+
+pub fn compute_rename_with_options(
+    uri: &Uri,
+    text: &str,
+    position: Position,
+    new_name: &str,
+    encoding: PositionEncoding,
+    options: ParseOptions,
+) -> Result<Option<WorkspaceEdit>, String> {
     validate_new_name(new_name)?;
-    let model = SemanticModel::build(&parse(text).cst);
+    let model = SemanticModel::build(&parse_with_options(text, options).cst);
     let line_index = LineIndex::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     Ok(rename_for(
@@ -116,13 +145,23 @@ pub(crate) fn prepare_rename_via_db(
     }));
     match cached {
         Ok(Some(result)) => result,
-        Ok(None) | Err(_) => compute_prepare_rename(text, position, encoding),
+        Ok(None) | Err(_) => compute_prepare_rename_with_options(
+            text,
+            position,
+            encoding,
+            snapshot.options_for_path(path),
+        ),
     }
 }
 
-/// Compute the rename edit off the snapshot's cached parse when the tracked
-/// buffer still matches `text`; otherwise re-parse. Mirrors
-/// [`prepare_rename_via_db`].
+#[derive(Debug)]
+pub(crate) enum RenameError {
+    InvalidName(String),
+    BindingConflict,
+}
+
+/// Compute the rename edit from the snapshot's cached parse if its text still
+/// matches the buffer. Otherwise, fall back to a fresh parse.
 pub(crate) fn rename_via_db(
     snapshot: &Analysis,
     uri: &Uri,
@@ -131,8 +170,8 @@ pub(crate) fn rename_via_db(
     position: Position,
     new_name: &str,
     encoding: PositionEncoding,
-) -> Result<Option<WorkspaceEdit>, String> {
-    validate_new_name(new_name)?;
+) -> Result<Option<WorkspaceEdit>, RenameError> {
+    validate_new_name(new_name).map_err(RenameError::InvalidName)?;
     let line_index = text.line_index();
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
@@ -148,7 +187,7 @@ pub(crate) fn rename_via_db(
         // file wins; an empty one (member set not seeded yet) falls through.
         if let Some(symbol) = resolver.workspace_symbol_at(offset) {
             if !resolver.can_rename_workspace_symbol(&symbol) {
-                return Some(None);
+                return Some(Ok(None));
             }
             let edit = cross_file_rename(snapshot, &symbol, new_name, encoding);
             if edit
@@ -156,22 +195,101 @@ pub(crate) fn rename_via_db(
                 .as_ref()
                 .is_some_and(|changes| !changes.is_empty())
             {
-                return Some(Some(edit));
+                return Some(if workspace_bindings_agree(snapshot, &symbol) {
+                    Ok(Some(edit))
+                } else {
+                    Err(RenameError::BindingConflict)
+                });
             }
         }
-        Some(rename_for(
-            model,
-            uri,
-            &line_index,
-            offset,
-            new_name,
-            encoding,
-        ))
+        let edit = rename_for(model, uri, &line_index, offset, new_name, encoding);
+        Some(
+            if edit.is_some() && !local_bindings_agree(snapshot, file, model, offset) {
+                Err(RenameError::BindingConflict)
+            } else {
+                Ok(edit)
+            },
+        )
     }));
     match cached {
-        Ok(Some(result)) => Ok(result),
-        Ok(None) | Err(_) => compute_rename(uri, text, position, new_name, encoding),
+        Ok(Some(result)) => result,
+        Ok(None) | Err(_) => compute_rename_with_options(
+            uri,
+            text,
+            position,
+            new_name,
+            encoding,
+            snapshot.options_for_path(path),
+        )
+        .map_err(RenameError::InvalidName),
     }
+}
+
+/// Check the exact occurrences we propose to edit against the resolver in
+/// every context of their own file, including contexts that do not load the
+/// file where the rename was requested.
+fn workspace_bindings_agree(snapshot: &Analysis, symbol: &OccurrenceKey) -> bool {
+    let index = snapshot.workspace_reference_index();
+    index.0[symbol]
+        .chunk_by(|(a, _), (b, _)| a == b)
+        .all(|records| {
+            let file = records[0].0;
+            snapshot
+                .source_editions(file)
+                .iter()
+                .all(|(context, selected)| {
+                    if !selected.certain {
+                        return false;
+                    }
+                    if snapshot.context() == Some(context) {
+                        return true;
+                    }
+                    let Some(path) = snapshot.file_path_of(file) else {
+                        return false;
+                    };
+                    let view = snapshot.with_context(context.clone(), selected.options);
+                    let model = view.semantic_model(file);
+                    let occurrences = Resolver::new(model, &view)
+                        .with_workspace(view.workspace_member(&path))
+                        .workspace_occurrences();
+                    occurrences.get(symbol).is_some_and(|sites| {
+                        records.iter().all(|(_, record)| {
+                            sites.iter().any(|site| {
+                                site.range == record.range && site.is_def == record.is_def
+                            })
+                        })
+                    })
+                })
+        })
+}
+
+fn local_bindings_agree(
+    snapshot: &Analysis,
+    file: SourceFile,
+    model: &SemanticModel,
+    offset: TextSize,
+) -> bool {
+    let contexts = snapshot.source_editions(file);
+    if contexts.len() <= 1 {
+        return contexts.iter().all(|(_, selected)| selected.certain);
+    }
+    let Some((binding, _)) = binding_and_range_at(model, offset) else {
+        return false;
+    };
+    let original = model.binding(binding);
+    let global = model.scope(original.scope).kind.is_global();
+    let entry = &contexts[0].0.entry;
+    contexts.iter().all(|(context, selected)| {
+        if !selected.certain || (global && context.entry != *entry) {
+            return false;
+        }
+        let view = snapshot.with_options(selected.options);
+        let other = view.semantic_model(file);
+        binding_and_range_at(other, offset).is_some_and(|(binding, _)| {
+            let candidate = other.binding(binding);
+            candidate.def_range == original.def_range && candidate.kind == original.kind
+        })
+    })
 }
 
 /// The multi-file workspace edit renaming a workspace symbol: every occurrence

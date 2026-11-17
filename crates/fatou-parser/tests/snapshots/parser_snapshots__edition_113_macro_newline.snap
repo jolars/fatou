@@ -1,0 +1,27 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+assertion_line: 49
+expression: rendered
+---
+ROOT@0..23
+  PAREN_EXPR@0..22
+    LPAREN@0..1 "("
+    MACRO_CALL@1..16
+      MACRO_NAME@1..6
+        AT@1..2 "@"
+        IDENT@2..6 "info"
+      WHITESPACE@6..7 " "
+      STRING_LITERAL@7..16
+        STRING_DELIM_OPEN@7..8 "\""
+        STRING_CONTENT@8..15 "message"
+        STRING_DELIM_CLOSE@15..16 "\""
+    NEWLINE@16..17 "\n"
+    WHITESPACE@17..18 " "
+    ERROR@18..21
+      IDENT@18..19 "x"
+      EQ@19..20 "="
+      INTEGER@20..21 "1"
+    RPAREN@21..22 ")"
+  NEWLINE@22..23 "\n"
+
+diagnostic [18..19]: expected a closing delimiter or separator

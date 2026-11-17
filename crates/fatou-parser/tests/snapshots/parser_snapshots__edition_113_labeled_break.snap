@@ -1,0 +1,17 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+assertion_line: 49
+expression: rendered
+---
+ROOT@0..13
+  ERROR@0..13
+    BREAK_EXPR@0..13
+      BREAK_KW@0..5 "break"
+      WHITESPACE@5..6 " "
+      ERROR@6..13
+        IDENT@6..11 "outer"
+        WHITESPACE@11..12 " "
+        INTEGER@12..13 "1"
+
+diagnostic [6..11]: unexpected token after `break`
+diagnostic [13..13]: premature end of input

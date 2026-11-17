@@ -1,0 +1,76 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..101
+  ASSIGNMENT_EXPR@0..13
+    NAME@0..9
+      IDENT@0..9 "typegroup"
+    WHITESPACE@9..10 " "
+    EQ@10..11 "="
+    WHITESPACE@11..12 " "
+    LITERAL@12..13
+      INTEGER@12..13 "1"
+  NEWLINE@13..14 "\n"
+  MACRO_CALL@14..26
+    MACRO_NAME@14..16
+      AT@14..15 "@"
+      IDENT@15..16 "m"
+    WHITESPACE@16..17 " "
+    NAME@17..26
+      IDENT@17..26 "typegroup"
+  NEWLINE@26..27 "\n"
+  MACRO_CALL@27..53
+    MACRO_NAME@27..29
+      AT@27..28 "@"
+      IDENT@28..29 "m"
+    WHITESPACE@29..30 " "
+    ERROR@30..53
+      TYPEGROUP_DEF@30..53
+        IDENT@30..39 "typegroup"
+        BLOCK@39..50
+          WHITESPACE@39..40 " "
+          STRING_LITERAL@40..49
+            STRING_DELIM_OPEN@40..43 "\"\"\""
+            STRING_CONTENT@43..46 "doc"
+            STRING_DELIM_CLOSE@46..49 "\"\"\""
+          WHITESPACE@49..50 " "
+        END_KW@50..53 "end"
+  NEWLINE@53..54 "\n"
+  ERROR@54..80
+    TYPEGROUP_DEF@54..80
+      IDENT@54..63 "typegroup"
+      BLOCK@63..77
+        WHITESPACE@63..64 " "
+        STRUCT_DEF@64..76
+          STRUCT_KW@64..70 "struct"
+          WHITESPACE@70..71 " "
+          SIGNATURE@71..72
+            NAME@71..72
+              IDENT@71..72 "A"
+          BLOCK@72..73
+            WHITESPACE@72..73 " "
+          END_KW@73..76 "end"
+        WHITESPACE@76..77 " "
+      END_KW@77..80 "end"
+  NEWLINE@80..81 "\n"
+  MACRO_CALL@81..101
+    MACRO_NAME@81..83
+      AT@81..82 "@"
+      IDENT@82..83 "m"
+    WHITESPACE@83..84 " "
+    ERROR@84..101
+      TYPEGROUP_DEF@84..101
+        IDENT@84..93 "typegroup"
+        BLOCK@93..101
+          WHITESPACE@93..94 " "
+          STRING_LITERAL@94..100
+            STRING_DELIM_OPEN@94..95 "\""
+            STRING_CONTENT@95..99 "text"
+            STRING_DELIM_CLOSE@99..100 "\""
+          NEWLINE@100..101 "\n"
+
+diagnostic [30..39]: `typegroup` blocks require Julia syntax edition 1.14
+diagnostic [54..63]: `typegroup` blocks require Julia syntax edition 1.14
+diagnostic [84..93]: `typegroup` blocks require Julia syntax edition 1.14
+diagnostic [84..93]: expected `end`

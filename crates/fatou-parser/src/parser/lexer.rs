@@ -661,11 +661,18 @@ impl<'a> Lexer<'a> {
 
     fn lex_ident_or_keyword(&mut self, start: usize) {
         self.scan_ident();
+        let text = &self.input[start..self.pos];
+        let keyword = keyword_kind(text);
         // Non-standard literal: an identifier immediately before `"`/`` ` `` with
         // no intervening whitespace is a prefix (`r"..."`, `raw"..."`, `` v`...` ``).
-        // Keywords are never prefixes.
-        if matches!(self.peek(0), Some(b'"' | b'`'))
-            && keyword_kind(&self.input[start..self.pos]).is_none()
+        // A quote after contextual `typegroup` starts an ordinary string in
+        // the block body, even when the parser reports an edition error.
+        if keyword.is_none()
+            && match self.peek(0) {
+                Some(b'"') => text != "typegroup",
+                Some(b'`') => true,
+                _ => false,
+            }
         {
             self.push(TokKind::StringPrefix, start, self.pos);
             let open = self.pos;
@@ -676,9 +683,7 @@ impl<'a> Lexer<'a> {
             }
             return;
         }
-        let text = &self.input[start..self.pos];
-        let kind = keyword_kind(text).unwrap_or(TokKind::Ident);
-        self.push(kind, start, self.pos);
+        self.push(keyword.unwrap_or(TokKind::Ident), start, self.pos);
     }
 
     /// Lex a bare `$ident` interpolation operand. Unlike [`Self::lex_ident_or_keyword`]

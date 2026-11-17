@@ -1,8 +1,9 @@
 ---
-source: tests/parser_snapshots.rs
+source: crates/fatou-parser/tests/parser_snapshots.rs
+assertion_line: 49
 expression: rendered
 ---
-ROOT@0..365
+ROOT@0..324
   TYPEGROUP_DEF@0..146
     IDENT@0..9 "typegroup"
     BLOCK@9..143
@@ -154,31 +155,3 @@ ROOT@0..365
       NEWLINE@319..320 "\n"
     END_KW@320..323 "end"
   NEWLINE@323..324 "\n"
-  ASSIGNMENT_EXPR@324..337
-    NAME@324..333
-      IDENT@324..333 "typegroup"
-    WHITESPACE@333..334 " "
-    EQ@334..335 "="
-    WHITESPACE@335..336 " "
-    LITERAL@336..337
-      INTEGER@336..337 "1"
-  NEWLINE@337..338 "\n"
-  CALL_EXPR@338..350
-    NAME@338..347
-      IDENT@338..347 "typegroup"
-    ARG_LIST@347..350
-      LPAREN@347..348 "("
-      ARG@348..349
-        NAME@348..349
-          IDENT@348..349 "x"
-      RPAREN@349..350 ")"
-  NEWLINE@350..351 "\n"
-  ASSIGNMENT_EXPR@351..364
-    NAME@351..352
-      IDENT@351..352 "x"
-    WHITESPACE@352..353 " "
-    EQ@353..354 "="
-    WHITESPACE@354..355 " "
-    NAME@355..364
-      IDENT@355..364 "typegroup"
-  NEWLINE@364..365 "\n"

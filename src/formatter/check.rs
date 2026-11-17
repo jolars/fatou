@@ -81,7 +81,7 @@ pub fn check_paths(
     style: FormatStyle,
     exclude: &ExcludeFilter,
 ) -> Result<CheckResult, CheckError> {
-    check_paths_impl(paths, style, exclude, false)
+    check_paths_impl(paths, style, exclude, false, None)
 }
 
 /// The verified counterpart of [`check_paths`]. Every prospective output is
@@ -91,7 +91,17 @@ pub fn check_paths_verified(
     style: FormatStyle,
     exclude: &ExcludeFilter,
 ) -> Result<CheckResult, CheckError> {
-    check_paths_impl(paths, style, exclude, true)
+    check_paths_impl(paths, style, exclude, true, None)
+}
+
+pub fn check_paths_in_contexts(
+    paths: &[PathBuf],
+    style: FormatStyle,
+    exclude: &ExcludeFilter,
+    verified: bool,
+    contexts: &crate::parse_context::ContextCatalog,
+) -> Result<CheckResult, CheckError> {
+    check_paths_impl(paths, style, exclude, verified, Some(contexts))
 }
 
 fn check_paths_impl(
@@ -99,6 +109,7 @@ fn check_paths_impl(
     style: FormatStyle,
     exclude: &ExcludeFilter,
     verified: bool,
+    contexts: Option<&crate::parse_context::ContextCatalog>,
 ) -> Result<CheckResult, CheckError> {
     let files = collect_julia_files(paths, exclude).map_err(CheckError::Discovery)?;
 
@@ -109,7 +120,18 @@ fn check_paths_impl(
             path: path.clone(),
             message: err.to_string(),
         })?;
-        let formatted = if verified {
+        let formatted = if let Some(contexts) = contexts {
+            crate::parse_context::format_source(
+                &original,
+                style,
+                verified,
+                contexts.selections(path),
+            )
+            .map_err(|message| CheckError::Format {
+                path: path.clone(),
+                error: FormatError::Unsupported(message),
+            })?
+        } else if verified {
             format_verified_with_style(&original, style).map_err(|error| {
                 CheckError::VerifiedFormat {
                     path: path.clone(),

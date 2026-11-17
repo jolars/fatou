@@ -10,10 +10,11 @@
 //! pending, canceled only when superseded by a strictly-newer edit of the
 //! *same* URI.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::JoinHandle;
 
 use crossbeam_channel::{Receiver, Sender, select};
@@ -23,12 +24,11 @@ use salsa::Database as _;
 use crate::environment::is_project_file;
 use crate::incremental::{IncrementalDatabase, IncrementalDb};
 use crate::index::{DeclaredDeps, HarvestedLibrary, PackageIndex};
-use crate::parser::Edit;
+use crate::parser::{Edit, ParseOptions};
 use crate::text::{PositionEncoding, TextBuffer};
 
-use super::format::parse_diagnostics_to_lsp;
 use super::graph_diagnostics::{GraphSource, graph_diagnostics};
-use super::lint::{ServerRules, lint_diagnostics_via_db};
+use super::lint::ServerRules;
 use super::read_jobs::{ReadJob, run_read};
 use super::rename_files::renamed_package_projects;
 use super::script_projects::{Loaded, ScriptProjects};
@@ -63,6 +63,7 @@ pub(crate) fn guard(label: &str, f: impl FnOnce()) -> bool {
 /// An analysis request handed to the dedicated analysis thread: refresh the
 /// diagnostics for `uri`'s live buffer at `version`.
 pub(crate) struct AnalysisRequest {
+    pub(crate) context_epoch: u64,
     pub(crate) uri: Uri,
     pub(crate) path: PathBuf,
     pub(crate) text: Arc<TextBuffer>,
@@ -76,10 +77,12 @@ pub(crate) struct AnalysisRequest {
     pub(crate) edits: Option<Vec<Edit>>,
 }
 
-/// A write to the tracked text of a file the analysis pipeline does not own —
-/// the route to the sole salsa writer for anything that is not a Julia
-/// analysis.
+/// Ordered writes to the sole Salsa owner. A close follows every analysis
+/// request for the discarded buffer.
 pub(crate) enum SyncMessage {
+    Analyze(AnalysisRequest),
+    SourceChanged(PathBuf),
+    RefreshLibrary,
     /// Revert this path's tracked input to on-disk text: a document closed (its
     /// discarded buffer must not linger in the reverse-occurrence index) or a
     /// watched file changed outside any open buffer.
@@ -87,28 +90,35 @@ pub(crate) enum SyncMessage {
     /// Track this text for `path`: an open project-file buffer, which is never
     /// dispatched as an analysis (it is not Julia) but whose `[deps]` the
     /// linter reads through `project_declared_deps`.
-    SetText { path: PathBuf, text: String },
+    SetText {
+        path: PathBuf,
+        text: Arc<str>,
+        context_epoch: u64,
+        edition_changed: bool,
+    },
+    MetadataRevert {
+        path: PathBuf,
+        context_epoch: u64,
+    },
     /// Refresh project files edited by an entry rename, then request a full
     /// resolve. The client may have no file watchers to report those TOML edits.
     RenamedProjects {
         files: Vec<lsp_types::FileRename>,
         open_projects: Vec<PathBuf>,
-        harvest: Sender<HarvestSignal>,
     },
 }
 
-/// A library-index update delivered to the analysis thread by the background
-/// harvester. The full harvest lands once at startup; a re-harvest of the
-/// workspace package (on save) lands as a single-package swap.
+/// A full resolve or a batch of variants harvested under live editions.
+/// Generations keep a superseded harvest from restoring stale memberships.
 pub(crate) enum LibraryMessage {
-    /// The whole harvested environment (Base/stdlib, deps, and the workspace
-    /// package): replace the library index wholesale.
-    Full(HarvestedLibrary),
-    /// A re-harvested single package (the workspace package on save): swap just
-    /// its entry, keeping the rest and the workspace name.
-    Package {
-        name: String,
-        index: Arc<PackageIndex>,
+    Full {
+        generation: u64,
+        library: Box<HarvestedLibrary>,
+        failed_manifests: BTreeSet<PathBuf>,
+    },
+    Syntax {
+        generation: u64,
+        variants: Vec<(String, ParseOptions, Arc<PackageIndex>)>,
     },
 }
 
@@ -118,7 +128,6 @@ pub(crate) enum LibraryMessage {
 /// thread swaps it into the db as a write.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_analysis_thread(
-    analysis_rx: Receiver<AnalysisRequest>,
     read_rx: Receiver<ReadJob>,
     library_rx: Receiver<LibraryMessage>,
     sync_rx: Receiver<SyncMessage>,
@@ -126,12 +135,25 @@ pub(crate) fn spawn_analysis_thread(
     read_spawner: Spawner,
     encoding: PositionEncoding,
     push_diagnostics: bool,
+    harvest: Sender<HarvestSignal>,
+    has_workspace: bool,
+    membership_generation: Arc<AtomicU64>,
 ) -> JoinHandle<()> {
     let (done_tx, done_rx) = crossbeam_channel::unbounded::<AnalyzeDone>();
     std::thread::Builder::new()
         .name("fatou-analysis".to_string())
         .spawn(move || {
             let mut worker = AnalysisWorker {
+                context_epoch: 0,
+                harvest,
+                full_harvest: has_workspace.then_some(0),
+                syntax_harvest: None,
+                harvest_generation: 0,
+                harvest_failed: false,
+                changed_sources: BTreeSet::new(),
+                syntax_dirty: false,
+                membership_generation,
+                deferred_edits: Vec::new(),
                 scripts: ScriptProjects::new(encoding),
                 pending_script_load: None,
                 db: IncrementalDatabase::default(),
@@ -147,7 +169,7 @@ pub(crate) fn spawn_analysis_thread(
                 package_graph_diags: BTreeMap::new(),
                 import_projections: HashMap::new(),
             };
-            worker.run(&analysis_rx, &read_rx, &library_rx, &sync_rx, &done_rx);
+            worker.run(&read_rx, library_rx, &sync_rx, &done_rx);
         })
         .expect("spawn analysis thread")
 }
@@ -156,6 +178,7 @@ pub(crate) fn spawn_analysis_thread(
 /// analysis thread: the analysis for `uri`@`version` has completed (or unwound
 /// on cancellation) and dropped its db clone, so the in-flight slot is free.
 struct AnalyzeDone {
+    context_epoch: u64,
     uri: Uri,
     version: i32,
     import_projection: Option<(PathBuf, Arc<crate::project::scripts::ScriptFile>)>,
@@ -213,6 +236,19 @@ pub(crate) fn decide(
 }
 
 struct AnalysisWorker {
+    harvest: Sender<HarvestSignal>,
+    /// Keep rewrites queued until both the disk resolve and any follow-up
+    /// variants needed by live metadata have landed.
+    full_harvest: Option<u64>,
+    syntax_harvest: Option<u64>,
+    harvest_generation: u64,
+    harvest_failed: bool,
+    changed_sources: BTreeSet<PathBuf>,
+    syntax_dirty: bool,
+    /// A rewrite reply must still describe the memberships used by its read.
+    membership_generation: Arc<AtomicU64>,
+    deferred_edits: Vec<ReadJob>,
+    context_epoch: u64,
     scripts: ScriptProjects,
     /// Installing even a body-only load can write tracked text and cancel
     /// Salsa readers, so keep the latest load until the analysis slot is free.
@@ -254,9 +290,8 @@ struct AnalysisWorker {
 impl AnalysisWorker {
     fn run(
         &mut self,
-        analysis_rx: &Receiver<AnalysisRequest>,
         read_rx: &Receiver<ReadJob>,
-        library_rx: &Receiver<LibraryMessage>,
+        mut library_rx: Receiver<LibraryMessage>,
         sync_rx: &Receiver<SyncMessage>,
         done_rx: &Receiver<AnalyzeDone>,
     ) {
@@ -265,104 +300,269 @@ impl AnalysisWorker {
                 recv(self.scripts.ready) -> loaded => {
                     if let Ok(loaded) = loaded {
                         guard("script install", || {
+                            self.drain_sync(sync_rx);
                             self.on_scripts_loaded(loaded);
                         });
                     }
                 }
                 recv(sync_rx) -> msg => {
-                    // A write to a file the analysis pipeline does not own.
-                    // Guarded so a panic mid-write can't kill the sole writer.
-                    guard("sync", || match msg {
-                        // An editor closed a document, or a watched file changed
-                        // outside any open buffer: revert its tracked input to
-                        // on-disk text so a discarded buffer (or stale seeded
-                        // text) stops contributing to the reverse-occurrence
-                        // index. A no-op for a non-member or a buffer already
-                        // matching disk.
-                        Ok(SyncMessage::Revert(path)) => self.on_sync(&path, analysis_rx),
-                        Ok(SyncMessage::SetText { path, text }) => {
-                            self.on_project_text(&path, text);
-                        }
-                        Ok(SyncMessage::RenamedProjects { files, open_projects, harvest }) => {
-                            let projects = renamed_package_projects(&self.db.snapshot(), &files);
-                            for path in &projects {
-                                if !open_projects.contains(path) {
-                                    self.on_sync(path, analysis_rx);
-                                }
-                            }
-                            if !projects.is_empty() {
-                                let _ = harvest.send(HarvestSignal::Environment);
-                            }
-                        }
-                        Err(_) => {}
+                    let Ok(msg) = msg else { break };
+                    guard("sync", || {
+                        self.on_sync_message(msg);
+                        self.drain_sync(sync_rx);
                     });
                 }
                 recv(library_rx) -> msg => {
-                    // The background harvester delivered an index update: swap it
-                    // into the db (a write). Later requests read it from their
-                    // snapshot; open files need no re-analysis because no
-                    // diagnostic depends on the library yet.
-                    guard("library", || match msg {
-                        Ok(LibraryMessage::Full(lib)) => {
-                            self.db.set_project_files(lib.project_files);
-                            self.db.set_library_deps(lib.deps);
-                            self.db.set_library(lib.packages, lib.roots, lib.workspaces);
-                            // Seed the workspace packages' member files as inputs
-                            // so cross-file references/rename can index them.
-                            self.db.seed_workspace_members();
-                            self.refresh_graph_diagnostics();
-                            // `set_library_deps` above is where a `[deps]` inlay
-                            // hint's version comes from, and it lands well after
-                            // any `Project.toml` the user opened at startup. A
-                            // single-package swap leaves that map alone, so this
-                            // rides the full harvest only.
-                            let _ = self.out_tx.send(Outbound::InlayHintsRefresh);
+                    guard("library", || {
+                        self.drain_sync(sync_rx);
+                        match msg {
+                            Ok(msg) => self.on_library_message(msg),
+                            Err(_) => {
+                                library_rx = crossbeam_channel::never();
+                                self.harvest_failed |= self.full_harvest.take().is_some()
+                                    || self.syntax_harvest.take().is_some();
+                            }
                         }
-                        Ok(LibraryMessage::Package { name, index }) => {
-                            self.db.set_package_index(name, index);
-                            self.db.seed_workspace_members();
-                            self.refresh_graph_diagnostics();
-                        }
-                        Err(_) => {}
-                    });
-                }
-                recv(analysis_rx) -> msg => {
-                    let Ok(req) = msg else { break };
-                    // Coalesce: keep only the latest version per URI, so a fast
-                    // typist's stale edits are dropped before they're analyzed.
-                    guard("analyze", || {
-                        self.enqueue(req);
-                        while let Ok(more) = analysis_rx.try_recv() {
-                            self.enqueue(more);
-                        }
-                        self.try_dispatch();
                     });
                 }
                 recv(done_rx) -> done => {
-                    let Ok(done) = done else { continue };
-                    // Free the slot only if this `done` is for the *current*
-                    // in-flight analysis — a late `done` from a superseded one
-                    // (older version) must not clear the new analysis.
-                    guard("done", || {
-                        self.on_done(done);
-                        self.try_dispatch();
-                    });
+                    if let Ok(done) = done {
+                        guard("done", || {
+                            self.drain_sync(sync_rx);
+                            self.on_done(done);
+                        });
+                    }
                 }
                 recv(read_rx) -> job => {
-                    let Ok(job) = job else { continue };
-                    // Mint a short-lived read-only snapshot and run the job off
-                    // this thread. The clone is dropped inside `run_read`, so
-                    // the next write isn't blocked once the read finishes (or a
-                    // racing write trips `salsa::Cancelled`, handled by the
-                    // job's fallback).
+                    let Ok(job) = job else { break };
                     guard("read-dispatch", || {
-                        let snapshot = self.db.snapshot();
-                        let encoding = self.encoding;
-                        self.read_spawner.spawn(move || run_read(snapshot, job, encoding));
+                        self.drain_sync(sync_rx);
+                        if job.produces_edits() {
+                            self.deferred_edits.push(job);
+                        } else {
+                            self.try_dispatch();
+                            self.dispatch_read(job);
+                        }
                     });
                 }
             }
+            guard("dispatch", || {
+                self.schedule_syntax_harvest();
+                self.try_dispatch();
+                self.dispatch_ready_edits();
+            });
         }
+    }
+
+    fn drain_sync(&mut self, sync_rx: &Receiver<SyncMessage>) {
+        while let Ok(msg) = sync_rx.try_recv() {
+            self.on_sync_message(msg);
+        }
+    }
+
+    fn dispatch_ready_edits(&mut self) {
+        if self.full_harvest.is_some() || self.syntax_harvest.is_some() || self.scripts.loading() {
+            return;
+        }
+        for job in std::mem::take(&mut self.deferred_edits) {
+            // A workspace edit must see the current text of its other files.
+            // Document-only formatting can use the text captured by the client.
+            if !self.pending.is_empty()
+                && matches!(
+                    job,
+                    ReadJob::Rename { .. } | ReadJob::WillRenameFiles { .. }
+                )
+            {
+                self.deferred_edits.push(job);
+                continue;
+            }
+            if self.harvest_failed || self.scripts.load_failed() {
+                let (id, reply) = job.into_reply_parts();
+                use lsp_server::{ErrorCode, Message, Response};
+                let _ = reply.send(Message::Response(Response::new_err(
+                    id,
+                    ErrorCode::RequestFailed as i32,
+                    "source loading contexts could not be determined".into(),
+                )));
+            } else {
+                self.dispatch_read(job);
+            }
+        }
+    }
+
+    fn dispatch_read(&self, job: ReadJob) {
+        let job =
+            job.with_membership_generation(self.membership_generation.load(Ordering::Acquire));
+        let snapshot = self.db.snapshot();
+        let contexts = job.contexts(&snapshot);
+        let encoding = self.encoding;
+        self.read_spawner
+            .spawn(move || run_read(snapshot, job, encoding, contexts));
+    }
+
+    fn on_sync_message(&mut self, msg: SyncMessage) {
+        match msg {
+            SyncMessage::Analyze(req) => self.enqueue(req),
+            SyncMessage::SourceChanged(path) => {
+                self.changed_sources
+                    .insert(crate::incremental::normalize_path(&path));
+                self.syntax_dirty = true;
+            }
+            SyncMessage::RefreshLibrary => self.request_full_harvest(),
+            SyncMessage::Revert(path) => self.on_sync(&path),
+            SyncMessage::SetText {
+                path,
+                text,
+                context_epoch,
+                edition_changed,
+            } => {
+                self.context_epoch = self.context_epoch.max(context_epoch);
+                self.on_project_text(&path, text);
+                if edition_changed {
+                    self.on_edition_changed();
+                }
+            }
+            SyncMessage::MetadataRevert {
+                path,
+                context_epoch,
+            } => {
+                let edition_changed = context_epoch > self.context_epoch;
+                self.context_epoch = self.context_epoch.max(context_epoch);
+                self.on_sync(&path);
+                if edition_changed {
+                    self.on_edition_changed();
+                }
+            }
+            SyncMessage::RenamedProjects {
+                files,
+                open_projects,
+            } => {
+                let projects = renamed_package_projects(&self.db.snapshot(), &files);
+                for path in &projects {
+                    if !open_projects.contains(path) {
+                        self.on_sync(path);
+                    }
+                }
+                if !projects.is_empty() {
+                    self.request_full_harvest();
+                }
+            }
+        }
+    }
+
+    fn request_full_harvest(&mut self) {
+        self.harvest_generation += 1;
+        let generation = self.harvest_generation;
+        if self
+            .harvest
+            .send(HarvestSignal::Environment(generation))
+            .is_ok()
+        {
+            self.full_harvest = Some(generation);
+            self.syntax_harvest = None;
+            self.invalidate_edit_replies();
+        }
+    }
+
+    fn schedule_syntax_harvest(&mut self) {
+        if self.full_harvest.is_some() || !self.syntax_dirty {
+            return;
+        }
+        self.syntax_dirty = false;
+        self.db
+            .invalidate_workspace_variants(&std::mem::take(&mut self.changed_sources));
+        let work = self.db.pending_syntax_harvests();
+        if work.is_empty() {
+            self.syntax_harvest = None;
+            if self.db.seed_workspace_members() {
+                self.refresh_graph_diagnostics();
+            }
+            return;
+        }
+        self.harvest_generation += 1;
+        let generation = self.harvest_generation;
+        if self
+            .harvest
+            .send(HarvestSignal::Syntax { work, generation })
+            .is_ok()
+        {
+            self.syntax_harvest = Some(generation);
+            self.invalidate_edit_replies();
+        } else {
+            self.harvest_failed = true;
+        }
+    }
+
+    fn on_library_message(&mut self, msg: LibraryMessage) {
+        match msg {
+            LibraryMessage::Full {
+                generation,
+                mut library,
+                failed_manifests,
+            } if self.full_harvest == Some(generation) => {
+                let before = self.open_parse_options();
+                self.full_harvest = None;
+                self.db
+                    .retain_failed_manifest_memberships(&mut library.syntax, &failed_manifests);
+                self.db.set_library_syntax(library.syntax);
+                self.db.set_project_files(library.project_files);
+                self.db.set_library_deps(library.deps);
+                self.db
+                    .set_library(library.packages, library.roots, library.workspaces);
+                self.db.seed_workspace_members();
+                self.scripts.library_changed(&self.db);
+                self.refresh_graph_diagnostics();
+                let _ = self.out_tx.send(Outbound::InlayHintsRefresh);
+                self.syntax_dirty = true;
+                self.invalidate_edit_replies();
+                self.refresh_tokens_if_edition_changed(before);
+            }
+            LibraryMessage::Syntax {
+                generation,
+                variants,
+            } if self.syntax_harvest == Some(generation) => {
+                let before = self.open_parse_options();
+                self.syntax_harvest = None;
+                self.db.install_syntax_variants(variants);
+                self.db.seed_workspace_members();
+                self.scripts.library_changed(&self.db);
+                self.refresh_graph_diagnostics();
+                self.invalidate_edit_replies();
+                self.refresh_tokens_if_edition_changed(before);
+            }
+            _ => {}
+        }
+    }
+
+    fn invalidate_edit_replies(&self) {
+        self.membership_generation.fetch_add(1, Ordering::Release);
+    }
+
+    fn open_parse_options(&self) -> Vec<ParseOptions> {
+        self.scripts
+            .open_paths()
+            .map(|path| {
+                self.db
+                    .lookup_file(path)
+                    .map(|file| self.db.parse_options(file))
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
+    fn refresh_tokens_if_edition_changed(&self, before: Vec<ParseOptions>) {
+        if self.open_parse_options() != before {
+            let _ = self.out_tx.send(Outbound::SemanticTokensRefresh);
+        }
+    }
+
+    fn on_edition_changed(&mut self) {
+        self.db.rediscover_source_contexts();
+        self.scripts.metadata_changed(&self.db);
+        self.syntax_dirty = true;
+        self.invalidate_edit_replies();
+        let _ = self.out_tx.send(Outbound::DiagnosticsRefresh);
+        let _ = self.out_tx.send(Outbound::SemanticTokensRefresh);
     }
 
     fn on_scripts_loaded(&mut self, loaded: Loaded) {
@@ -370,9 +570,12 @@ impl AnalysisWorker {
             self.pending_script_load = Some(loaded);
             return;
         }
+        let before = self.open_parse_options();
         if self.scripts.install(loaded, &mut self.db) {
+            self.invalidate_edit_replies();
             self.publish_graph_diagnostics();
         }
+        self.refresh_tokens_if_edition_changed(before);
     }
 
     fn on_done(&mut self, done: AnalyzeDone) {
@@ -380,7 +583,9 @@ impl AnalysisWorker {
             return;
         }
         self.inflight = None;
-        if let Some((path, projection)) = done.import_projection {
+        if done.context_epoch == self.context_epoch
+            && let Some((path, projection)) = done.import_projection
+        {
             let previous = self
                 .import_projections
                 .insert(path, Arc::clone(&projection));
@@ -390,25 +595,9 @@ impl AnalysisWorker {
         }
     }
 
-    /// Handle a sync signal: a document was closed, or a watched file changed
-    /// with no buffer of its own. Every queued analysis of that path's live
-    /// buffer is discarded before the tracked input is reverted to the on-disk
-    /// text — dispatching one afterwards would re-upsert the very buffer the
-    /// revert discarded.
-    ///
-    /// Clearing `pending` alone isn't enough: the request and the sync signal
-    /// travel on different channels, so a request the main loop sent *before*
-    /// the close can still be sitting unreceived in `analysis_rx` when the
-    /// `select!` picks the sync arm. Draining it here pulls those into the
-    /// queue first, where they're dropped along with the rest.
-    ///
-    /// An analysis already in flight for the path needs no cancellation: its
-    /// write-phase ran before this revert, so the revert wins, and the main
-    /// loop drops its diagnostics for a document it no longer tracks.
-    fn on_sync(&mut self, path: &Path, analysis_rx: &Receiver<AnalysisRequest>) {
-        while let Ok(req) = analysis_rx.try_recv() {
-            self.enqueue(req);
-        }
+    /// Earlier analyses and the revert arrive on the same channel. Discard
+    /// pending text for the closed buffer before restoring the disk input.
+    fn on_sync(&mut self, path: &Path) {
         let dropped: Vec<Uri> = self
             .pending
             .iter()
@@ -428,23 +617,23 @@ impl AnalysisWorker {
         }
         let declared_before = self.declared_deps_of(path);
         self.db.revert_file_to_disk(path);
-        self.scripts.closed_or_changed(path, &mut self.db);
+        self.scripts.closed_or_changed(path, &self.db);
+        if self.scripts.loading() {
+            self.invalidate_edit_replies();
+        }
         if self.import_projections.remove(path).is_some() {
             let _ = self.out_tx.send(Outbound::DiagnosticsRefresh);
         }
         // Closing an unsaved `Project.toml` puts the disk copy back in charge,
         // which can change what the package declares.
         self.refresh_if_declared_deps_changed(path, declared_before);
-        // The drain above swallowed the `analyze` arm's wake-up for whatever
-        // else it picked up, so those requests are dispatched from here.
-        self.try_dispatch();
     }
 
     /// Track an open project file's buffer text. The buffer is authoritative
     /// over the disk copy from here on, so an unsaved `[deps]` edit reaches
     /// `unresolved-import` across the package without a save — the harvester's
     /// own re-resolve reads disk, but never clobbers a tracked input.
-    fn on_project_text(&mut self, path: &Path, text: String) {
+    fn on_project_text(&mut self, path: &Path, text: Arc<str>) {
         let declared_before = self.declared_deps_of(path);
         self.db.upsert_file(path, text);
         self.refresh_if_declared_deps_changed(path, declared_before);
@@ -484,18 +673,23 @@ impl AnalysisWorker {
     /// sees has to describe the transform from the last *analyzed* text, not
     /// from the last enqueued one.
     fn enqueue(&mut self, mut req: AnalysisRequest) {
+        self.db.ensure_source_context(&req.path);
         self.scripts.update(
             &req.path,
             Arc::clone(&req.text),
             req.version,
             &req.rules.entry_points,
-            &mut self.db,
+            &self.db,
         );
+        if self.scripts.loading() {
+            self.invalidate_edit_replies();
+        }
         // Even a stale-version duplicate signals recent activity on this URI.
         self.active = Some(req.uri.clone());
         match self.pending.get_mut(&req.uri) {
             Some(existing) if existing.version >= req.version => {
                 if existing.version == req.version {
+                    existing.context_epoch = existing.context_epoch.max(req.context_epoch);
                     existing.rules = Arc::clone(&req.rules);
                 }
                 // Dropping a request whose text differs loses the transform to
@@ -560,6 +754,7 @@ impl AnalysisWorker {
     /// right after spawning keeps reads responsive and lets a fresher edit
     /// cancel the analysis.
     fn start(&mut self, mut req: AnalysisRequest) {
+        self.scripts.mark_pending(&mut self.db);
         // Write-phase: push the live buffer into the persistent db. Cheap —
         // the parse is a lazy salsa query deferred to the read-phase.
         let file = self.db.upsert_file(&req.path, req.text.text_arc());
@@ -582,6 +777,7 @@ impl AnalysisWorker {
             path,
             text,
             version,
+            context_epoch,
             rules,
             edits: _, // already staged on the db above
         } = req;
@@ -601,22 +797,16 @@ impl AnalysisWorker {
             .flatten();
             if push {
                 let result = salsa::Cancelled::catch(AssertUnwindSafe(|| {
-                    let mut diags =
-                        parse_diagnostics_to_lsp(snapshot.parse_diagnostics(file), &text, encoding);
-                    // Lint findings join the same publish, but only on a clean
-                    // tree: rules would misfire on error-recovered shapes, and a
-                    // broken buffer's parse errors are the actionable signal.
-                    if diags.is_empty() {
-                        diags.extend(lint_diagnostics_via_db(
-                            &snapshot, &path, &text, encoding, &rules,
-                        ));
-                    }
-                    diags
+                    super::pull_diagnostics::source_diagnostics_via_db(
+                        &snapshot, &path, &text, encoding, &rules,
+                    )
                 }));
                 if let Ok(diags) = result {
                     let _ = out_tx.send(Outbound::Diagnostics {
+                        context_epoch,
                         uri: uri.clone(),
                         version,
+                        text: Arc::clone(&text),
                         diags,
                     });
                 }
@@ -627,6 +817,7 @@ impl AnalysisWorker {
             // on this clone.
             drop(snapshot);
             let _ = done_tx.send(AnalyzeDone {
+                context_epoch,
                 uri,
                 version,
                 import_projection,
@@ -642,14 +833,43 @@ impl AnalysisWorker {
     fn refresh_graph_diagnostics(&mut self) {
         let updates: BTreeMap<PathBuf, Vec<Diagnostic>> = {
             let snapshot = self.db.snapshot();
-            let graph = snapshot.project_graph();
-            graph_diagnostics(graph, self.encoding, |path| {
-                let file = snapshot.lookup_file(path)?;
-                Some((
-                    snapshot.file_text_of(file).to_string(),
-                    snapshot.parsed_tree(file),
-                ))
-            })
+            let mut merged = BTreeMap::<_, Vec<_>>::new();
+            for name in snapshot.workspace_packages() {
+                let Some(root) = snapshot.package_root(&name) else {
+                    continue;
+                };
+                let entry = crate::incremental::normalize_path(
+                    &root.join("src").join(format!("{name}.jl")),
+                );
+                let Some(file) = snapshot.lookup_file(&entry) else {
+                    continue;
+                };
+                for (context, selection) in snapshot
+                    .source_editions(file)
+                    .iter()
+                    .filter(|(context, _)| context.entry == entry)
+                {
+                    let view = snapshot.with_context(context.clone(), selection.options);
+                    let parser = snapshot.with_options(selection.options);
+                    for (path, findings) in
+                        graph_diagnostics(view.project_graph(), self.encoding, |path| {
+                            let file = parser.lookup_file(path)?;
+                            Some((
+                                parser.file_text_of(file).to_string(),
+                                parser.parsed_tree(file),
+                            ))
+                        })
+                    {
+                        let diagnostics = merged.entry(path).or_default();
+                        for finding in findings {
+                            if !diagnostics.contains(&finding) {
+                                diagnostics.push(finding);
+                            }
+                        }
+                    }
+                }
+            }
+            merged
         };
         self.package_graph_diags = updates;
         self.publish_graph_diagnostics();
@@ -706,6 +926,16 @@ mod tests {
             use crate::text::PositionEncoding;
 
             Self {
+                context_epoch: 0,
+                harvest: crossbeam_channel::unbounded().0,
+                full_harvest: None,
+                syntax_harvest: None,
+                harvest_generation: 0,
+                harvest_failed: false,
+                changed_sources: BTreeSet::new(),
+                syntax_dirty: false,
+                membership_generation: Default::default(),
+                deferred_edits: Vec::new(),
                 scripts: Default::default(),
                 pending_script_load: None,
                 db: IncrementalDatabase::default(),
@@ -756,6 +986,7 @@ mod tests {
                 version,
             });
             worker.on_done(AnalyzeDone {
+                context_epoch: 0,
                 uri: uri.clone(),
                 version,
                 import_projection: Some((path.clone(), projection)),
@@ -772,6 +1003,7 @@ mod tests {
             version: 4,
         });
         worker.on_done(AnalyzeDone {
+            context_epoch: 0,
             uri,
             version: 2,
             import_projection: Some((path, literals)),
@@ -900,6 +1132,7 @@ mod tests {
         let a = uri_named("a.jl");
         let rules = ServerRules::defaults();
         let req = |version: i32| AnalysisRequest {
+            context_epoch: 0,
             uri: a.clone(),
             path: PathBuf::from("/work/a.jl"),
             text: Arc::new(TextBuffer::from("x = 1\n")),
@@ -959,6 +1192,69 @@ mod tests {
     }
 
     #[test]
+    fn read_dispatch_leaves_an_untracked_buffer_queued_during_another_analysis() {
+        use crate::lsp::read_jobs::ReadReply;
+        use crate::lsp::task_pool::TaskPool;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("src/Foo.jl");
+        let uri = super::super::uri::from_path(&path).unwrap();
+        let text = Arc::new(TextBuffer::new("typegroup(x) = x\n"));
+        std::fs::create_dir(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "module Foo end\n").unwrap();
+        std::fs::write(
+            dir.path().join("Project.toml"),
+            "name = 'Foo'\n[syntax]\njulia_version = '1.13'\n",
+        )
+        .unwrap();
+        let pool = TaskPool::new("test-read-dispatch", 1);
+        let mut worker = AnalysisWorker {
+            read_spawner: pool.spawner(),
+            inflight: Some(InflightAnalyze {
+                uri: super::super::uri::from_path(&dir.path().join("a.jl")).unwrap(),
+                version: 1,
+            }),
+            ..AnalysisWorker::for_test()
+        };
+        worker
+            .db
+            .set_script_sources(&[], &BTreeMap::new(), &BTreeMap::new());
+        let mut rules = ServerRules::from_config(&Default::default()).0;
+        rules.entry_points = vec![path.clone()];
+        worker.enqueue(AnalysisRequest {
+            context_epoch: 0,
+            uri: uri.clone(),
+            path: path.clone(),
+            text: Arc::clone(&text),
+            version: 1,
+            rules: Arc::new(rules),
+            edits: None,
+        });
+        worker.try_dispatch();
+        let (sender, replies) = crossbeam_channel::unbounded();
+        worker.dispatch_read(ReadJob::DocumentSymbols {
+            id: 1.into(),
+            path: path.clone(),
+            text,
+            sender: ReadReply::new(sender),
+        });
+        assert!(worker.pending.contains_key(&uri));
+        assert!(worker.db.lookup_file(&path).is_none());
+        assert!(!worker.db.scripts_pending());
+        let Outbound::ReadReply {
+            message: lsp_server::Message::Response(response),
+            ..
+        } = replies
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+        else {
+            panic!("expected response");
+        };
+        let symbols = response.response_result.unwrap();
+        assert_eq!(symbols[0]["name"], "typegroup", "{symbols}");
+    }
+
+    #[test]
     fn script_body_load_preserves_another_files_inflight_diagnostics() {
         use std::time::Duration;
 
@@ -980,6 +1276,7 @@ mod tests {
         rules.entry_points = vec![entry.clone()];
         let rules = Arc::new(rules);
         let request = |path: &Path, text: &str, version| AnalysisRequest {
+            context_epoch: 0,
             uri: super::super::uri::from_path(path).unwrap(),
             path: path.to_owned(),
             text: Arc::new(TextBuffer::from(text)),
@@ -1002,7 +1299,7 @@ mod tests {
             Arc::new(TextBuffer::new(original)),
             1,
             &rules.entry_points,
-            &mut worker.db,
+            &worker.db,
         );
         let initial = worker.scripts.ready.recv_timeout(timeout).unwrap();
         worker.on_scripts_loaded(initial);
@@ -1042,6 +1339,7 @@ mod tests {
             uri,
             version,
             diags,
+            ..
         } = out_rx.try_recv().unwrap()
         else {
             panic!("expected the other file's diagnostics");
@@ -1096,7 +1394,7 @@ mod tests {
             Arc::new(TextBuffer::new("old() = 1\n")),
             1,
             &entries,
-            &mut worker.db,
+            &worker.db,
         );
         worker.inflight = Some(InflightAnalyze {
             uri: super::super::uri::from_path(&dir.path().join("other.jl")).unwrap(),
@@ -1114,7 +1412,7 @@ mod tests {
             Arc::new(TextBuffer::new("fresh() = 2\n")),
             2,
             &entries,
-            &mut worker.db,
+            &worker.db,
         );
         worker.inflight = None;
         worker.try_dispatch();
@@ -1140,6 +1438,74 @@ mod tests {
             Ok(Outbound::DiagnosticsRefresh)
         ));
         assert!(out_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn rewrites_wait_for_script_membership_and_tokens_refresh_on_an_edition_change() {
+        use std::time::Duration;
+
+        use crate::lsp::read_jobs::ReadReply;
+        use crate::lsp::task_pool::TaskPool;
+
+        let dir = tempfile::tempdir().unwrap();
+        let shared = dir.path().join("shared.jl");
+        std::fs::write(
+            dir.path().join("Project.toml"),
+            "[syntax]\njulia_version = '1.13'\n",
+        )
+        .unwrap();
+        let entry = dir.path().join("new/main.jl");
+        std::fs::create_dir(entry.parent().unwrap()).unwrap();
+        std::fs::write(
+            entry.with_file_name("Project.toml"),
+            "[syntax]\njulia_version = '1.14'\n",
+        )
+        .unwrap();
+        std::fs::write(&entry, "include(\"../shared.jl\")\n").unwrap();
+        let text = Arc::new(TextBuffer::new("typegroup  =  1\n"));
+        let pool = TaskPool::new("test-deferred-format", 1);
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        let mut worker = AnalysisWorker {
+            out_tx: sender.clone(),
+            read_spawner: pool.spawner(),
+            ..AnalysisWorker::for_test()
+        };
+        worker.db.upsert_file(&shared, text.text_arc());
+        worker
+            .scripts
+            .update(&shared, Arc::clone(&text), 1, &[entry], &worker.db);
+        let loaded = worker
+            .scripts
+            .ready
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        worker.deferred_edits.push(ReadJob::Format {
+            id: 1.into(),
+            path: shared,
+            text,
+            style: Default::default(),
+            safe: true,
+            sender: ReadReply::new(sender),
+        });
+        worker.dispatch_ready_edits();
+        assert_eq!(worker.deferred_edits.len(), 1);
+        assert!(receiver.try_recv().is_err());
+
+        worker.on_scripts_loaded(loaded);
+        assert!(
+            receiver
+                .try_iter()
+                .any(|out| matches!(out, Outbound::SemanticTokensRefresh))
+        );
+        worker.dispatch_ready_edits();
+        let Outbound::ReadReply {
+            message: lsp_server::Message::Response(response),
+            ..
+        } = receiver.recv_timeout(Duration::from_secs(5)).unwrap()
+        else {
+            panic!("expected formatting response");
+        };
+        assert!(response.response_result.is_err(), "{response:?}");
     }
 
     /// The write phase hands salsa the live buffer's own allocation, never a
@@ -1168,6 +1534,7 @@ mod tests {
         let text = Arc::new(TextBuffer::from("x = 1\n"));
         let path = PathBuf::from("/work/share.jl");
         worker.start(AnalysisRequest {
+            context_epoch: 0,
             uri: uri_named("share.jl"),
             path: path.clone(),
             text: Arc::clone(&text),
@@ -1196,6 +1563,7 @@ mod tests {
         let a = uri_named("a.jl");
         let rules = ServerRules::defaults();
         let req = |version: i32, text: &str, edits: Option<Vec<Edit>>| AnalysisRequest {
+            context_epoch: 0,
             uri: a.clone(),
             path: PathBuf::from("/work/a.jl"),
             text: Arc::new(TextBuffer::from(text)),
@@ -1235,11 +1603,8 @@ mod tests {
         assert_eq!(worker.pending[&a].edits, None);
     }
 
-    /// A close signal takes the closed buffer's queued analyses with it —
-    /// including a request still sitting unreceived in `analysis_rx`, which
-    /// races the sync signal in the `select!`. Dispatching one after the revert
-    /// would re-upsert the unsaved buffer the close discarded. Queued work for
-    /// *other* files is untouched.
+    /// A close takes the closed buffer's queued analyses with it. A later
+    /// reopen on the ordered write channel is a new document.
     #[test]
     fn sync_drops_queued_analyses_for_the_closed_path() {
         use crate::lsp::lint::ServerRules;
@@ -1254,6 +1619,7 @@ mod tests {
 
         let rules = ServerRules::defaults();
         let req = |uri: &Uri, path: &PathBuf, text: &str, version: i32| AnalysisRequest {
+            context_epoch: 0,
             uri: uri.clone(),
             path: path.clone(),
             text: Arc::new(TextBuffer::from(text)),
@@ -1264,7 +1630,7 @@ mod tests {
 
         // A real read pool so the surviving request can actually dispatch.
         let pool = TaskPool::new("test-analysis-read", 1);
-        let (analysis_tx, analysis_rx) = crossbeam_channel::unbounded::<AnalysisRequest>();
+        let (sync_tx, sync_rx) = crossbeam_channel::unbounded();
         let mut worker = AnalysisWorker {
             scripts: Default::default(),
             read_spawner: pool.spawner(),
@@ -1273,17 +1639,16 @@ mod tests {
 
         // An earlier analysis already pushed the unsaved buffer into the db.
         worker.db.upsert_file(&closed, "unsaved = 2\n".to_string());
-        // One later edit is queued, another is still in the channel when the
-        // close lands; a third belongs to a file that stays open.
-        worker.enqueue(req(&closed_uri, &closed, "unsaved = 3\n", 3));
-        analysis_tx
-            .send(req(&closed_uri, &closed, "unsaved = 4\n", 4))
-            .unwrap();
-        analysis_tx
-            .send(req(&other_uri, &other, "b = 2\n", 1))
-            .unwrap();
-
-        worker.on_sync(&closed, &analysis_rx);
+        for message in [
+            SyncMessage::Analyze(req(&closed_uri, &closed, "unsaved = 3\n", 3)),
+            SyncMessage::Analyze(req(&closed_uri, &closed, "unsaved = 4\n", 4)),
+            SyncMessage::Analyze(req(&other_uri, &other, "b = 2\n", 1)),
+            SyncMessage::Revert(closed.clone()),
+        ] {
+            sync_tx.send(message).unwrap();
+        }
+        worker.drain_sync(&sync_rx);
+        worker.try_dispatch();
 
         assert!(
             !worker.pending.contains_key(&closed_uri),
@@ -1294,12 +1659,6 @@ mod tests {
             "the still-open document's request should have been dispatched"
         );
 
-        // The next turn of the `select!` loop: nothing is left to receive for
-        // the closed path, so the reverted disk text stands.
-        while let Ok(more) = analysis_rx.try_recv() {
-            worker.enqueue(more);
-        }
-        worker.try_dispatch();
         let file = worker.db.lookup_file(&closed).expect("tracked input");
         assert_eq!(
             worker.db.file_text(file),

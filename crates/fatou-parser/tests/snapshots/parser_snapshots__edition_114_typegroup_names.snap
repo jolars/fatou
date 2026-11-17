@@ -1,0 +1,101 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..154
+  FUNCTION_DEF@0..25
+    FUNCTION_KW@0..8 "function"
+    WHITESPACE@8..9 " "
+    SIGNATURE@9..21
+      CALL_EXPR@9..21
+        ERROR@9..18
+          NAME@9..18
+            IDENT@9..18 "typegroup"
+        ARG_LIST@18..21
+          LPAREN@18..19 "("
+          ARG@19..20
+            NAME@19..20
+              IDENT@19..20 "x"
+          RPAREN@20..21 ")"
+    BLOCK@21..22
+      WHITESPACE@21..22 " "
+    END_KW@22..25 "end"
+  WHITESPACE@25..26 " "
+  ERROR@26..29
+    END_KW@26..29 "end"
+  NEWLINE@29..30 "\n"
+  MACRO_DEF@30..52
+    MACRO_KW@30..35 "macro"
+    WHITESPACE@35..36 " "
+    SIGNATURE@36..48
+      CALL_EXPR@36..48
+        ERROR@36..45
+          NAME@36..45
+            IDENT@36..45 "typegroup"
+        ARG_LIST@45..48
+          LPAREN@45..46 "("
+          ARG@46..47
+            NAME@46..47
+              IDENT@46..47 "x"
+          RPAREN@47..48 ")"
+    BLOCK@48..49
+      WHITESPACE@48..49 " "
+    END_KW@49..52 "end"
+  NEWLINE@52..53 "\n"
+  STRUCT_DEF@53..73
+    STRUCT_KW@53..59 "struct"
+    WHITESPACE@59..60 " "
+    SIGNATURE@60..69
+      ERROR@60..69
+        NAME@60..69
+          IDENT@60..69 "typegroup"
+    BLOCK@69..70
+      WHITESPACE@69..70 " "
+    END_KW@70..73 "end"
+  NEWLINE@73..74 "\n"
+  MODULE_DEF@74..94
+    MODULE_KW@74..80 "module"
+    WHITESPACE@80..81 " "
+    SIGNATURE@81..90
+      ERROR@81..90
+        NAME@81..90
+          IDENT@81..90 "typegroup"
+    BLOCK@90..91
+      WHITESPACE@90..91 " "
+    END_KW@91..94 "end"
+  NEWLINE@94..95 "\n"
+  ABSTRACT_DEF@95..122
+    IDENT@95..103 "abstract"
+    WHITESPACE@103..104 " "
+    IDENT@104..108 "type"
+    WHITESPACE@108..109 " "
+    SIGNATURE@109..118
+      ERROR@109..118
+        NAME@109..118
+          IDENT@109..118 "typegroup"
+    WHITESPACE@118..119 " "
+    END_KW@119..122 "end"
+  NEWLINE@122..123 "\n"
+  PRIMITIVE_DEF@123..153
+    IDENT@123..132 "primitive"
+    WHITESPACE@132..133 " "
+    IDENT@133..137 "type"
+    WHITESPACE@137..138 " "
+    SIGNATURE@138..147
+      ERROR@138..147
+        NAME@138..147
+          IDENT@138..147 "typegroup"
+    WHITESPACE@147..148 " "
+    LITERAL@148..149
+      INTEGER@148..149 "8"
+    WHITESPACE@149..150 " "
+    END_KW@150..153 "end"
+  NEWLINE@153..154 "\n"
+
+diagnostic [9..18]: reserved keyword used as a name
+diagnostic [26..29]: trailing tokens after statement
+diagnostic [36..45]: reserved keyword used as a name
+diagnostic [60..69]: reserved keyword used as a name
+diagnostic [81..90]: reserved keyword used as a name
+diagnostic [109..118]: reserved keyword used as a name
+diagnostic [138..147]: reserved keyword used as a name

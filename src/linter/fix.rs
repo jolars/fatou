@@ -96,9 +96,10 @@ pub fn fix_with(
 ) -> FixOutcome {
     let mut current = text.to_string();
     let mut total = 0usize;
+    let mut prepared = None;
 
     for _ in 0..MAX_PASSES {
-        let report = check(&current);
+        let report = prepared.take().unwrap_or_else(|| check(&current));
         let Applied { output, applied } =
             apply_fixes(&current, &report.diagnostics, include_unsafe);
         if applied == 0 {
@@ -108,6 +109,18 @@ pub fn fix_with(
                 remaining: report.diagnostics,
             };
         }
+        let candidate = check(&output);
+        if matches!(
+            candidate.status,
+            crate::linter::LintStatus::ParseDiagnostics { .. }
+        ) {
+            return FixOutcome {
+                output: current,
+                applied: total,
+                remaining: report.diagnostics,
+            };
+        }
+        prepared = Some(candidate);
         total += applied;
         current = output;
     }

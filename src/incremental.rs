@@ -11,7 +11,7 @@
 //! side-channel that lives beside salsa rather than inside it: [`PrevParse`],
 //! the tree to splice against, plus the chain of [`Edit`]s the language server
 //! staged since that tree was built. Both are hints — every route through
-//! [`parsed_document`] returns exactly what `parse(text)` would (Tenet 4), so
+//! [`parsed_document`] returns exactly what `parse_with_options(text, options)` would (Tenet 4), so
 //! a cold, stale, or evicted cache costs a full parse and nothing else.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -22,7 +22,11 @@ use salsa::{Durability, Setter};
 
 use crate::environment::PackageMeta;
 use crate::index::{DeclaredDeps, PackageIndex};
-use crate::parser::{Edit, ParseDiagnostic, ReparseTier, diff_edit, parse, reparse, reparse_edits};
+use crate::parse_context::{EditionSelection, SourceContext};
+use crate::parser::{Edit, ParseDiagnostic, ReparseTier, diff_edit};
+use crate::parser::{
+    ParseOptions, ReparseBase, parse_with_options, reparse_edits_with_options, reparse_with_options,
+};
 use crate::project::{self, IncludeEdge};
 use crate::resolve::{
     Candidate, ModulePath, Namespace, OccurrenceKey, OccurrenceRec, PackageSource, Resolution,
@@ -135,6 +139,10 @@ pub struct LibraryIndex {
 pub struct WorkspaceFiles {
     #[returns(ref)]
     pub files: Vec<SourceFile>,
+    /// Files with a known loading root but an uncertain edition. File moves
+    /// must still check their include sites, without seeding symbol resolution.
+    #[returns(ref)]
+    rename_only: Vec<SourceFile>,
 }
 
 /// Availability and membership loaded by the script background worker. Text
@@ -149,35 +157,56 @@ pub struct ScriptFiles {
 }
 
 #[salsa::tracked(returns(ref))]
-pub fn script_file(db: &dyn IncrementalDb, file: SourceFile) -> Arc<project::scripts::ScriptFile> {
+pub fn script_file_with_options(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+    options: ParseOptions,
+) -> Arc<project::scripts::ScriptFile> {
     Arc::new(project::scripts::ScriptFile::project(
-        &parsed_tree_root(db, file),
-        semantic_model(db, file),
+        &parsed_tree_root_with_options(db, file, options),
+        semantic_model_with_options(db, file, options),
         file.path(db).as_deref().expect("script files have paths"),
-        parse_diagnostics(db, file).is_empty(),
+        parse_diagnostics_with_options(db, file, options).is_empty(),
     ))
 }
 
+pub fn script_file(db: &dyn IncrementalDb, file: SourceFile) -> &Arc<project::scripts::ScriptFile> {
+    script_file_with_options(db, file, primary_parse_options(db, file))
+}
+
 #[salsa::tracked(returns(ref))]
+pub fn script_program_with_options(
+    db: &dyn IncrementalDb,
+    entry: SourceFile,
+    options: ParseOptions,
+) -> Arc<project::scripts::ScriptProgram> {
+    let inputs = ScriptFiles::try_get(db);
+    Arc::new(
+        project::scripts::ScriptProgram::build_with_availability(
+            entry
+                .path(db)
+                .as_deref()
+                .expect("script entries have paths"),
+            |path| {
+                use project::scripts::ScriptFileState;
+                match inputs.and_then(|input| input.files(db).get(path)) {
+                    Some(Some(file)) => ScriptFileState::Available(Arc::clone(
+                        script_file_with_options(db, *file, options),
+                    )),
+                    Some(None) => ScriptFileState::Failed,
+                    None => ScriptFileState::Pending,
+                }
+            },
+        )
+        .with_parse_options(options),
+    )
+}
+
 pub fn script_program(
     db: &dyn IncrementalDb,
     entry: SourceFile,
-) -> Arc<project::scripts::ScriptProgram> {
-    let inputs = ScriptFiles::try_get(db);
-    Arc::new(project::scripts::ScriptProgram::build_with_availability(
-        entry
-            .path(db)
-            .as_deref()
-            .expect("script entries have paths"),
-        |path| {
-            use project::scripts::ScriptFileState;
-            match inputs.and_then(|input| input.files(db).get(path)) {
-                Some(Some(file)) => ScriptFileState::Available(Arc::clone(script_file(db, *file))),
-                Some(None) => ScriptFileState::Failed,
-                None => ScriptFileState::Pending,
-            }
-        },
-    ))
+) -> &Arc<project::scripts::ScriptProgram> {
+    script_program_with_options(db, entry, primary_parse_options(db, entry))
 }
 
 /// Current package include closures, including module uses from live buffers.
@@ -204,12 +233,225 @@ fn workspace_import_programs(
                 .get(name)?
                 .join("src")
                 .join(format!("{name}.jl"));
-            Some(Arc::new(project::scripts::ScriptProgram::build(
-                &entry,
-                |path| Some(Arc::clone(script_file(db, *by_path.get(path)?))),
-            )))
+            let options = primary_parse_options(db, *by_path.get(&entry)?);
+            Some(Arc::new(
+                project::scripts::ScriptProgram::build(&entry, |path| {
+                    Some(Arc::clone(script_file_with_options(
+                        db,
+                        *by_path.get(path)?,
+                        options,
+                    )))
+                })
+                .with_parse_options(options),
+            ))
         })
         .collect()
+}
+
+/// One source can be loaded in several editions while retaining one text input.
+pub fn parse_diagnostics_with_options(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+    options: ParseOptions,
+) -> &[ParseDiagnostic] {
+    &parsed_document_with_options(db, file, options).diagnostics
+}
+pub fn parsed_tree_root_with_options(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+    options: ParseOptions,
+) -> SyntaxNode {
+    SyntaxNode::new_root(
+        parsed_document_with_options(db, file, options)
+            .green
+            .clone(),
+    )
+}
+
+#[salsa::input(singleton)]
+pub struct LibrarySyntaxInput {
+    #[returns(ref)]
+    pub data: Arc<crate::index::LibrarySyntax>,
+}
+
+#[salsa::tracked(returns(ref))]
+fn manifest_editions(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+) -> Arc<crate::parse_context::ManifestEditions> {
+    let path = file.path(db).as_deref().expect("a manifest has a path");
+    Arc::new(crate::parse_context::ManifestEditions::decode(
+        path,
+        file.text(db),
+    ))
+}
+
+fn select_edition_source(
+    db: &dyn IncrementalDb,
+    source: &crate::parse_context::EditionSource,
+) -> EditionSelection {
+    let file = source.path().and_then(|path| {
+        let input = SyntaxContexts::try_get(db)?;
+        if input.unavailable(db).contains(path) {
+            return None;
+        }
+        input.metadata(db).get(path).copied()
+    });
+    if let Some(file) = file
+        && let crate::parse_context::EditionSource::Manifest { path, name, uuid } = source
+    {
+        return manifest_editions(db, file).select(path, name, *uuid);
+    }
+    source.select(file.map(|file| file.text(db).as_ref()))
+}
+
+fn library_package_for_context(
+    db: &dyn IncrementalDb,
+    name: &str,
+    context: Option<&SourceContext>,
+) -> Option<Arc<PackageIndex>> {
+    if let Some(input) = LibrarySyntaxInput::try_get(db) {
+        let data = input.data(db);
+        if let Some(package) = data.packages.get(name) {
+            let source = context
+                .and_then(|context| context.source.path())
+                .and_then(|owner| data.environments.get(owner))
+                .and_then(|packages| packages.get(name))
+                .unwrap_or(&package.source);
+            let selected = select_edition_source(db, source);
+            if !selected.certain {
+                return None;
+            }
+            return data
+                .variants
+                .get(&(name.to_string(), selected.options))
+                .cloned();
+        }
+    }
+    LibraryIndex::try_get(db)?.packages(db).0.get(name).cloned()
+}
+
+/// Associations are inputs; their text is held in ordinary low-durability
+/// SourceFiles. A tracked query never discovers or reads files.
+#[salsa::input(singleton)]
+pub struct SyntaxContexts {
+    #[returns(ref)]
+    pub unavailable: BTreeSet<PathBuf>,
+    #[returns(ref)]
+    pub direct: BTreeSet<PathBuf>,
+    #[returns(ref)]
+    pub files: BTreeMap<PathBuf, Vec<SourceContext>>,
+    #[returns(ref)]
+    pub metadata: BTreeMap<PathBuf, SourceFile>,
+}
+
+#[derive(Default, PartialEq, Eq)]
+struct LivePackageMembership {
+    roots: Vec<SourceContext>,
+    files: BTreeMap<PathBuf, Vec<SourceContext>>,
+}
+
+#[salsa::input(singleton)]
+struct LivePackageSyntax {
+    #[returns(ref)]
+    membership: Arc<LivePackageMembership>,
+}
+
+#[salsa::tracked(returns(ref))]
+pub fn source_editions(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+) -> Arc<Vec<(SourceContext, EditionSelection)>> {
+    Arc::new(
+        file.path(db)
+            .as_deref()
+            .map_or_else(Vec::new, |path| tracked_source_editions(db, path)),
+    )
+}
+
+fn tracked_source_editions(
+    db: &dyn IncrementalDb,
+    path: &Path,
+) -> Vec<(SourceContext, EditionSelection)> {
+    let input = SyntaxContexts::try_get(db);
+    let library = LibrarySyntaxInput::try_get(db).map(|input| input.data(db));
+    let mut contexts = library
+        .and_then(|data| data.files.get(path))
+        .cloned()
+        .unwrap_or_default();
+    let mut retained = &[][..];
+    if let Some(data) = library {
+        retained = data
+            .failed_manifest_files
+            .get(path)
+            .map_or(&[], Vec::as_slice);
+        contexts.retain(|context| {
+            let Some((name, package)) = data
+                .packages
+                .iter()
+                .find(|(name, package)| package.entry(name) == context.entry)
+            else {
+                return true;
+            };
+            let selected = select_edition_source(db, &context.source);
+            !selected.certain
+                || data
+                    .variants
+                    .get(&(name.clone(), selected.options))
+                    .is_none_or(|index| {
+                        index
+                            .members
+                            .iter()
+                            .any(|member| normalize_path(&package.root.join(member)) == *path)
+                    })
+        });
+    }
+    if let Some(input) = LivePackageSyntax::try_get(db) {
+        let live = input.membership(db);
+        contexts.retain(|context| {
+            !live.roots.contains(context) || !select_edition_source(db, &context.source).certain
+        });
+        for context in live.files.get(path).into_iter().flatten() {
+            if !contexts.contains(context) {
+                contexts.push(context.clone());
+            }
+        }
+    }
+    for context in retained {
+        if !contexts.contains(context) {
+            contexts.push(context.clone());
+        }
+    }
+    if let Some(input) = input
+        && (!input.direct(db).contains(path) || contexts.is_empty())
+    {
+        for context in input.files(db).get(path).into_iter().flatten() {
+            if !contexts.contains(context) {
+                contexts.push(context.clone());
+            }
+        }
+    }
+    contexts.sort_by_key(|context| std::cmp::Reverse(context.owner_depth(path)));
+    contexts
+        .into_iter()
+        .map(|context| {
+            let mut selection = select_edition_source(db, &context.source);
+            if selection.certain && retained.contains(&context) {
+                // The live metadata may have recovered before the disk
+                // reload. Require a successful resolve to confirm the pin.
+                selection = context.source.select(None);
+            }
+            (context, selection)
+        })
+        .collect()
+}
+
+#[salsa::tracked(returns(clone))]
+pub fn primary_parse_options(db: &dyn IncrementalDb, file: SourceFile) -> ParseOptions {
+    source_editions(db, file)
+        .first()
+        .map(|(_, selected)| selected.options)
+        .unwrap_or_default()
 }
 
 /// The cached parse of a file. The `GreenNode` is not `Eq`, so
@@ -230,6 +472,7 @@ pub struct ParsedDocument {
 /// tracked query sound.
 #[derive(Debug, Clone)]
 pub struct PrevParse {
+    pub options: ParseOptions,
     pub text: Arc<str>,
     pub green: rowan::GreenNode,
     pub diagnostics: Vec<ParseDiagnostic>,
@@ -237,6 +480,22 @@ pub struct PrevParse {
 
 #[salsa::db]
 pub trait IncrementalDb: salsa::Database {
+    fn reparse_prev_with_options(
+        &self,
+        file: SourceFile,
+        options: ParseOptions,
+    ) -> Option<Arc<PrevParse>> {
+        self.reparse_prev(file)
+            .filter(|prev| prev.options == options)
+    }
+    fn reparse_pending_edits_with_options(
+        &self,
+        file: SourceFile,
+        _options: ParseOptions,
+    ) -> Vec<Edit> {
+        self.reparse_pending_edits(file)
+    }
+
     /// The cached previous parse for `file`, if any (the incremental-reparse
     /// base). The no-op default keeps bare test databases working without a
     /// cache — they simply always full-parse.
@@ -297,13 +556,17 @@ pub trait IncrementalDb: salsa::Database {
 /// order is only better for edits that are *adjacent*, where it saves a few
 /// tens of microseconds.
 ///
-/// Every path yields a result identical to `parse(text)` (Tenet 4), so the
+/// Every path yields a result identical to `parse_with_options(text, options)` (Tenet 4), so the
 /// side-channel never affects query semantics — salsa only sees text changes.
 #[salsa::tracked(returns(ref), no_eq)]
-pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocument {
+pub fn parsed_document_with_options(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+    options: ParseOptions,
+) -> ParsedDocument {
     let text = file.text(db);
-    let staged = db.reparse_pending_edits(file);
-    let prev = db.reparse_prev(file);
+    let staged = db.reparse_pending_edits_with_options(file, options);
+    let prev = db.reparse_prev_with_options(file, options);
 
     // Text unchanged: the base already holds what a full parse would return, so
     // hand it back rather than recomputing it. Salsa usually spares us the call
@@ -326,9 +589,15 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
     }
 
     let reparsed = prev.and_then(|prev| {
-        reparse_edits(&prev.text, &prev.green, &prev.diagnostics, &staged, text).or_else(|| {
+        let base = ReparseBase {
+            text: &prev.text,
+            green: &prev.green,
+            diagnostics: &prev.diagnostics,
+            options: prev.options,
+        };
+        reparse_edits_with_options(base, &staged, text, options).or_else(|| {
             let edit = diff_edit(&prev.text, text);
-            reparse(&prev.text, &prev.green, &prev.diagnostics, &edit, text)
+            reparse_with_options(base, &edit, text, options)
         })
     });
 
@@ -336,7 +605,7 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
     let (green, diagnostics) = match reparsed {
         Some(r) => (r.green, r.diagnostics),
         None => {
-            let parsed = parse(text);
+            let parsed = parse_with_options(text, options);
             (parsed.cst.green().to_owned(), parsed.diagnostics)
         }
     };
@@ -349,6 +618,7 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
     db.reparse_store(
         file,
         PrevParse {
+            options,
             text: text.clone(),
             green: green.clone(),
             diagnostics: diagnostics.clone(),
@@ -360,14 +630,18 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
     ParsedDocument { green, diagnostics }
 }
 
+pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> &ParsedDocument {
+    parsed_document_with_options(db, file, primary_parse_options(db, file))
+}
+
 /// The parse diagnostics for `file` (empty when it parses cleanly).
 pub fn parse_diagnostics(db: &dyn IncrementalDb, file: SourceFile) -> &[ParseDiagnostic] {
-    &parsed_document(db, file).diagnostics
+    parse_diagnostics_with_options(db, file, primary_parse_options(db, file))
 }
 
 /// Materialize the cached parse for `file` as a fresh `SyntaxNode` cursor.
 pub fn parsed_tree_root(db: &dyn IncrementalDb, file: SourceFile) -> SyntaxNode {
-    SyntaxNode::new_root(parsed_document(db, file).green.clone())
+    parsed_tree_root_with_options(db, file, primary_parse_options(db, file))
 }
 
 /// The per-file semantic model (scope tree, bindings, reads, and documentation),
@@ -379,32 +653,56 @@ pub fn parsed_tree_root(db: &dyn IncrementalDb, file: SourceFile) -> SyntaxNode 
 /// [`file_free_reads`] provide the invalidation barrier for position-shifting
 /// edits.
 #[salsa::tracked(returns(ref))]
-pub fn semantic_model(db: &dyn IncrementalDb, file: SourceFile) -> SemanticModel {
-    SemanticModel::build(&parsed_tree_root(db, file))
+pub fn semantic_model_with_options(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+    options: ParseOptions,
+) -> SemanticModel {
+    SemanticModel::build(&parsed_tree_root_with_options(db, file, options))
+}
+
+pub fn semantic_model(db: &dyn IncrementalDb, file: SourceFile) -> &SemanticModel {
+    semantic_model_with_options(db, file, primary_parse_options(db, file))
 }
 
 /// Static documentation in source order, with source positions and literal
 /// spelling removed. Equal decoded payloads backdate across Julia body edits,
 /// attachment shifts, and changes to escaping or indentation.
 #[salsa::tracked(returns(ref))]
-pub fn static_docstring_payloads(db: &dyn IncrementalDb, file: SourceFile) -> Arc<[String]> {
-    crate::documentation::static_documentation(semantic_model(db, file))
+pub fn static_docstring_payloads_with_options(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+    options: ParseOptions,
+) -> Arc<[String]> {
+    crate::documentation::static_documentation(semantic_model_with_options(db, file, options))
         .map(|(_, decoded)| decoded.as_str().to_string())
         .collect()
+}
+
+pub fn static_docstring_payloads(db: &dyn IncrementalDb, file: SourceFile) -> &Arc<[String]> {
+    static_docstring_payloads_with_options(db, file, primary_parse_options(db, file))
 }
 
 /// The demand-only Markdown navigation index. Depend only on decoded payloads
 /// so edits to Julia code do not repeat the file's documentation parses.
 #[salsa::tracked(returns(ref))]
-pub fn documentation_index(
+pub fn documentation_index_with_options(
     db: &dyn IncrementalDb,
     file: SourceFile,
+    options: ParseOptions,
 ) -> Arc<crate::documentation::DocumentationIndex> {
     Arc::new(crate::documentation::DocumentationIndex::build(
-        static_docstring_payloads(db, file)
+        static_docstring_payloads_with_options(db, file, options)
             .iter()
             .map(String::as_str),
     ))
+}
+
+pub fn documentation_index(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+) -> &Arc<crate::documentation::DocumentationIndex> {
+    documentation_index_with_options(db, file, primary_parse_options(db, file))
 }
 
 /// The per-file control-flow graph: one region per function-like body and
@@ -413,8 +711,16 @@ pub fn documentation_index(
 /// edit that leaves the graph unchanged is backdated and CFG-dependent work is
 /// not re-run.
 #[salsa::tracked(returns(ref))]
-pub fn control_flow(db: &dyn IncrementalDb, file: SourceFile) -> FileControlFlow {
-    FileControlFlow::build(&parsed_tree_root(db, file))
+pub fn control_flow_with_options(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+    options: ParseOptions,
+) -> FileControlFlow {
+    FileControlFlow::build(&parsed_tree_root_with_options(db, file, options))
+}
+
+pub fn control_flow(db: &dyn IncrementalDb, file: SourceFile) -> &FileControlFlow {
+    control_flow_with_options(db, file, primary_parse_options(db, file))
 }
 
 // The firewall queries: range-free projections of [`semantic_model`] (or, for
@@ -428,23 +734,47 @@ pub fn control_flow(db: &dyn IncrementalDb, file: SourceFile) -> FileControlFlow
 /// another file that `include`s this one sees. Editing a function body changes
 /// [`semantic_model`] but leaves this `BTreeSet` equal, so salsa backdates.
 #[salsa::tracked(returns(ref))]
-pub fn file_exports(db: &dyn IncrementalDb, file: SourceFile) -> BTreeSet<String> {
-    project::file_exports(semantic_model(db, file))
+pub fn file_exports_with_options(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+    options: ParseOptions,
+) -> BTreeSet<String> {
+    project::file_exports(semantic_model_with_options(db, file, options))
+}
+
+pub fn file_exports(db: &dyn IncrementalDb, file: SourceFile) -> &BTreeSet<String> {
+    file_exports_with_options(db, file, primary_parse_options(db, file))
 }
 
 /// The names the file reads but binds nowhere in it
 /// ([`crate::project::file_free_reads`]). The mirror firewall to
 /// [`file_exports`].
 #[salsa::tracked(returns(ref))]
-pub fn file_free_reads(db: &dyn IncrementalDb, file: SourceFile) -> BTreeSet<String> {
-    project::file_free_reads(semantic_model(db, file))
+pub fn file_free_reads_with_options(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+    options: ParseOptions,
+) -> BTreeSet<String> {
+    project::file_free_reads(semantic_model_with_options(db, file, options))
+}
+
+pub fn file_free_reads(db: &dyn IncrementalDb, file: SourceFile) -> &BTreeSet<String> {
+    file_free_reads_with_options(db, file, primary_parse_options(db, file))
 }
 
 /// The module-qualified names the file references, each a full dotted path
 /// ([`crate::project::file_qualified_reads`]).
 #[salsa::tracked(returns(ref))]
-pub fn file_qualified_reads(db: &dyn IncrementalDb, file: SourceFile) -> BTreeSet<String> {
-    project::file_qualified_reads(semantic_model(db, file))
+pub fn file_qualified_reads_with_options(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+    options: ParseOptions,
+) -> BTreeSet<String> {
+    project::file_qualified_reads(semantic_model_with_options(db, file, options))
+}
+
+pub fn file_qualified_reads(db: &dyn IncrementalDb, file: SourceFile) -> &BTreeSet<String> {
+    file_qualified_reads_with_options(db, file, primary_parse_options(db, file))
 }
 
 /// The file's static `include("literal")` edges, in source order, resolved
@@ -452,10 +782,18 @@ pub fn file_qualified_reads(db: &dyn IncrementalDb, file: SourceFile) -> BTreeSe
 /// path is an input field set once, so this re-runs only on a text edit and
 /// backdates when the edges are unchanged.
 #[salsa::tracked(returns(ref))]
-pub fn include_edges(db: &dyn IncrementalDb, file: SourceFile) -> Vec<IncludeEdge> {
-    let root = parsed_tree_root(db, file);
+pub fn include_edges_with_options(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+    options: ParseOptions,
+) -> Vec<IncludeEdge> {
+    let root = parsed_tree_root_with_options(db, file, options);
     let base_dir = file.path(db).as_deref().and_then(Path::parent);
     project::include_edges(&root, base_dir)
+}
+
+pub fn include_edges(db: &dyn IncrementalDb, file: SourceFile) -> &Vec<IncludeEdge> {
+    include_edges_with_options(db, file, primary_parse_options(db, file))
 }
 
 /// The names in `file`'s `[deps]`, when it parses as a project file — the
@@ -588,12 +926,53 @@ pub fn project_graph(db: &dyn IncrementalDb) -> ProjectGraph {
             &by_path,
             entry,
             entry_file,
+            primary_parse_options(db, entry_file),
             Vec::new(),
             &name,
             &mut color,
             &mut graph,
         );
     }
+    graph
+}
+
+#[salsa::tracked(returns(ref))]
+fn project_graph_with_options(
+    db: &dyn IncrementalDb,
+    entry: SourceFile,
+    options: ParseOptions,
+) -> ProjectGraph {
+    let mut by_path: HashMap<_, _> = WorkspaceFiles::try_get(db)
+        .into_iter()
+        .flat_map(|input| input.files(db))
+        .filter_map(|&file| Some((normalize_path(file.path(db).as_deref()?), file)))
+        .collect();
+    if let Some(input) = ScriptFiles::try_get(db) {
+        for (path, file) in input.files(db) {
+            if let Some(file) = file {
+                by_path.entry(path.clone()).or_insert(*file);
+            }
+        }
+    }
+    let mut graph = ProjectGraph::default();
+    let Some(path) = entry.path(db) else {
+        return graph;
+    };
+    let name = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    walk_include_graph(
+        db,
+        &by_path,
+        path.clone(),
+        entry,
+        options,
+        Vec::new(),
+        name,
+        &mut HashMap::new(),
+        &mut graph,
+    );
     graph
 }
 
@@ -608,6 +987,7 @@ fn walk_include_graph(
     by_path: &HashMap<PathBuf, SourceFile>,
     path: PathBuf,
     file: SourceFile,
+    options: ParseOptions,
     host: Vec<String>,
     pkg: &str,
     color: &mut HashMap<PathBuf, IncludeColor>,
@@ -617,7 +997,7 @@ fn walk_include_graph(
     graph.nodes.push(path.clone());
     graph.host_modules.insert(path.clone(), host.clone());
 
-    for edge in include_edges(db, file) {
+    for edge in include_edges_with_options(db, file, options) {
         let target = match &edge.target {
             Some(target) => normalize_path(target),
             None => {
@@ -663,7 +1043,7 @@ fn walk_include_graph(
             }),
             Some(IncludeColor::Black) => {}
             None => walk_include_graph(
-                db, by_path, target, child_file, child_host, pkg, color, graph,
+                db, by_path, target, child_file, options, child_host, pkg, color, graph,
             ),
         }
     }
@@ -714,7 +1094,7 @@ fn workspace_package_for(db: &dyn IncrementalDb, path: &Path) -> Option<Arc<Pack
         }
     }
     let (_, name) = best?;
-    index.packages(db).0.get(name).cloned()
+    library_package_for_context(db, name, None)
 }
 
 /// [`PackageSource::workspace_member`] keyed by [`SourceFile`], for tracked
@@ -768,11 +1148,7 @@ struct DbPackages<'a>(&'a dyn IncrementalDb);
 
 impl PackageSource for DbPackages<'_> {
     fn package(&self, name: &str) -> Option<Arc<PackageIndex>> {
-        LibraryIndex::try_get(self.0)?
-            .packages(self.0)
-            .0
-            .get(name)
-            .cloned()
+        library_package_for_context(self.0, name, None)
     }
 
     fn package_root(&self, name: &str) -> Option<PathBuf> {
@@ -805,6 +1181,82 @@ pub fn workspace_reference_index(db: &dyn IncrementalDb) -> WorkspaceReferenceIn
         for (key, recs) in &projection.0 {
             let bucket = out.entry(key.clone()).or_default();
             bucket.extend(recs.iter().map(|rec| (file, *rec)));
+        }
+    }
+    WorkspaceReferenceIndex(out)
+}
+
+#[salsa::tracked(returns(ref))]
+fn context_workspace_occurrences(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+    entry: SourceFile,
+    options: ParseOptions,
+    context: SourceContext,
+) -> WorkspaceOccurrences {
+    let graph = project_graph_with_options(db, entry, options);
+    let model = semantic_model_with_options(db, file, options);
+    struct Packages<'a> {
+        db: &'a dyn IncrementalDb,
+        context: Option<&'a SourceContext>,
+    }
+    impl PackageSource for Packages<'_> {
+        fn package(&self, name: &str) -> Option<Arc<PackageIndex>> {
+            library_package_for_context(self.db, name, self.context)
+        }
+    }
+    let packages = Packages {
+        db,
+        context: Some(&context),
+    };
+    let workspace = entry
+        .path(db)
+        .as_deref()
+        .and_then(|path| workspace_package_for(db, path))
+        .and_then(|package| {
+            Some((
+                packages.package(&package.name)?,
+                graph
+                    .host_modules
+                    .get(file.path(db).as_deref()?)
+                    .into_iter()
+                    .flatten()
+                    .map(SmolStr::new)
+                    .collect(),
+            ))
+        });
+    WorkspaceOccurrences(
+        Resolver::new(model, &packages)
+            .with_workspace(workspace)
+            .workspace_occurrences(),
+    )
+}
+
+#[salsa::tracked(returns(ref))]
+fn context_workspace_reference_index(
+    db: &dyn IncrementalDb,
+    entry: SourceFile,
+    options: ParseOptions,
+    context: SourceContext,
+) -> WorkspaceReferenceIndex {
+    let mut out: BTreeMap<OccurrenceKey, Vec<(SourceFile, OccurrenceRec)>> = BTreeMap::new();
+    let graph = project_graph_with_options(db, entry, options);
+    if let Some(input) = WorkspaceFiles::try_get(db) {
+        for &file in input.files(db) {
+            if file
+                .path(db)
+                .as_ref()
+                .is_none_or(|path| !graph.nodes.contains(path))
+            {
+                continue;
+            }
+            for (key, records) in
+                &context_workspace_occurrences(db, file, entry, options, context.clone()).0
+            {
+                out.entry(key.clone())
+                    .or_default()
+                    .extend(records.iter().map(|record| (file, *record)));
+            }
         }
     }
     WorkspaceReferenceIndex(out)
@@ -873,14 +1325,19 @@ pub struct IncrementalDatabase {
 /// splice against, and the chain of edits staged since that parse.
 #[derive(Debug, Default)]
 struct FileReparseState {
-    prev: Option<Arc<PrevParse>>,
-    pending: Vec<Edit>,
+    editions: BTreeMap<ParseOptions, EditionReparseState>,
     /// When this entry was last touched, for eviction. See [`ReparseCache`].
     used: u64,
     /// Whether this file has shown it benefits from a base: an editor staged a
     /// real edit chain against it, or a splice actually landed. See
     /// [`ReparseCache`] for what the flag buys.
     hot: bool,
+}
+
+#[derive(Debug, Default)]
+struct EditionReparseState {
+    prev: Option<Arc<PrevParse>>,
+    pending: Vec<Edit>,
 }
 
 /// How many files keep a reparse base. Every file the include graph reaches
@@ -965,11 +1422,21 @@ impl ReparseCache {
 
 impl Default for IncrementalDatabase {
     fn default() -> Self {
-        Self {
+        let db = Self {
             storage: salsa::Storage::new(None),
             source_map: Arc::new(Mutex::new(FileSourceMap::default())),
             reparse_cache: Arc::new(Mutex::new(ReparseCache::default())),
-        }
+        };
+        SyntaxContexts::new(
+            &db,
+            BTreeSet::new(),
+            BTreeSet::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        );
+        LibrarySyntaxInput::new(&db, Arc::new(crate::index::LibrarySyntax::default()));
+        LivePackageSyntax::new(&db, Arc::default());
+        db
     }
 }
 
@@ -1005,44 +1472,54 @@ impl salsa::Database for IncrementalDatabase {}
 #[salsa::db]
 impl IncrementalDb for IncrementalDatabase {
     fn reparse_prev(&self, file: SourceFile) -> Option<Arc<PrevParse>> {
+        self.reparse_prev_with_options(file, primary_parse_options(self, file))
+    }
+
+    fn reparse_prev_with_options(
+        &self,
+        file: SourceFile,
+        options: ParseOptions,
+    ) -> Option<Arc<PrevParse>> {
         let mut cache = self.reparse_state();
-        // Read through `touch` so a file the editor keeps hitting stays hot
-        // even across a long run of parses of other files.
-        let prev = cache.files.get(&file)?.prev.clone();
+        let prev = cache.files.get(&file)?.editions.get(&options)?.prev.clone();
         cache.touch(file);
         prev
     }
 
     fn reparse_stage_edits(&self, file: SourceFile, edits: Option<Vec<Edit>>) {
+        let options = primary_parse_options(self, file);
         let mut cache = self.reparse_state();
         let state = cache.touch(file);
-        let Some(edits) = edits else {
-            // `None` is an unknown transform, which is also what a sweep and a
-            // disk revert look like, so it must not promote the entry.
-            state.pending.clear();
-            return;
-        };
-        state.hot = true;
-        state.pending.extend(edits);
-
-        // Bound the chain here rather than where it is read: nothing guarantees
-        // a read happens per stage. Under pull diagnostics the analysis thread
-        // stages on every keystroke but demands no parse (see
-        // `lsp::analysis_thread::start`), so an unbounded chain would grow one
-        // edit per keypress until the client happens to pull. Over budget, the
-        // chain becomes an unknown transform and the next parse falls back to
-        // the whole-text diff — correct, just coarser.
-        let bytes: usize = state.pending.iter().map(|e| e.insert.len()).sum();
-        if state.pending.len() > MAX_CHAIN_EDITS || bytes > MAX_CHAIN_INSERT_BYTES {
-            state.pending.clear();
+        state.editions.entry(options).or_default();
+        if edits.is_some() {
+            state.hot = true;
+        }
+        for edition in state.editions.values_mut() {
+            match &edits {
+                Some(edits) => edition.pending.extend(edits.iter().cloned()),
+                None => edition.pending.clear(),
+            }
+            let bytes: usize = edition.pending.iter().map(|edit| edit.insert.len()).sum();
+            if edition.pending.len() > MAX_CHAIN_EDITS || bytes > MAX_CHAIN_INSERT_BYTES {
+                edition.pending.clear();
+            }
         }
         cache.evict_over_budget();
     }
 
     fn reparse_pending_edits(&self, file: SourceFile) -> Vec<Edit> {
+        self.reparse_pending_edits_with_options(file, primary_parse_options(self, file))
+    }
+
+    fn reparse_pending_edits_with_options(
+        &self,
+        file: SourceFile,
+        options: ParseOptions,
+    ) -> Vec<Edit> {
         self.reparse_state()
             .files
             .get(&file)
+            .and_then(|state| state.editions.get(&options))
             .map(|state| state.pending.clone())
             .unwrap_or_default()
     }
@@ -1067,7 +1544,8 @@ impl IncrementalDb for IncrementalDatabase {
         // A splice that landed is proof this file's base earns its slot, which
         // is the signal a client on full-buffer sync gives instead of a chain.
         state.hot |= tier.is_some();
-        state.prev = Some(Arc::new(prev));
+        let edition = state.editions.entry(prev.options).or_default();
+        edition.prev = Some(Arc::new(prev));
         // Drain the *prefix* the caller saw, not the whole chain: a stage can
         // land between the peek and this store (an `upsert_file` that finds the
         // text unchanged takes no `&mut db`, so it neither blocks nor cancels
@@ -1076,7 +1554,7 @@ impl IncrementalDb for IncrementalDatabase {
         // budget or stale — is what keeps this self-healing: the base has
         // advanced to the current text either way, so a chain kept back would
         // be stale forever after.
-        state.pending.drain(..consumed.min(state.pending.len()));
+        edition.pending.drain(..consumed.min(edition.pending.len()));
         cache.evict_over_budget();
     }
 
@@ -1093,6 +1571,383 @@ const MAX_CHAIN_EDITS: usize = 16;
 const MAX_CHAIN_INSERT_BYTES: usize = 64 * 1024;
 
 impl IncrementalDatabase {
+    pub(crate) fn retain_failed_manifest_memberships(
+        &self,
+        syntax: &mut crate::index::LibrarySyntax,
+        failed: &BTreeSet<PathBuf>,
+    ) {
+        syntax.retain_failed_manifest_memberships(LibrarySyntaxInput::get(self).data(self), failed);
+        syntax.retain_failed_manifest_files(
+            &LivePackageSyntax::get(self).membership(self).files,
+            failed,
+        );
+    }
+
+    /// Loading roots for a potentially changed include, from the last
+    /// harvest and any closures already expanded using editor buffers.
+    pub(crate) fn package_contexts(&self, path: &Path) -> impl Iterator<Item = &SourceContext> {
+        let data = LibrarySyntaxInput::get(self).data(self);
+        let direct = SyntaxContexts::get(self);
+        let manifest_contexts =
+            direct
+                .files(self)
+                .get(path)
+                .into_iter()
+                .flatten()
+                .filter(move |context| {
+                    direct.direct(self).contains(path)
+                        && matches!(
+                            context.source,
+                            crate::parse_context::EditionSource::Manifest { .. }
+                        )
+                });
+        data.files
+            .get(path)
+            .into_iter()
+            .flatten()
+            .chain(self.live_package_contexts(path).filter(|context| {
+                data.files
+                    .get(&context.entry)
+                    .is_some_and(|contexts| contexts.contains(context))
+            }))
+            .chain(manifest_contexts)
+    }
+
+    pub(crate) fn changed_unindexed_package_roots(&self) -> impl Iterator<Item = &SourceContext> {
+        let data = LibrarySyntaxInput::get(self).data(self);
+        data.unindexed_options
+            .iter()
+            .filter_map(|(context, options)| {
+                (select_edition_source(self, &context.source).options != *options)
+                    .then_some(context)
+            })
+    }
+
+    pub(crate) fn live_package_contexts(
+        &self,
+        path: &Path,
+    ) -> impl Iterator<Item = &SourceContext> {
+        LivePackageSyntax::get(self)
+            .membership(self)
+            .files
+            .get(path)
+            .into_iter()
+            .flatten()
+    }
+
+    pub(crate) fn set_live_package_contexts(
+        &mut self,
+        roots: Vec<SourceContext>,
+        catalog: crate::parse_context::ContextCatalog,
+        buffers: &BTreeMap<PathBuf, Arc<str>>,
+    ) -> bool {
+        let input = LivePackageSyntax::get(self);
+        for root in &roots {
+            if let Some(path) = root.source.path() {
+                self.seed_disk_file(path);
+            }
+        }
+        let membership = LivePackageMembership {
+            roots,
+            files: catalog
+                .files
+                .into_iter()
+                .map(|(path, contexts)| {
+                    (
+                        path,
+                        contexts.into_iter().map(|(context, _)| context).collect(),
+                    )
+                })
+                .collect(),
+        };
+        for (path, disk) in catalog.sources {
+            if let Some(text) = buffers.get(&path).cloned().or_else(|| disk.ok()) {
+                self.upsert_file(&path, text);
+            }
+        }
+        if **input.membership(self) == membership {
+            return false;
+        }
+        input.set_membership(self).to(Arc::new(membership));
+        true
+    }
+
+    pub fn set_library_syntax(&mut self, data: crate::index::LibrarySyntax) {
+        let metadata: BTreeSet<_> = data
+            .packages
+            .values()
+            .map(|package| &package.source)
+            .chain(
+                data.environments
+                    .values()
+                    .flat_map(|packages| packages.values()),
+            )
+            .chain(
+                data.unindexed_files
+                    .values()
+                    .flatten()
+                    .map(|context| &context.source),
+            )
+            .filter_map(|source| source.path())
+            .collect();
+        for path in metadata {
+            self.seed_disk_file(path);
+        }
+        let input = LibrarySyntaxInput::get(self);
+        if **input.data(self) != data {
+            input.set_data(self).to(Arc::new(data));
+        }
+    }
+
+    pub fn install_syntax_variant(
+        &mut self,
+        name: String,
+        options: ParseOptions,
+        index: Arc<PackageIndex>,
+    ) {
+        self.install_syntax_variants([(name, options, index)]);
+    }
+
+    pub(crate) fn install_syntax_variants(
+        &mut self,
+        variants: impl IntoIterator<Item = (String, ParseOptions, Arc<PackageIndex>)>,
+    ) {
+        let input = LibrarySyntaxInput::get(self);
+        let mut data = (**input.data(self)).clone();
+        for (name, options, index) in variants {
+            if data.packages.contains_key(&name) {
+                data.variants.insert((name, options), index);
+            }
+        }
+        data.rebuild_memberships();
+        if **input.data(self) != data {
+            input.set_data(self).to(Arc::new(data));
+        }
+    }
+
+    /// Discard the cached trees of packages whose disk sources changed. Keep
+    /// their last known memberships until the new variants arrive together.
+    pub(crate) fn invalidate_workspace_variants(&mut self, paths: &BTreeSet<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+        let input = LibrarySyntaxInput::get(self);
+        let data = input.data(self);
+        let names: BTreeSet<_> = self
+            .workspace_packages()
+            .into_iter()
+            .filter(|name| {
+                let Some(package) = data.packages.get(name) else {
+                    return false;
+                };
+                let src = package.root.join("src");
+                let ext = package.root.join("ext");
+                let entry = package.entry(name);
+                paths.iter().any(|path| {
+                    path.starts_with(&src)
+                        || path.starts_with(&ext)
+                        || data.files.get(path).is_some_and(|contexts| {
+                            contexts.iter().any(|context| context.entry == entry)
+                        })
+                })
+            })
+            .collect();
+        if names.is_empty() {
+            return;
+        }
+        let mut data = (**data).clone();
+        let before = data.variants.len();
+        data.variants.retain(|(name, _), _| !names.contains(name));
+        if data.variants.len() != before {
+            input.set_data(self).to(Arc::new(data));
+        }
+    }
+
+    pub fn pending_syntax_harvests(&self) -> Vec<(String, PathBuf, ParseOptions)> {
+        let input = LibrarySyntaxInput::get(self);
+        let data = input.data(self);
+        let mut work = BTreeMap::new();
+        for (name, package) in &data.packages {
+            let sources = std::iter::once(&package.source).chain(
+                data.environments
+                    .values()
+                    .filter_map(|sources| sources.get(name)),
+            );
+            for source in sources {
+                let selected = select_edition_source(self, source);
+                if selected.certain
+                    && !data
+                        .variants
+                        .contains_key(&(name.clone(), selected.options))
+                {
+                    work.insert((name.clone(), selected.options), package.root.clone());
+                }
+            }
+        }
+        work.into_iter()
+            .map(|((name, options), root)| (name, root, options))
+            .collect()
+    }
+
+    /// Install loading contexts without replacing authoritative live text.
+    pub fn set_source_contexts(&mut self, path: &Path, mut contexts: Vec<SourceContext>) {
+        use crate::parse_context::EditionSource;
+        for context in &mut contexts {
+            context.entry = normalize_path(&context.entry);
+            match &mut context.source {
+                EditionSource::Project { path, .. } | EditionSource::Manifest { path, .. } => {
+                    *path = normalize_path(path);
+                }
+                EditionSource::Fixed(_) => {}
+            }
+        }
+        self.update_source_contexts([(normalize_path(path), contexts, false)]);
+    }
+
+    /// Replace a script load's associations together. Paths that left all
+    /// configured programs return to direct discovery.
+    pub(crate) fn replace_script_contexts(
+        &mut self,
+        previous: &BTreeSet<PathBuf>,
+        contexts: BTreeMap<PathBuf, Vec<SourceContext>>,
+    ) -> bool {
+        let buffers = self.metadata_buffers();
+        let removed: Vec<_> = previous
+            .iter()
+            .filter(|path| !contexts.contains_key(*path))
+            .map(|path| Self::direct_context(path, &buffers))
+            .collect();
+        self.update_source_contexts(
+            contexts
+                .into_iter()
+                .map(|(path, contexts)| (path, contexts, false))
+                .chain(removed),
+        )
+    }
+
+    fn direct_context(
+        path: &Path,
+        buffers: &BTreeMap<PathBuf, Arc<str>>,
+    ) -> (PathBuf, Vec<SourceContext>, bool) {
+        let env = crate::environment::EnvContext::from_process(path.to_path_buf());
+        let (roots, _) =
+            crate::parse_context::manifest_contexts(&[path.to_path_buf()], None, env.clone());
+        let catalog = crate::parse_context::ContextCatalog::load(&roots, buffers, None);
+        let mut contexts: Vec<_> = catalog
+            .selections(path)
+            .iter()
+            .map(|(context, _)| context.clone())
+            .collect();
+        if contexts.is_empty() {
+            contexts.push(crate::parse_context::discover(path, &env, buffers));
+        }
+        (path.to_path_buf(), contexts, true)
+    }
+
+    fn update_source_contexts(
+        &mut self,
+        updates: impl IntoIterator<Item = (PathBuf, Vec<SourceContext>, bool)>,
+    ) -> bool {
+        let input = SyntaxContexts::get(self);
+        let mut direct = input.direct(self).clone();
+        let mut files = input.files(self).clone();
+        for (path, contexts, is_direct) in updates {
+            for context in &contexts {
+                if let Some(source) = context.source.path() {
+                    self.seed_disk_file(source);
+                }
+            }
+            if is_direct {
+                direct.insert(path.clone());
+            } else {
+                direct.remove(&path);
+            }
+            files.insert(path, contexts);
+        }
+        let changed = *input.direct(self) != direct || *input.files(self) != files;
+        if *input.direct(self) != direct {
+            input.set_direct(self).to(direct);
+        }
+        if *input.files(self) != files {
+            input.set_files(self).to(files);
+        }
+        changed
+    }
+
+    fn track_default_context(&mut self, path: &Path, file: SourceFile) {
+        let input = SyntaxContexts::get(self);
+        if crate::environment::is_environment_file(path) {
+            if input.unavailable(self).contains(path) {
+                let mut unavailable = input.unavailable(self).clone();
+                unavailable.remove(path);
+                input.set_unavailable(self).to(unavailable);
+            }
+            if input.metadata(self).get(path) != Some(&file) {
+                let mut metadata = input.metadata(self).clone();
+                metadata.insert(path.to_path_buf(), file);
+                input.set_metadata(self).to(metadata);
+            }
+        } else {
+            self.ensure_source_context(path);
+        }
+    }
+
+    pub(crate) fn ensure_source_context(&mut self, path: &Path) {
+        if SyntaxContexts::get(self).files(self).contains_key(path) {
+            return;
+        }
+        let buffers = self.metadata_buffers();
+        let context = if LibrarySyntaxInput::get(self)
+            .data(self)
+            .files
+            .contains_key(path)
+        {
+            // The library already registered the manifest closure. Keep a
+            // cheap direct fallback for when that membership disappears.
+            let env = crate::environment::EnvContext::from_process(path.to_path_buf());
+            let context = crate::parse_context::discover(path, &env, &buffers);
+            (path.to_path_buf(), vec![context], true)
+        } else {
+            Self::direct_context(path, &buffers)
+        };
+        self.update_source_contexts([context]);
+    }
+
+    pub(crate) fn metadata_buffers(&self) -> BTreeMap<PathBuf, Arc<str>> {
+        self.source_map()
+            .by_path
+            .iter()
+            .filter(|(path, _)| {
+                crate::environment::is_environment_file(path)
+                    && !SyntaxContexts::get(self).unavailable(self).contains(*path)
+            })
+            .map(|(path, file)| (path.clone(), Arc::clone(file.text(self))))
+            .collect()
+    }
+
+    /// New, deleted, and renamed project files can change which project owns a
+    /// loose buffer. Known package/dependency/include contexts stay authoritative.
+    pub fn rediscover_source_contexts(&mut self) {
+        let input = SyntaxContexts::get(self);
+        let buffers = self.metadata_buffers();
+        let contexts: Vec<_> = input
+            .direct(self)
+            .iter()
+            .map(|path| Self::direct_context(path, &buffers))
+            .collect();
+        self.update_source_contexts(contexts);
+    }
+
+    pub fn source_editions(
+        &self,
+        file: SourceFile,
+    ) -> &Arc<Vec<(SourceContext, EditionSelection)>> {
+        source_editions(self, file)
+    }
+    pub fn parse_options(&self, file: SourceFile) -> ParseOptions {
+        primary_parse_options(self, file)
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -1131,7 +1986,7 @@ impl IncrementalDatabase {
         let key = normalize_path(path);
         let text = text.into();
         let existing = self.source_map().by_path.get(&key).copied();
-        match existing {
+        let file = match existing {
             Some(file) => {
                 // Salsa's setter never compares, so this guard — the compare,
                 // not the `ptr_eq` — is what stops a no-op upsert from
@@ -1150,10 +2005,12 @@ impl IncrementalDatabase {
             None => {
                 let id = self.source_map().alloc_id();
                 let file = SourceFile::new(self, id, Some(key.clone()), text);
-                self.source_map().by_path.insert(key, file);
+                self.source_map().by_path.insert(key.clone(), file);
                 file
             }
-        }
+        };
+        self.track_default_context(&key, file);
+        file
     }
 
     /// Look up the input tracked for `path`, if any.
@@ -1360,10 +2217,14 @@ impl IncrementalDatabase {
         if let Some(file) = self.lookup_file(&key) {
             return Some(file);
         }
+        if !key.is_file() {
+            return None;
+        }
         let text = std::fs::read_to_string(&key).ok()?;
         let id = self.source_map().alloc_id();
         let file = SourceFile::new(self, id, Some(key.clone()), Arc::from(text));
-        self.source_map().by_path.insert(key, file);
+        self.source_map().by_path.insert(key.clone(), file);
+        self.track_default_context(&key, file);
         Some(file)
     }
 
@@ -1422,18 +2283,16 @@ impl IncrementalDatabase {
         ScriptFiles::try_get(self).is_none_or(|input| *input.pending(self))
     }
 
-    /// Replace the reverse-index file set (the [`WorkspaceFiles`] singleton),
-    /// creating it on first call. Unchanged membership still re-sets, but the
-    /// only consumer ([`workspace_reference_index`]) is demanded lazily, so a
-    /// needless revision bump costs at most one recompute on the next request.
+    /// Replace the reverse-index file set, preserving unchanged membership.
     pub fn set_workspace_files(&mut self, files: Vec<SourceFile>) {
         match WorkspaceFiles::try_get(self) {
-            Some(wf) => {
+            Some(wf) if *wf.files(self) != files => {
                 wf.set_files(self).to(files);
             }
             None => {
-                let _ = WorkspaceFiles::builder(files).new(self);
+                let _ = WorkspaceFiles::builder(files, Vec::new()).new(self);
             }
+            _ => {}
         }
     }
 
@@ -1441,8 +2300,8 @@ impl IncrementalDatabase {
     /// tracked and readable. Used when an editor closes a member file: the
     /// discarded (possibly unsaved) buffer must not linger in the
     /// reverse-occurrence index, where on-disk content is authoritative once the
-    /// document is closed. A no-op for an untracked path, an unreadable or deleted
-    /// file, or text already matching disk (so no needless revision bump).
+    /// document is closed. Unreadable or deleted Julia files lose their live
+    /// text. Untracked files or unchanged text need no database write.
     ///
     /// Evicts the file's incremental-reparse state first, before any of those
     /// early returns: the buffer this path was being edited through is gone, so
@@ -1454,8 +2313,20 @@ impl IncrementalDatabase {
         };
         self.reparse_evict(file);
         let Ok(text) = std::fs::read_to_string(path) else {
+            if crate::environment::is_environment_file(path) {
+                let input = SyntaxContexts::get(self);
+                let mut unavailable = input.unavailable(self).clone();
+                if unavailable.insert(normalize_path(path)) {
+                    input.set_unavailable(self).to(unavailable);
+                }
+            } else if !file.text(self).is_empty() {
+                file.set_text(self).to(Arc::from(""));
+            }
             return;
         };
+        if crate::environment::is_environment_file(path) {
+            self.track_default_context(&normalize_path(path), file);
+        }
         if **file.text(self) != *text {
             file.set_text(self).to(Arc::from(text));
         }
@@ -1465,18 +2336,33 @@ impl IncrementalDatabase {
     /// union as the reverse-index file set. A no-op when no folder is a package
     /// project or nothing has been harvested yet. Called right after the library
     /// index is swapped in (on the analysis thread's write path).
-    pub fn seed_workspace_members(&mut self) {
+    pub fn seed_workspace_members(&mut self) -> bool {
         let names = self.workspace_packages();
-        if names.is_empty() {
-            return;
-        }
         let mut files: Vec<SourceFile> = Vec::new();
         let mut seen: std::collections::HashSet<SourceFile> = std::collections::HashSet::new();
+        let mut entries = BTreeSet::new();
+        let mut uncertain_members = BTreeSet::new();
         for name in names {
-            let (Some(pkg), Some(root)) = (self.library_package(&name), self.package_root(&name))
-            else {
+            let Some(root) = self.package_root(&name) else {
                 continue;
             };
+            let Some(pkg) = self.library_package(&name) else {
+                let data = LibrarySyntaxInput::get(self).data(self);
+                if data
+                    .packages
+                    .get(&name)
+                    .is_some_and(|package| !select_edition_source(self, &package.source).certain)
+                {
+                    for ((variant, _), index) in &data.variants {
+                        if *variant == name {
+                            uncertain_members
+                                .extend(index.members.iter().map(|path| root.join(path)));
+                        }
+                    }
+                }
+                continue;
+            };
+            entries.insert(normalize_path(&root.join("src").join(format!("{name}.jl"))));
             // Dedup across packages: overlapping folders must not register a
             // file twice, or the reference index would double-count it.
             for rel in &pkg.members {
@@ -1487,6 +2373,16 @@ impl IncrementalDatabase {
                 }
             }
         }
+        for (path, contexts) in &LivePackageSyntax::get(self).membership(self).files {
+            if contexts
+                .iter()
+                .any(|context| entries.contains(&context.entry))
+                && let Some(file) = self.lookup_file(path)
+                && seen.insert(file)
+            {
+                files.push(file);
+            }
+        }
         // Pin a canonical (by-path) order so an unchanged member set always
         // seeds an identical `Vec`, independent of the iteration order of
         // `names`/`members` above. `WorkspaceFiles` is compared by value, so a
@@ -1495,17 +2391,25 @@ impl IncrementalDatabase {
         // recompute. Every seeded member has a path (`seed_disk_file` sets one),
         // and each path maps to a single handle, so the sort is total and stable.
         files.sort_by(|a, b| a.path(self).cmp(b.path(self)));
+        let changed = WorkspaceFiles::try_get(self)
+            .map_or(!files.is_empty(), |input| *input.files(self) != files);
         self.set_workspace_files(files);
+        let rename_only: Vec<_> = uncertain_members
+            .iter()
+            .filter_map(|path| self.seed_disk_file(path))
+            .filter(|file| seen.insert(*file))
+            .collect();
+        let input = WorkspaceFiles::get(self);
+        if *input.rename_only(self) != rename_only {
+            input.set_rename_only(self).to(rename_only);
+        }
+        changed
     }
 
     /// The harvested index for `name`, if the library has been populated and
     /// contains it.
     pub fn library_package(&self, name: &str) -> Option<Arc<PackageIndex>> {
-        LibraryIndex::try_get(self)?
-            .packages(self)
-            .0
-            .get(name)
-            .cloned()
+        library_package_for_context(self, name, None)
     }
 
     /// The absolute source root of package `name` (the directory its
@@ -1564,7 +2468,7 @@ impl IncrementalDatabase {
     /// callers can only *read*. Drop it promptly — an outstanding clone blocks
     /// the next write (salsa is single-writer; see the [`Clone`] impl).
     pub fn snapshot(&self) -> Analysis {
-        Analysis(self.clone())
+        Analysis(self.clone(), None, None)
     }
 }
 
@@ -1573,11 +2477,101 @@ impl IncrementalDatabase {
 /// analysis thread's [`IncrementalDatabase`] and exposes *only* read queries,
 /// so a read job cannot call `upsert_file` or salsa setters — the single-writer
 /// invariant is encoded in the type system rather than left to convention.
-pub struct Analysis(IncrementalDatabase);
+#[derive(Clone)]
+pub struct Analysis(
+    IncrementalDatabase,
+    Option<ParseOptions>,
+    Option<SourceContext>,
+);
 
 impl Analysis {
+    /// Capture a read's editions before dispatch, including documents still
+    /// queued for their first analysis and therefore lacking a Salsa input.
+    pub(crate) fn capture_source_editions(
+        &self,
+        path: &Path,
+    ) -> Vec<(SourceContext, EditionSelection)> {
+        if let Some(file) = self.lookup_file(path) {
+            return self.source_editions(file).as_ref().clone();
+        }
+        let path = normalize_path(path);
+        let known = tracked_source_editions(&self.0, &path);
+        if !known.is_empty() {
+            return known;
+        }
+        let buffers = self.0.metadata_buffers();
+        let (_, contexts, _) = IncrementalDatabase::direct_context(&path, &buffers);
+        contexts
+            .into_iter()
+            .map(|context| {
+                let selection = context.selection(&buffers);
+                (context, selection)
+            })
+            .collect()
+    }
+
+    pub fn options_for_path(&self, path: &Path) -> ParseOptions {
+        salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
+            self.tracked_options_for_path(path)
+        }))
+        .unwrap_or_else(|_| self.1.unwrap_or_default())
+    }
+    fn tracked_options_for_path(&self, path: &Path) -> ParseOptions {
+        if let Some(file) = self.lookup_file(path) {
+            return self.parse_options(file);
+        }
+        if self.2.is_none()
+            && let Some(options) = self.1
+        {
+            return options;
+        }
+        let path = normalize_path(path);
+        let known = tracked_source_editions(&self.0, &path);
+        if let (Some(options), Some(context)) = (self.1, &self.2)
+            && (context.entry == path || known.iter().any(|(candidate, _)| candidate == context))
+        {
+            return options;
+        }
+        known
+            .first()
+            .map_or_else(ParseOptions::default, |(_, selection)| selection.options)
+    }
+    pub fn with_context(&self, context: SourceContext, options: ParseOptions) -> Self {
+        Self(self.0.clone(), Some(options), Some(context))
+    }
+
+    pub(crate) fn context(&self) -> Option<&SourceContext> {
+        self.2.as_ref()
+    }
+
+    pub fn with_options(&self, options: ParseOptions) -> Self {
+        Self(self.0.clone(), Some(options), self.2.clone())
+    }
+    pub fn parse_options(&self, file: SourceFile) -> ParseOptions {
+        if let Some(options) = self.1
+            && (self.2.is_none()
+                || self
+                    .source_editions(file)
+                    .iter()
+                    .any(|(context, _)| Some(context) == self.2.as_ref()))
+        {
+            return options;
+        }
+        primary_parse_options(&self.0, file)
+    }
+    pub fn source_editions(
+        &self,
+        file: SourceFile,
+    ) -> &Arc<Vec<(SourceContext, EditionSelection)>> {
+        source_editions(&self.0, file)
+    }
+
     pub(crate) fn import_projection(&self, file: SourceFile) -> Arc<project::scripts::ScriptFile> {
-        Arc::clone(script_file(&self.0, file))
+        Arc::clone(script_file_with_options(
+            &self.0,
+            file,
+            self.parse_options(file),
+        ))
     }
 
     pub fn workspace_import_usage(&self) -> project::scripts::ScriptAnalysis {
@@ -1599,7 +2593,15 @@ impl Analysis {
             };
         };
         project::scripts::ScriptAnalysis {
-            programs: workspace_import_programs(&self.0, files, library).clone(),
+            programs: workspace_import_programs(&self.0, files, library)
+                .iter()
+                .filter(|program| {
+                    self.2
+                        .as_ref()
+                        .is_none_or(|context| context.entry == program.entry)
+                })
+                .cloned()
+                .collect(),
             pending: false,
         }
     }
@@ -1620,9 +2622,41 @@ impl Analysis {
                 .any(|entry| !input.entries(&self.0).contains(entry));
         let programs = entries
             .iter()
+            .filter(|entry| {
+                self.2.as_ref().is_none_or(|context| {
+                    if matches!(
+                        context.source,
+                        crate::parse_context::EditionSource::Fixed(_)
+                            | crate::parse_context::EditionSource::Project {
+                                role: crate::parse_context::SourceRole::Script,
+                                ..
+                            }
+                    ) {
+                        return input
+                            .files(&self.0)
+                            .get(*entry)
+                            .copied()
+                            .flatten()
+                            .is_some_and(|file| {
+                                self.source_editions(file)
+                                    .iter()
+                                    .any(|(candidate, selected)| {
+                                        candidate.entry == **entry
+                                            && candidate.source == context.source
+                                            && Some(selected.options) == self.1
+                                    })
+                            });
+                    }
+                    context.entry == **entry
+                })
+            })
             .map(
                 |entry| match input.files(&self.0).get(entry).copied().flatten() {
-                    Some(file) => Arc::clone(script_program(&self.0, file)),
+                    Some(file) => Arc::clone(script_program_with_options(
+                        &self.0,
+                        file,
+                        self.parse_options(file),
+                    )),
                     None => Arc::new(ScriptProgram::build(entry, |_| None)),
                 },
             )
@@ -1640,19 +2674,23 @@ impl Analysis {
         self.0.file_text(file)
     }
 
+    pub(crate) fn file_text_arc(&self, file: SourceFile) -> Arc<str> {
+        Arc::clone(file.text(&self.0))
+    }
+
     /// Parse diagnostics for `file` (empty when it parses cleanly).
     pub fn parse_diagnostics(&self, file: SourceFile) -> &[ParseDiagnostic] {
-        parse_diagnostics(&self.0, file)
+        parse_diagnostics_with_options(&self.0, file, self.parse_options(file))
     }
 
     /// A fresh `SyntaxNode` over the cached parse tree.
     pub fn parsed_tree(&self, file: SourceFile) -> SyntaxNode {
-        self.0.parsed_tree(file)
+        parsed_tree_root_with_options(&self.0, file, self.parse_options(file))
     }
 
     /// The cached semantic model for `file`.
     pub fn semantic_model(&self, file: SourceFile) -> &SemanticModel {
-        semantic_model(&self.0, file)
+        semantic_model_with_options(&self.0, file, self.parse_options(file))
     }
 
     /// Markdown navigation cached by the file's static documentation payloads.
@@ -1660,40 +2698,50 @@ impl Analysis {
         &self,
         file: SourceFile,
     ) -> &Arc<crate::documentation::DocumentationIndex> {
-        documentation_index(&self.0, file)
+        documentation_index_with_options(&self.0, file, self.parse_options(file))
     }
 
     /// The cached control-flow graph for `file` (the [`control_flow`] query).
     pub fn control_flow(&self, file: SourceFile) -> &FileControlFlow {
-        self.0.control_flow(file)
+        control_flow_with_options(&self.0, file, self.parse_options(file))
     }
 
     /// The file's top-level definitions (the [`file_exports`] firewall query).
     pub fn file_exports(&self, file: SourceFile) -> &BTreeSet<String> {
-        file_exports(&self.0, file)
+        file_exports_with_options(&self.0, file, self.parse_options(file))
     }
 
     /// The names the file reads but binds nowhere (the [`file_free_reads`]
     /// firewall query).
     pub fn file_free_reads(&self, file: SourceFile) -> &BTreeSet<String> {
-        file_free_reads(&self.0, file)
+        file_free_reads_with_options(&self.0, file, self.parse_options(file))
     }
 
     /// The module-qualified names the file references (the
     /// [`file_qualified_reads`] firewall query).
     pub fn file_qualified_reads(&self, file: SourceFile) -> &BTreeSet<String> {
-        file_qualified_reads(&self.0, file)
+        file_qualified_reads_with_options(&self.0, file, self.parse_options(file))
     }
 
     /// The file's static `include` edges (the [`include_edges`] firewall query).
     pub fn include_edges(&self, file: SourceFile) -> &[IncludeEdge] {
-        include_edges(&self.0, file)
+        include_edges_with_options(&self.0, file, self.parse_options(file))
     }
 
     /// The workspace reverse-occurrence index: every member file's occurrences of
     /// every top-level symbol, keyed by `(namespace, name)`. Backs cross-file
     /// references and rename. See [`workspace_reference_index`].
     pub fn workspace_reference_index(&self) -> &WorkspaceReferenceIndex {
+        if let Some(context) = &self.2
+            && let Some(entry) = self.lookup_file(&context.entry)
+        {
+            return context_workspace_reference_index(
+                &self.0,
+                entry,
+                self.1.unwrap_or_else(|| self.parse_options(entry)),
+                context.clone(),
+            );
+        }
         workspace_reference_index(&self.0)
     }
 
@@ -1707,9 +2755,31 @@ impl Analysis {
             .unwrap_or_default()
     }
 
+    pub(crate) fn file_rename_sources(&self) -> Vec<SourceFile> {
+        let mut files = self.workspace_files();
+        if let Some(input) = WorkspaceFiles::try_get(&self.0) {
+            files.extend(input.rename_only(&self.0));
+        }
+        if let Some(input) = ScriptFiles::try_get(&self.0) {
+            files.extend(input.files(&self.0).values().filter_map(|file| *file));
+        }
+        files
+    }
+
     /// The package's transitive `include` graph (see [`project_graph`]): closure,
     /// forward/reverse edges, host modules, cycles, and unresolved includes.
     pub fn project_graph(&self) -> &ProjectGraph {
+        if let Some(context) = &self.2
+            && let Some(entry) = self.lookup_file(&context.entry)
+            && WorkspaceFiles::try_get(&self.0)
+                .is_some_and(|files| files.files(&self.0).contains(&entry))
+        {
+            return project_graph_with_options(
+                &self.0,
+                entry,
+                self.1.unwrap_or_else(|| self.parse_options(entry)),
+            );
+        }
         project_graph(&self.0)
     }
 
@@ -1727,7 +2797,7 @@ impl Analysis {
 
     /// The harvested index for package `name`, if present.
     pub fn library_package(&self, name: &str) -> Option<Arc<PackageIndex>> {
-        self.0.library_package(name)
+        library_package_for_context(&self.0, name, self.2.as_ref())
     }
 
     /// The absolute source root of package `name`, if the live server has
@@ -1761,13 +2831,48 @@ impl Analysis {
     /// The workspace package and host module path of `path`, when `path` is one
     /// of its source files. See [`IncrementalDatabase::workspace_member`].
     pub fn workspace_member(&self, path: &Path) -> Option<(Arc<PackageIndex>, ModulePath)> {
-        self.0.workspace_member(path)
+        let direct = SyntaxContexts::try_get(&self.0)
+            .is_some_and(|input| input.direct(&self.0).contains(&normalize_path(path)));
+        let known_package = LibrarySyntaxInput::try_get(&self.0).is_some_and(|input| {
+            input
+                .data(&self.0)
+                .files
+                .contains_key(&normalize_path(path))
+        }) || LivePackageSyntax::try_get(&self.0).is_some_and(|input| {
+            input
+                .membership(&self.0)
+                .files
+                .contains_key(&normalize_path(path))
+        });
+        if direct && !known_package {
+            let (package, host) = self.0.workspace_member(path)?;
+            return Some((self.library_package(&package.name)?, host));
+        }
+        if let Some(context) = &self.2 {
+            let library = LibraryIndex::try_get(&self.0)?;
+            let name = library.workspaces(&self.0).iter().find(|name| {
+                library.roots(&self.0).0.get(*name).is_some_and(|root| {
+                    normalize_path(&root.join("src").join(format!("{name}.jl"))) == context.entry
+                })
+            })?;
+            let package = self.library_package(name)?;
+            let host = self
+                .project_graph()
+                .host_modules
+                .get(&normalize_path(path))?
+                .iter()
+                .map(SmolStr::new)
+                .collect();
+            return Some((package, host));
+        }
+        let (package, host) = self.0.workspace_member(path)?;
+        Some((self.library_package(&package.name)?, host))
     }
 
     /// Just the workspace package for `path`. See
     /// [`IncrementalDatabase::workspace_module`].
     pub fn workspace_module(&self, path: &Path) -> Option<Arc<PackageIndex>> {
-        self.0.workspace_module(path)
+        self.workspace_member(path).map(|(package, _)| package)
     }
 
     /// Resolve `name` read at `offset` in `file` through the shared masking
@@ -1809,6 +2914,13 @@ impl Analysis {
 /// The library seen through a read-only snapshot, so a [`Resolver`] can run off
 /// the analysis thread.
 impl PackageSource for Analysis {
+    fn syntax_options(&self) -> ParseOptions {
+        self.1.unwrap_or_default()
+    }
+    fn syntax_options_at(&self, path: &Path) -> ParseOptions {
+        self.options_for_path(path)
+    }
+
     fn package(&self, name: &str) -> Option<Arc<PackageIndex>> {
         self.library_package(name)
     }
@@ -1825,6 +2937,60 @@ impl PackageSource for Analysis {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn equivalent_metadata_keeps_parses_and_switching_editions_reuses_each_view() {
+        use salsa::Database as _;
+        let executions = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&executions);
+        let mut db = IncrementalDatabase {
+            storage: salsa::Storage::new(Some(Box::new(move |event| {
+                if let salsa::EventKind::WillExecute { database_key } = event.kind {
+                    recorded.lock().unwrap().push(database_key);
+                }
+            }))),
+            ..Default::default()
+        };
+        SyntaxContexts::new(
+            &db,
+            BTreeSet::new(),
+            BTreeSet::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        );
+        LibrarySyntaxInput::new(&db, Arc::new(crate::index::LibrarySyntax::default()));
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("Project.toml");
+        let metadata = "[syntax]\njulia_version = \"1.13\"\n";
+        std::fs::write(&project, metadata).unwrap();
+        let file = db.upsert_file(&dir.path().join("src/Foo.jl"), "typegroup = 1\n");
+        let runs = |db: &IncrementalDatabase| {
+            executions
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|key| {
+                    db.ingredient_debug_name(key.ingredient_index())
+                        == "parsed_document_with_options"
+                })
+                .count()
+        };
+        assert!(parse_diagnostics(&db, file).is_empty());
+        assert_eq!(runs(&db), 1);
+        db.upsert_file(&project, format!("# comment\n{metadata}"));
+        assert!(parse_diagnostics(&db, file).is_empty());
+        assert_eq!(
+            runs(&db),
+            1,
+            "normalized selection backdates unchanged options"
+        );
+        db.upsert_file(&project, metadata.replace("1.13", "1.14"));
+        assert!(!parse_diagnostics(&db, file).is_empty());
+        assert_eq!(runs(&db), 2);
+        db.upsert_file(&project, metadata);
+        assert!(parse_diagnostics(&db, file).is_empty());
+        assert_eq!(runs(&db), 2, "the old edition still owns its cached parse");
+    }
 
     #[test]
     fn documentation_parse_query_runs_only_when_payloads_change() {
@@ -1846,7 +3012,8 @@ mod tests {
                 .unwrap()
                 .iter()
                 .filter(|key| {
-                    db.ingredient_debug_name(key.ingredient_index()) == "documentation_index"
+                    db.ingredient_debug_name(key.ingredient_index())
+                        == "documentation_index_with_options"
                 })
                 .count()
         };

@@ -18,7 +18,7 @@ use lsp_types::{Position, Range, SelectionRange};
 use rowan::{TextRange, TextSize, TokenAtOffset};
 
 use crate::incremental::Analysis;
-use crate::parser::parse;
+use crate::parser::{ParseOptions, parse_with_options};
 use crate::semantic::SemanticModel;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
@@ -33,9 +33,18 @@ pub fn compute_selection_ranges(
     positions: &[Position],
     encoding: PositionEncoding,
 ) -> Vec<SelectionRange> {
-    let root = parse(text).cst;
+    compute_selection_ranges_with_options(text, positions, encoding, ParseOptions::default())
+}
+
+pub fn compute_selection_ranges_with_options(
+    text: &str,
+    positions: &[Position],
+    encoding: PositionEncoding,
+    options: ParseOptions,
+) -> Vec<SelectionRange> {
+    let root = parse_with_options(text, options).cst;
     let model = SemanticModel::build(&root);
-    selections_for_tree(&root, &model, text, positions, encoding)
+    selections_for_tree(&root, &model, text, positions, encoding, options)
 }
 
 /// Compute selection ranges off the snapshot's cached parse when the db's
@@ -57,12 +66,24 @@ pub(crate) fn selection_ranges_via_db(
         }
         let root = snapshot.parsed_tree(file);
         let model = snapshot.semantic_model(file);
-        Some(selections_for_tree(&root, model, text, positions, encoding))
+        Some(selections_for_tree(
+            &root,
+            model,
+            text,
+            positions,
+            encoding,
+            snapshot.options_for_path(path),
+        ))
     }));
     match cached {
         Ok(Some(ranges)) => ranges,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_selection_ranges(text, positions, encoding),
+        Ok(None) | Err(_) => compute_selection_ranges_with_options(
+            text,
+            positions,
+            encoding,
+            snapshot.options_for_path(path),
+        ),
     }
 }
 
@@ -74,6 +95,7 @@ fn selections_for_tree(
     text: &str,
     positions: &[Position],
     encoding: PositionEncoding,
+    options: ParseOptions,
 ) -> Vec<SelectionRange> {
     let line_index = LineIndex::new(text);
     positions
@@ -84,7 +106,7 @@ fn selections_for_tree(
             let mut chain = Vec::new();
             if let Some(context) = super::documentation::DocumentationContext::at(model, offset) {
                 if let Some(embedded) = context.embedded_julia() {
-                    let parsed = parse(embedded.text);
+                    let parsed = parse_with_options(embedded.text, options);
                     for range in range_chain(&parsed.cst, embedded.offset.into()) {
                         if let Some(source) = embedded.source_range(range) {
                             push_widening(&mut chain, source);

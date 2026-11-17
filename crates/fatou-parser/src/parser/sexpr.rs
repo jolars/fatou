@@ -22,14 +22,13 @@
 use crate::parser::core::is_bare_signature_name;
 use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic};
 use crate::parser::unescape::{StringDecodeError, decode_escape_into, string_chunks};
+use crate::parser::{ParseOptions, SyntaxEdition};
 use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 use rowan::NodeOrToken;
 use std::borrow::Cow;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use SyntaxKind::*;
-
-const ORACLE_VERSION_VALUE: &str = "v\"1.15.0\"";
 
 // The projector reconstructs JuliaSyntax's `(error-t)`/`(error)` error shapes
 // from the parse diagnostics rather than from dedicated CST nodes (the
@@ -38,6 +37,7 @@ const ORACLE_VERSION_VALUE: &str = "v\"1.15.0\"";
 // thread-local set once at the entry point and queried by byte position at the
 // handful of sites that need them, rather than threaded through every signature.
 thread_local! {
+    static PROJ_OPTIONS: Cell<ParseOptions> = const { Cell::new(ParseOptions { syntax_edition: SyntaxEdition::LATEST }) };
     static PROJ_DIAGS: RefCell<Vec<(DiagnosticKind, usize, usize)>> =
         const { RefCell::new(Vec::new()) };
 }
@@ -55,6 +55,17 @@ thread_local! {
 /// version, and operator values retain their structural heads. This projection
 /// does not select a grammar edition for [`super::parse`].
 pub fn to_juliasyntax_sexpr(tree: &SyntaxNode, diags: &[ParseDiagnostic]) -> String {
+    to_juliasyntax_sexpr_with_options(tree, diags, ParseOptions::default())
+}
+
+/// Project the encoding of a tree parsed with `options`, including module and
+/// `@VERSION` edition metadata. This never changes the tree's grammar.
+pub fn to_juliasyntax_sexpr_with_options(
+    tree: &SyntaxNode,
+    diags: &[ParseDiagnostic],
+    options: ParseOptions,
+) -> String {
+    PROJ_OPTIONS.with(|o| o.set(options));
     PROJ_DIAGS.with(|d| {
         *d.borrow_mut() = diags.iter().map(|x| (x.kind, x.start, x.end)).collect();
     });
@@ -129,6 +140,11 @@ fn is_recovery_error(node: &SyntaxNode) -> bool {
                     | DiagnosticKind::InvalidBreakLabel
             ) && *ds >= s
                 && *de <= e
+                && !node.descendants().skip(1).any(|child| {
+                    child.kind() == ERROR
+                        && usize::from(child.text_range().start()) <= *ds
+                        && usize::from(child.text_range().end()) >= *de
+                })
         })
     })
 }
@@ -286,7 +302,13 @@ fn project(node: &SyntaxNode) -> String {
 
         TUPLE_EXPR => project_delimited("tuple-p", node),
         PAREN_BLOCK => sexp("block-p", project_block_args(node)),
-        BARE_TUPLE_EXPR => sexp("tuple", project_each(child_nodes(node))),
+        BARE_TUPLE_EXPR => {
+            let mut parts = project_each(child_nodes(node));
+            if diag_at(keyword_start(node), DiagnosticKind::EmptyListSlot) {
+                parts.insert(0, "(error)".to_string());
+            }
+            sexp("tuple", parts)
+        }
         VECT_EXPR => project_delimited("vect", node),
         MATRIX_EXPR => project_matrix(node),
         TYPED_MATRIX_EXPR => project_typed_matrix(node),
@@ -321,7 +343,16 @@ fn project(node: &SyntaxNode) -> String {
         PRIMITIVE_DEF => project_primitive(node),
         // `typegroup … end` keeps its `BLOCK` (unlike `begin`, which folds into
         // one): `(typegroup (block …))`.
-        TYPEGROUP_DEF => sexp("typegroup", vec![project_block_child_folding_error(node)]),
+        TYPEGROUP_DEF => {
+            let mut parts = vec![project_block_child(node)];
+            parts.extend(
+                node.children()
+                    .filter(|child| child.kind() == ERROR)
+                    .map(|child| project(&child)),
+            );
+            push_trailing_errors(node, &mut parts);
+            sexp("typegroup", parts)
+        }
         MODULE_DEF => project_module(node),
         DO_EXPR => project_do(node),
 
@@ -568,6 +599,7 @@ fn project_operator_atom(node: &SyntaxNode) -> String {
 }
 
 fn project_operator_value(t: &SyntaxToken) -> String {
+    let error = edition_error(t);
     match t.kind() {
         PLUS_EQ | MINUS_EQ | STAR_EQ | SLASH_EQ | BACKSLASH_EQ | SLASH_SLASH_EQ | CARET_EQ
         | PERCENT_EQ | PLUS_PERCENT_EQ | MINUS_PERCENT_EQ | STAR_PERCENT_EQ | PIPE_EQ
@@ -575,14 +607,14 @@ fn project_operator_value(t: &SyntaxToken) -> String {
         | DOT_MINUS_EQ | DOT_STAR_EQ | DOT_SLASH_EQ | DOT_BACKSLASH_EQ | DOT_SLASH_SLASH_EQ
         | DOT_CARET_EQ | DOT_PERCENT_EQ | DOT_AMP_EQ | DOT_PIPE_EQ | DOT_SHL_EQ | DOT_SHR_EQ
         | DOT_USHR_EQ | DOT_DIV_EQ | DOT_XOR_EQ | DOT_PLUS_PERCENT_EQ | DOT_MINUS_PERCENT_EQ
-        | DOT_STAR_PERCENT_EQ => update_operator_value(t.text()),
+        | DOT_STAR_PERCENT_EQ => update_operator_value(t.text(), error),
         DOT_DOT | DOT_DOT_DOT => format!("(DotsIdentifier-{})", t.text().len()),
         kind if matches!(infix_head(kind), InfixHead::DotCallI(_)) => {
             // A suffixed broadcast operator (`.+₁`) keeps its suffix, which
             // `operator_func_repr` (keyed on kind) would drop; strip the
             // leading broadcast dot from the text instead.
-            if op_has_suffix(t.text()) {
-                format!("(. {})", &t.text()[1..])
+            if op_has_suffix(t.text()) || !error.is_empty() {
+                format!("(. {error}{})", &t.text()[1..])
             } else {
                 operator_func_repr(t.kind())
             }
@@ -594,16 +626,20 @@ fn project_operator_value(t: &SyntaxToken) -> String {
         _ if t.text().starts_with('.') && t.text().len() > 1 && t.text().as_bytes()[1] != b'.' => {
             format!("(. {})", &t.text()[1..])
         }
-        _ => folded_op_text(t.text()).into_owned(),
+        _ if error.is_empty() => folded_op_text(t.text()).into_owned(),
+        _ => format!("{error}{}", folded_op_text(t.text())),
     }
 }
 
-fn update_operator_value(text: &str) -> String {
+fn update_operator_value(text: &str, error: &str) -> String {
     let (head, base) = match text.strip_prefix('.') {
         Some(base) => (".op=", base),
         None => ("op=", text),
     };
-    format!("({head} {})", folded_op_text(base.trim_end_matches('=')))
+    format!(
+        "({head} {error}{})",
+        folded_op_text(base.trim_end_matches('='))
+    )
 }
 
 /// The function-name representation of an operator used as a callee, e.g. in
@@ -681,6 +717,14 @@ fn project_ternary(node: &SyntaxNode) -> String {
                 parts.push("(error-t)".to_string());
             }
         }
+    }
+    if nodes.len() == 2
+        && q_end
+            .is_some_and(|end| diag_count_from(end - 1, DiagnosticKind::MissingTernaryColon) > 0)
+    {
+        // The parser recorded the absent colon and false branch. As with other
+        // missing syntax, their zero-width error markers live off-tree.
+        parts.extend(["(error-t)".to_string(), "(error)".to_string()]);
     }
     sexp("?", parts)
 }
@@ -828,7 +872,7 @@ fn project_flat_arith(op: &SyntaxToken, operands: &[SyntaxNode], last_op_missing
     };
     let mut parts = Vec::with_capacity(operands.len() + 2);
     parts.push(project(&operands[0]));
-    parts.push(op_text);
+    parts.push(format!("{}{op_text}", edition_error(op)));
     parts.extend(operands[1..].iter().map(project));
     if last_op_missing {
         parts.push("(error)".to_string());
@@ -876,11 +920,24 @@ fn infix_call_string(op: &SyntaxToken, lhs: &str, rhs: &str) -> Option<String> {
             _ => format!("(call-i {lhs} {text} {rhs})"),
         });
     }
+    let error = edition_error(op);
     match infix_head(op.kind()) {
-        InfixHead::CallI(text) => Some(format!("(call-i {lhs} {text} {rhs})")),
+        InfixHead::CallI(text) => Some(format!("(call-i {lhs} {error}{text} {rhs})")),
         InfixHead::Special(text) => Some(format!("({text} {lhs} {rhs})")),
-        InfixHead::DotCallI(text) => Some(format!("(dotcall-i {lhs} {text} {rhs})")),
+        InfixHead::DotCallI(text) => Some(format!("(dotcall-i {lhs} {error}{text} {rhs})")),
         InfixHead::Dot => None,
+    }
+}
+
+/// Replay the zero-width diagnostic before an operator unsupported by the edition.
+fn edition_error(op: &SyntaxToken) -> &'static str {
+    if diag_at(
+        usize::from(op.text_range().start()),
+        DiagnosticKind::UnsupportedEdition,
+    ) {
+        "(error) "
+    } else {
+        ""
     }
 }
 
@@ -981,7 +1038,8 @@ fn project_assignment(node: &SyntaxNode) -> String {
         if let Some(lhs) = operands.first() {
             parts.push(project(lhs));
         }
-        parts.push(folded_op_text(base).into_owned());
+        let error = op.as_ref().map_or("", edition_error);
+        parts.push(format!("{error}{}", folded_op_text(base)));
         parts.extend(operands.iter().skip(1).map(project));
         if operands.len() == 1 && op.is_some_and(|t| operator_missing_rhs(&t)) {
             parts.push("(error)".to_string());
@@ -1049,6 +1107,7 @@ fn project_unary(node: &SyntaxNode) -> String {
         None => return format!("(unsupported {:?})", node.kind()),
     };
     let operand = project_first(node);
+    let error = edition_error(&op);
     match op.kind() {
         SUBTYPE => format!("(<:-pre {operand})"),
         SUPERTYPE => format!("(>:-pre {operand})"),
@@ -1057,8 +1116,8 @@ fn project_unary(node: &SyntaxNode) -> String {
         AMP => format!("(& {operand})"),
         DOT_PLUS => format!("(dotcall-pre + {operand})"),
         DOT_MINUS => format!("(dotcall-pre - {operand})"),
-        DOT_PLUS_PERCENT => format!("(dotcall-pre +% {operand})"),
-        DOT_MINUS_PERCENT => format!("(dotcall-pre -% {operand})"),
+        DOT_PLUS_PERCENT => format!("(dotcall-pre {error}+% {operand})"),
+        DOT_MINUS_PERCENT => format!("(dotcall-pre {error}-% {operand})"),
         DOT_TILDE => format!("(dotcall-pre ~ {operand})"),
         DOT_BANG => format!("(dotcall-pre ! {operand})"),
         // A broadcast Unicode radical (`.√x`) carries the leading `.` in its
@@ -1069,7 +1128,7 @@ fn project_unary(node: &SyntaxNode) -> String {
         UNICODE_OP if op.text().starts_with('.') => {
             format!("(dotcall-pre {} {operand})", &op.text()[1..])
         }
-        _ => format!("(call-pre {} {operand})", folded_op_text(op.text())),
+        _ => format!("(call-pre {error}{} {operand})", folded_op_text(op.text())),
     }
 }
 
@@ -1226,7 +1285,9 @@ fn project_call(head: &str, node: &SyntaxNode) -> String {
             NodeOrToken::Token(t) if is_operator(t.kind()) => {
                 // A suffixed operator callee (`+₁(x)` → `(call +₁ x)`) keeps its
                 // suffix, which `operator_func_repr` (keyed on kind) would drop.
-                parts.push(if op_has_suffix(t.text()) {
+                parts.push(if !edition_error(&t).is_empty() {
+                    project_operator_value(&t)
+                } else if op_has_suffix(t.text()) {
                     match t.text().strip_prefix('.') {
                         Some(rest) if matches!(infix_head(t.kind()), InfixHead::DotCallI(_)) => {
                             format!("(. {rest})")
@@ -1900,8 +1961,8 @@ fn project_module(node: &SyntaxNode) -> String {
         });
     let mut parts = Vec::new();
     // JuliaSyntax emits edition metadata only after accepting the name's start.
-    if !invalid_name {
-        parts.push(ORACLE_VERSION_VALUE.to_string());
+    if !invalid_name && projection_edition() >= SyntaxEdition::Julia114 {
+        parts.push(format!("v\"{}.0\"", projection_edition()));
     }
     parts.extend([project_signature(node), project_block_child(node)]);
     push_trailing_errors(node, &mut parts);
@@ -2015,13 +2076,15 @@ fn do_param_strings(node: &SyntaxNode) -> Vec<String> {
 // --- Statements / declarations ---------------------------------------------
 
 fn project_break_continue(head: &str, node: &SyntaxNode) -> String {
-    let mut rendered = sexp(head, project_each(child_nodes(node)));
-    if node.first_token().is_some_and(|keyword| {
-        diag_at(
-            usize::from(keyword.text_range().end()),
-            DiagnosticKind::UnexpectedComma,
-        )
-    }) {
+    let mut parts = project_each(child_nodes(node));
+    let end = node
+        .first_token()
+        .map(|keyword| usize::from(keyword.text_range().end()));
+    if end.is_some_and(|end| diag_at(end, DiagnosticKind::UnexpectedLoopExitDelimiter)) {
+        parts.push("(error-t)".to_string());
+    }
+    let mut rendered = sexp(head, parts);
+    if end.is_some_and(|end| diag_at(end, DiagnosticKind::UnexpectedComma)) {
         // Recovery belongs after the completed keyword, inside whichever
         // expression or argument list contains it.
         rendered.push_str(" (error-t)");
@@ -2271,14 +2334,16 @@ fn project_macrocall(node: &SyntaxNode) -> String {
     let mut parts = vec![name];
     // Like module metadata, @VERSION's invisible argument encodes the oracle
     // edition rather than any additional source syntax.
-    if macro_name.is_some_and(|name| {
-        name.children_with_tokens()
-            .filter_map(|el| el.into_token())
-            .filter(|token| !is_trivia(token.kind()))
-            .last()
-            .is_some_and(|token| token.kind() == IDENT && token.text() == "VERSION")
-    }) {
-        parts.push(ORACLE_VERSION_VALUE.to_string());
+    if projection_edition() >= SyntaxEdition::Julia114
+        && macro_name.is_some_and(|name| {
+            name.children_with_tokens()
+                .filter_map(|el| el.into_token())
+                .filter(|token| !is_trivia(token.kind()))
+                .last()
+                .is_some_and(|token| token.kind() == IDENT && token.text() == "VERSION")
+        })
+    {
+        parts.push(format!("v\"{}.0\"", projection_edition()));
     }
 
     // Paren form `@m(…)` carries a direct `ARG_LIST` child → `macrocall-p`;
@@ -3500,7 +3565,13 @@ fn project_paren(node: &SyntaxNode) -> String {
             .iter()
             .find_map(|el| match el {
                 NodeOrToken::Token(t) if is_operator(t.kind()) => {
-                    Some(folded_op_text(t.text()).into_owned())
+                    if edition_error(t).is_empty() {
+                        Some(folded_op_text(t.text()).into_owned())
+                    } else if t.text().starts_with('.') {
+                        Some(project_operator_value(t))
+                    } else {
+                        Some(format!("(parens {})", project_operator_value(t)))
+                    }
                 }
                 _ => None,
             })
@@ -3635,6 +3706,10 @@ fn is_delimiter(kind: SyntaxKind) -> bool {
 /// kept like any other operand.
 fn is_keyword(kind: SyntaxKind) -> bool {
     kind.is_keyword() && !matches!(kind, TRUE_KW | FALSE_KW)
+}
+
+fn projection_edition() -> SyntaxEdition {
+    PROJ_OPTIONS.with(|o| o.get().syntax_edition)
 }
 
 #[cfg(test)]

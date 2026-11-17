@@ -54,7 +54,13 @@ impl Rule for UnresolvedDocstringReference {
             .is_some_and(|resolution| resolution.workspace.is_some());
         for reference in &scan.references {
             if scan.anchors.contains(&reference.target)
-                || !target_is_missing(resolver, &reference.target, reference.at, project_member)
+                || !target_is_missing(
+                    resolver,
+                    &reference.target,
+                    reference.at,
+                    project_member,
+                    ctx.parse_options,
+                )
             {
                 continue;
             }
@@ -75,8 +81,9 @@ fn target_is_missing<P: PackageSource + ?Sized>(
     target: &str,
     at: rowan::TextSize,
     project_member: bool,
+    options: parser::ParseOptions,
 ) -> bool {
-    let parsed = parser::parse(target);
+    let parsed = parser::parse_with_options(target, options);
     if !parsed.diagnostics.is_empty() {
         return false;
     }
@@ -179,9 +186,27 @@ mod tests {
         let resolver =
             Resolver::new(&model, &packages).with_workspace(Some((workspace.clone(), Vec::new())));
 
-        assert!(target_is_missing(&resolver, "raduis", 0.into(), true));
-        assert!(!target_is_missing(&resolver, "area", 0.into(), true));
-        assert!(!target_is_missing(&resolver, "raduis", 0.into(), false));
+        assert!(target_is_missing(
+            &resolver,
+            "raduis",
+            0.into(),
+            true,
+            Default::default()
+        ));
+        assert!(!target_is_missing(
+            &resolver,
+            "area",
+            0.into(),
+            true,
+            Default::default()
+        ));
+        assert!(!target_is_missing(
+            &resolver,
+            "raduis",
+            0.into(),
+            false,
+            Default::default()
+        ));
 
         let mut diagnostics = Vec::new();
         UnresolvedDocstringReference.check_file(&ctx, &mut diagnostics);

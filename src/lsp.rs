@@ -15,8 +15,10 @@
 //! reads. Background indexing has a separate single-thread pool so unbounded
 //! work cannot occupy a read worker.
 //!
-//! Edits are *coalesced* (latest version per URI; stale edits dropped) into a
-//! pending queue. A [`decide`](analysis_thread::decide) scheduler keeps at most
+//! Buffer analysis and disk reverts share an ordered channel so closing a
+//! document discards earlier queued edits before restoring its disk text.
+//! Analyses coalesce to the latest version per URI. A
+//! [`decide`](analysis_thread::decide) scheduler keeps at most
 //! one analysis in flight: a strictly-newer edit of the *same* URI cancels the
 //! running analysis via `salsa::Database::trigger_cancellation` (the worker's
 //! `salsa::Cancelled` catch then publishes nothing), while a *different*
@@ -32,6 +34,8 @@
 //! analysis thread writes trips `salsa::Cancelled`; both that and a cache miss
 //! fall back to a fresh parse, so reads are always correct, only sometimes
 //! warm.
+//! Requests that return edits wait for the loading contexts to settle. The
+//! main loop rejects replies if the buffer or those contexts move on.
 
 // `lsp_types::Uri` (a `fluent_uri` newtype) carries an internal `Cell` tag for
 // its mutable-view mechanism, which trips `clippy::mutable_key_type` when a

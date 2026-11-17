@@ -1,3 +1,5 @@
+use crate::parser::ParseOptions;
+use crate::parser::context::ParserCtx;
 use crate::parser::events::Event;
 use crate::parser::expr::parse_stmt;
 use crate::parser::lexer::{TokKind, Token, lex};
@@ -22,7 +24,13 @@ pub struct ParseOutput {
 /// unparseable token is consumed as one error token so the loop always makes
 /// progress.
 pub fn parse(text: &str) -> ParseOutput {
-    let tokens = lex(text);
+    parse_with_options(text, ParseOptions::default())
+}
+
+/// Parse with an explicitly selected syntax edition.
+pub fn parse_with_options(text: &str, options: ParseOptions) -> ParseOutput {
+    let tokens = lex_for_options(text, options);
+    let ctx = ParserCtx::with_options(&tokens, options);
     let mut diagnostics = Vec::new();
     let mut events = Vec::new();
 
@@ -79,7 +87,7 @@ pub fn parse(text: &str) -> ParseOutput {
                         // `x (error-t y ✘ z)`, `x@y` ⇒ `x (error-t ✘ y)`).
                         line.push(Event::Tok(i));
                         i += 1;
-                    } else if let Some(expr) = parse_stmt(&tokens, i, &mut diagnostics) {
+                    } else if let Some(expr) = parse_stmt(&ctx, i, &mut diagnostics) {
                         if leftover_mark.is_none() {
                             first_is_doc_string = stmt_is_doc_string(&expr.events, &tokens);
                         }
@@ -195,22 +203,27 @@ pub fn parse(text: &str) -> ParseOutput {
         }
     }
 
-    finish_parse(&tokens, &events, diagnostics)
+    finish_parse(&tokens, &events, diagnostics, options)
 }
 
 /// Reparse statements using the same body driver as their enclosing construct.
 /// Keeping the owner in the temporary tree lets the flag passes recognize
 /// context-sensitive forms such as a struct's bare `const` fields.
-pub(super) fn parse_block_fragment(text: &str, owner: SyntaxKind) -> Option<ParseOutput> {
-    let tokens = lex(text);
+pub(super) fn parse_block_fragment(
+    text: &str,
+    owner: SyntaxKind,
+    options: ParseOptions,
+) -> Option<ParseOutput> {
+    let tokens = lex_for_options(text, options);
+    let ctx = ParserCtx::with_options(&tokens, options);
     let mut diagnostics = Vec::new();
     let mut events = vec![Event::Start(owner)];
-    let end = super::structural::run_block_fragment(&tokens, &mut events, owner, &mut diagnostics)?;
+    let end = super::structural::run_block_fragment(&ctx, &mut events, owner, &mut diagnostics)?;
     if end != tokens.len() {
         return None;
     }
     events.push(Event::Finish);
-    let mut output = finish_parse(&tokens, &events, diagnostics);
+    let mut output = finish_parse(&tokens, &events, diagnostics, options);
     output.cst = output.cst.first_child()?.first_child()?;
     Some(output)
 }
@@ -219,6 +232,7 @@ fn finish_parse(
     tokens: &[Token],
     events: &[Event],
     mut diagnostics: Vec<ParseDiagnostic>,
+    options: ParseOptions,
 ) -> ParseOutput {
     let events = fold_docstrings(events, tokens);
 
@@ -232,6 +246,42 @@ fn finish_parse(
     flag_invalid_catch_vars(&cst, &mut diagnostics);
     flag_invalid_export_items(&cst, &mut diagnostics);
     flag_numeric_overflow(&cst, &mut diagnostics);
+    if options.syntax_edition == crate::parser::SyntaxEdition::Julia113 {
+        for token in cst
+            .descendants_with_tokens()
+            .filter_map(|el| el.into_token())
+        {
+            if matches!(
+                token.kind(),
+                SyntaxKind::PLUS_PERCENT
+                    | SyntaxKind::MINUS_PERCENT
+                    | SyntaxKind::STAR_PERCENT
+                    | SyntaxKind::PLUS_PERCENT_EQ
+                    | SyntaxKind::MINUS_PERCENT_EQ
+                    | SyntaxKind::STAR_PERCENT_EQ
+                    | SyntaxKind::DOT_PLUS_PERCENT
+                    | SyntaxKind::DOT_MINUS_PERCENT
+                    | SyntaxKind::DOT_STAR_PERCENT
+                    | SyntaxKind::DOT_PLUS_PERCENT_EQ
+                    | SyntaxKind::DOT_MINUS_PERCENT_EQ
+                    | SyntaxKind::DOT_STAR_PERCENT_EQ
+            ) && !token
+                .text()
+                .chars()
+                .next_back()
+                .is_some_and(super::lexer::is_op_suffix_char)
+            {
+                let at = usize::from(token.text_range().start());
+                push_diagnostic(
+                    &mut diagnostics,
+                    DiagnosticKind::UnsupportedEdition,
+                    "wrapping arithmetic requires syntax edition 1.14",
+                    at,
+                    at,
+                );
+            }
+        }
+    }
     ParseOutput { cst, diagnostics }
 }
 
@@ -851,6 +901,12 @@ pub fn reconstruct(text: &str) -> String {
         .filter_map(|el| el.into_token())
         .map(|tok| tok.text().to_string())
         .collect()
+}
+
+/// Lexical shapes are independent of the edition; grammatical keyword
+/// classification happens in the parser context.
+pub(super) fn lex_for_options(text: &str, _options: ParseOptions) -> Vec<Token<'_>> {
+    lex(text)
 }
 
 #[cfg(test)]

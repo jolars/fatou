@@ -94,3 +94,16 @@ independently of the `fatou` CLI.
 
 - [API documentation](https://docs.rs/fatou-parser)
 - [fatou](https://fatou.dev), the project this crate is extracted from
+
+### Syntax editions
+
+`parse` uses Fatou's latest supported Julia syntax edition (currently 1.15).
+Embedders can select 1.13, 1.14, or 1.15 with `parse_with_options` and
+`ParseOptions { syntax_edition }`. This selects grammar independently of a
+package's supported Julia runtime range. The engine never reads project files.
+
+For incremental parsing, pass a `ReparseBase` carrying the previous options to
+`reparse_with_options` or `reparse_edits_with_options`. A change of edition
+returns `None` and requires a full parse. All fragment parses use the same
+options. Project CSTs with `to_juliasyntax_sexpr_with_options` to retain the
+selected edition in JuliaSyntax's module and `@VERSION` encodings.

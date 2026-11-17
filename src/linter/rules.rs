@@ -237,6 +237,8 @@ pub struct RuleContext<'a> {
     /// version-gated rules (`julia-version-compat`) silent. Constant per run —
     /// carried on [`ResolvedRules`] and copied here by the driver.
     pub julia_target: Option<VersionRange>,
+    /// Grammar used by the containing source and embedded Julia snippets.
+    pub parse_options: crate::parser::ParseOptions,
     /// The per-rule option tables from `[lint.rules.<id>]`. Like
     /// [`julia_target`](Self::julia_target) this is constant per run: it is
     /// resolved once onto [`ResolvedRules`] and borrowed here by the driver. A
@@ -314,11 +316,18 @@ impl<'a> RuleContext<'a> {
             import_usage: None,
             includes: &[],
             julia_target: None,
+            parse_options: crate::parser::ParseOptions::default(),
             config: &DEFAULT_RULES_CONFIG,
             suppressions: &EMPTY_SUPPRESSIONS,
             enabled_rules: &EMPTY_ENABLED_RULES,
             cache: RuleCache::default(),
         }
+    }
+
+    #[must_use]
+    pub fn with_parse_options(mut self, options: crate::parser::ParseOptions) -> Self {
+        self.parse_options = options;
+        self
     }
 
     /// Attach the name-resolution context (see [`ResolutionContext`]).
@@ -450,9 +459,9 @@ impl<'a> RuleContext<'a> {
 
     /// Static docstrings parsed and classified once for all documentation rules.
     pub(crate) fn documentation_scan(&self) -> &documentation::DocumentationScan {
-        self.cache
-            .documentation
-            .get_or_init(|| documentation::DocumentationScan::collect(self.model))
+        self.cache.documentation.get_or_init(|| {
+            documentation::DocumentationScan::collect(self.model, self.parse_options)
+        })
     }
 
     /// The file's control-flow graph (see [`FileControlFlow`]), for a rule that
@@ -768,6 +777,7 @@ pub struct ResolvedRules {
     /// The declared Julia support range for this run, constant across files.
     /// Copied into each [`RuleContext`] so version-gated rules can read it.
     julia_target: Option<VersionRange>,
+    syntax_edition: Option<crate::parser::SyntaxEdition>,
     /// The `[lint.rules.<id>]` option tables for this run, likewise constant
     /// across files and borrowed by each [`RuleContext`]. Held here rather than
     /// threaded through the per-file entry points, which would widen every
@@ -778,6 +788,14 @@ pub struct ResolvedRules {
 }
 
 impl ResolvedRules {
+    pub fn with_syntax_edition(mut self, edition: Option<crate::parser::SyntaxEdition>) -> Self {
+        self.syntax_edition = edition;
+        self
+    }
+    pub fn syntax_edition(&self) -> Option<crate::parser::SyntaxEdition> {
+        self.syntax_edition
+    }
+
     /// Resolve rules for a workspace package file. Project-resolution rules
     /// join the defaults because the package supplies the file's host module
     /// and include context. Explicit `select` replaces these defaults too.
@@ -868,6 +886,7 @@ impl ResolvedRules {
                 by_kind,
                 any_node_rules,
                 julia_target: None,
+                syntax_edition: None,
                 rules_config: config.rules.clone(),
                 enabled,
             },
@@ -900,6 +919,7 @@ impl ResolvedRules {
             by_kind,
             any_node_rules,
             julia_target: None,
+            syntax_edition: None,
             rules_config: RulesConfig::default(),
             enabled,
         }
