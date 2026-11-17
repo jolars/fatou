@@ -569,6 +569,17 @@ pub(crate) fn parse_module_expr(
     })
 }
 
+/// Boundaries retained by a keyword operand while its other expression flags
+/// reset to statement scope. `return` inherits all of these; declarations only
+/// inherit the enclosing generator boundary.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct KwOperandContext {
+    pub for_ends: bool,
+    pub end_marker: bool,
+    pub begin_marker: bool,
+    pub colon_ends: bool,
+}
+
 /// The shape of a simple keyword statement's body after its keyword.
 pub(crate) enum KwStmt {
     /// An optional leading expression parsed at statement level, so a top-level
@@ -579,14 +590,15 @@ pub(crate) enum KwStmt {
     ///
     /// `optional_value` marks a keyword that may stand alone (`return`), so a
     /// stray closing delimiter in operand position ends it instead of forcing an
-    /// inner `(error)`. `for_ends` marks comprehension/generator position (inside
-    /// `(…)`/`[…]`/`{…}`), where a same-line `for` opens the generator's iteration
-    /// clause rather than belonging to the keyword statement
+    /// inner `(error)`. `context.for_ends` marks comprehension/generator position
+    /// (inside `(…)`/`[…]`/`{…}`), where a same-line `for` opens the generator's
+    /// iteration clause rather than belonging to the keyword statement
     /// (`[const x = 1 for i in 1:1]` ⇒
     /// `(comprehension (generator (const (= x 1)) (= i (call-i 1 : 1))))`).
+    /// `return` also preserves index markers and an enclosing ternary's colon.
     ExprTuple {
         optional_value: bool,
-        for_ends: bool,
+        context: KwOperandContext,
     },
     /// An optional block label, as `break`/`continue` take one in Julia 1.14
     /// (`break outer` ⇒ `(break outer)`). `takes_value` additionally admits a
@@ -613,11 +625,11 @@ pub(crate) fn parse_keyword_stmt(
     let mut events = vec![Event::Start(node_kind), Event::Tok(start)];
 
     let mut i = start + 1;
-    let (optional_value, for_ends) = match body {
+    let (optional_value, context) = match body {
         KwStmt::ExprTuple {
             optional_value,
-            for_ends,
-        } => (optional_value, for_ends),
+            context,
+        } => (optional_value, context),
         KwStmt::Label {
             takes_value,
             colon_ends,
@@ -635,9 +647,18 @@ pub(crate) fn parse_keyword_stmt(
     // Everything below is `KwStmt::ExprTuple`, the only other body shape.
     // In comprehension position the `for` (and the whitespace before it, which
     // the generator's own layout owns) is left for the bracket parser.
+    let operand_ends = |i: usize| {
+        (header_ends(&ctx, i)
+            && !(context.end_marker && ctx.token(i).is_some_and(|t| t.kind == TokKind::EndKw)))
+            || (context.colon_ends && ctx.token(i).is_some_and(|t| t.kind == TokKind::Colon))
+    };
     let stmt_ends = |i: usize| {
         header_ends(&ctx, i)
-            || (for_ends
+            || (context.colon_ends
+                && ctx
+                    .token(ctx.skip_ws_and_block_comments(i))
+                    .is_some_and(|t| t.kind == TokKind::Colon))
+            || (context.for_ends
                 && ctx
                     .token(ctx.skip_ws(i))
                     .is_some_and(|t| t.kind == TokKind::ForKw))
@@ -651,14 +672,14 @@ pub(crate) fn parse_keyword_stmt(
     };
     // A keyword whose value is optional (`return`) ends right after the
     // keyword when its operand position is a stray closing delimiter
-    // (`return)`, `return ]`): the empty form `(return)` is emitted and the
-    // delimiter is left for the toplevel-leftover driver to wrap as `✘`,
-    // matching `break)`. Value-required keywords (`const`/`global`/`local`)
+    // (`return)`, `return ]`) or the enclosing ternary's colon: the empty form
+    // `(return)` leaves the delimiter and its trivia to the caller, matching
+    // `break)`. Value-required keywords (`const`/`global`/`local`)
     // instead need an inner `(error)` synthesis and so do not take this path.
     if optional_value
-        && ctx
-            .token(operand_start)
-            .is_some_and(|t| is_close_delimiter_tok(t.kind))
+        && ctx.token(operand_start).is_some_and(|t| {
+            is_close_delimiter_tok(t.kind) || (context.colon_ends && t.kind == TokKind::Colon)
+        })
     {
         events.push(Event::Finish);
         return Some(ExprParse {
@@ -673,8 +694,8 @@ pub(crate) fn parse_keyword_stmt(
     // `stmt_ends` deliberately does not gate the *operand*: a `for` directly in
     // operand position is the keyword's operand, not a generator clause
     // (`[return for i in 1:1]` ⇒ `(vect (return (for …)))`).
-    if !header_ends(&ctx, i)
-        && let Some(expr) = parse_kw_stmt_operand(tokens, i, for_ends, diagnostics)
+    if !operand_ends(i)
+        && let Some(expr) = parse_kw_stmt_operand(tokens, i, context, diagnostics)
     {
         events.extend(expr.events);
         i = expr.end;

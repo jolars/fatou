@@ -1,0 +1,860 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..947
+  INDEX_EXPR@0..13
+    NAME@0..1
+      IDENT@0..1 "a"
+    ARG_LIST@1..13
+      LBRACKET@1..2 "["
+      ARG@2..12
+        RETURN_EXPR@2..12
+          RETURN_KW@2..8 "return"
+          WHITESPACE@8..9 " "
+          END_MARKER@9..12
+            END_KW@9..12 "end"
+      RBRACKET@12..13 "]"
+  NEWLINE@13..14 "\n"
+  INDEX_EXPR@14..29
+    NAME@14..15
+      IDENT@14..15 "a"
+    ARG_LIST@15..29
+      LBRACKET@15..16 "["
+      ARG@16..28
+        RETURN_EXPR@16..28
+          RETURN_KW@16..22 "return"
+          WHITESPACE@22..23 " "
+          BEGIN_MARKER@23..28
+            BEGIN_KW@23..28 "begin"
+      RBRACKET@28..29 "]"
+  NEWLINE@29..30 "\n"
+  INDEX_EXPR@30..57
+    NAME@30..31
+      IDENT@30..31 "a"
+    ARG_LIST@31..57
+      LBRACKET@31..32 "["
+      ARG@32..56
+        RETURN_EXPR@32..56
+          RETURN_KW@32..38 "return"
+          WHITESPACE@38..39 " "
+          BINARY_EXPR@39..56
+            BINARY_EXPR@39..48
+              BEGIN_MARKER@39..44
+                BEGIN_KW@39..44 "begin"
+              WHITESPACE@44..45 " "
+              PLUS@45..46 "+"
+              WHITESPACE@46..47 " "
+              LITERAL@47..48
+                INTEGER@47..48 "1"
+            COLON@48..49 ":"
+            BINARY_EXPR@49..56
+              END_MARKER@49..52
+                END_KW@49..52 "end"
+              WHITESPACE@52..53 " "
+              MINUS@53..54 "-"
+              WHITESPACE@54..55 " "
+              LITERAL@55..56
+                INTEGER@55..56 "1"
+      RBRACKET@56..57 "]"
+  NEWLINE@57..58 "\n"
+  INDEX_EXPR@58..78
+    NAME@58..59
+      IDENT@58..59 "a"
+    ARG_LIST@59..78
+      LBRACKET@59..60 "["
+      ARG@60..77
+        RETURN_EXPR@60..77
+          RETURN_KW@60..66 "return"
+          WHITESPACE@66..67 " "
+          BARE_TUPLE_EXPR@67..77
+            END_MARKER@67..70
+              END_KW@67..70 "end"
+            COMMA@70..71 ","
+            WHITESPACE@71..72 " "
+            BEGIN_MARKER@72..77
+              BEGIN_KW@72..77 "begin"
+      RBRACKET@77..78 "]"
+  NEWLINE@78..79 "\n"
+  INDEX_EXPR@79..99
+    NAME@79..80
+      IDENT@79..80 "a"
+    ARG_LIST@80..99
+      LBRACKET@80..81 "["
+      ARG@81..98
+        RETURN_EXPR@81..98
+          RETURN_KW@81..87 "return"
+          WHITESPACE@87..88 " "
+          RETURN_EXPR@88..98
+            RETURN_KW@88..94 "return"
+            WHITESPACE@94..95 " "
+            END_MARKER@95..98
+              END_KW@95..98 "end"
+      RBRACKET@98..99 "]"
+  NEWLINE@99..100 "\n"
+  INDEX_EXPR@100..125
+    NAME@100..101
+      IDENT@100..101 "a"
+    ARG_LIST@101..125
+      LBRACKET@101..102 "["
+      ARG@102..124
+        RETURN_EXPR@102..124
+          RETURN_KW@102..108 "return"
+          WHITESPACE@108..109 " "
+          TERNARY_EXPR@109..124
+            NAME@109..110
+              IDENT@109..110 "x"
+            WHITESPACE@110..111 " "
+            QUESTION@111..112 "?"
+            WHITESPACE@112..113 " "
+            BEGIN_MARKER@113..118
+              BEGIN_KW@113..118 "begin"
+            WHITESPACE@118..119 " "
+            COLON@119..120 ":"
+            WHITESPACE@120..121 " "
+            END_MARKER@121..124
+              END_KW@121..124 "end"
+      RBRACKET@124..125 "]"
+  NEWLINE@125..126 "\n"
+  INDEX_EXPR@126..151
+    NAME@126..127
+      IDENT@126..127 "a"
+    ARG_LIST@127..151
+      LBRACKET@127..128 "["
+      ARG@128..150
+        TERNARY_EXPR@128..150
+          NAME@128..129
+            IDENT@128..129 "x"
+          WHITESPACE@129..130 " "
+          QUESTION@130..131 "?"
+          WHITESPACE@131..132 " "
+          RETURN_EXPR@132..144
+            RETURN_KW@132..138 "return"
+            WHITESPACE@138..139 " "
+            BEGIN_MARKER@139..144
+              BEGIN_KW@139..144 "begin"
+          WHITESPACE@144..145 " "
+          COLON@145..146 ":"
+          WHITESPACE@146..147 " "
+          END_MARKER@147..150
+            END_KW@147..150 "end"
+      RBRACKET@150..151 "]"
+  NEWLINE@151..152 "\n"
+  INDEX_EXPR@152..177
+    NAME@152..153
+      IDENT@152..153 "a"
+    ARG_LIST@153..177
+      LBRACKET@153..154 "["
+      ARG@154..176
+        TERNARY_EXPR@154..176
+          NAME@154..155
+            IDENT@154..155 "x"
+          WHITESPACE@155..156 " "
+          QUESTION@156..157 "?"
+          WHITESPACE@157..158 " "
+          RETURN_EXPR@158..168
+            RETURN_KW@158..164 "return"
+            WHITESPACE@164..165 " "
+            END_MARKER@165..168
+              END_KW@165..168 "end"
+          WHITESPACE@168..169 " "
+          COLON@169..170 ":"
+          WHITESPACE@170..171 " "
+          BEGIN_MARKER@171..176
+            BEGIN_KW@171..176 "begin"
+      RBRACKET@176..177 "]"
+  NEWLINE@177..178 "\n"
+  INDEX_EXPR@178..197
+    NAME@178..179
+      IDENT@178..179 "a"
+    ARG_LIST@179..197
+      LBRACKET@179..180 "["
+      ARG@180..196
+        TERNARY_EXPR@180..196
+          NAME@180..181
+            IDENT@180..181 "x"
+          WHITESPACE@181..182 " "
+          QUESTION@182..183 "?"
+          WHITESPACE@183..184 " "
+          RETURN_EXPR@184..190
+            RETURN_KW@184..190 "return"
+          WHITESPACE@190..191 " "
+          COLON@191..192 ":"
+          WHITESPACE@192..193 " "
+          END_MARKER@193..196
+            END_KW@193..196 "end"
+      RBRACKET@196..197 "]"
+  NEWLINE@197..198 "\n"
+  INDEX_EXPR@198..226
+    NAME@198..199
+      IDENT@198..199 "a"
+    ARG_LIST@199..226
+      LBRACKET@199..200 "["
+      ARG@200..225
+        TERNARY_EXPR@200..225
+          NAME@200..201
+            IDENT@200..201 "x"
+          WHITESPACE@201..202 " "
+          QUESTION@202..203 "?"
+          WHITESPACE@203..204 " "
+          RETURN_EXPR@204..221
+            RETURN_KW@204..210 "return"
+            WHITESPACE@210..211 " "
+            BARE_TUPLE_EXPR@211..221
+              BEGIN_MARKER@211..216
+                BEGIN_KW@211..216 "begin"
+              COMMA@216..217 ","
+              WHITESPACE@217..218 " "
+              END_MARKER@218..221
+                END_KW@218..221 "end"
+          WHITESPACE@221..222 " "
+          COLON@222..223 ":"
+          WHITESPACE@223..224 " "
+          NAME@224..225
+            IDENT@224..225 "y"
+      RBRACKET@225..226 "]"
+  NEWLINE@226..227 "\n"
+  INDEX_EXPR@227..250
+    NAME@227..228
+      IDENT@227..228 "a"
+    ARG_LIST@228..250
+      LBRACKET@228..229 "["
+      ARG@229..249
+        RETURN_EXPR@229..249
+          RETURN_KW@229..235 "return"
+          WHITESPACE@235..236 " "
+          CALL_EXPR@236..249
+            NAME@236..237
+              IDENT@236..237 "f"
+            ARG_LIST@237..249
+              LPAREN@237..238 "("
+              ARG@238..243
+                BEGIN_MARKER@238..243
+                  BEGIN_KW@238..243 "begin"
+              COMMA@243..244 ","
+              WHITESPACE@244..245 " "
+              ARG@245..248
+                END_MARKER@245..248
+                  END_KW@245..248 "end"
+              RPAREN@248..249 ")"
+      RBRACKET@249..250 "]"
+  NEWLINE@250..251 "\n"
+  INDEX_EXPR@251..266
+    NAME@251..252
+      IDENT@251..252 "a"
+    ARG_LIST@252..266
+      LBRACKET@252..253 "["
+      ARG@253..265
+        RETURN_EXPR@253..265
+          RETURN_KW@253..259 "return"
+          WHITESPACE@259..260 " "
+          PAREN_EXPR@260..265
+            LPAREN@260..261 "("
+            END_MARKER@261..264
+              END_KW@261..264 "end"
+            RPAREN@264..265 ")"
+      RBRACKET@265..266 "]"
+  NEWLINE@266..267 "\n"
+  INDEX_EXPR@267..284
+    NAME@267..268
+      IDENT@267..268 "a"
+    ARG_LIST@268..284
+      LBRACKET@268..269 "["
+      ARG@269..283
+        RETURN_EXPR@269..283
+          RETURN_KW@269..275 "return"
+          WHITESPACE@275..276 " "
+          PAREN_EXPR@276..283
+            LPAREN@276..277 "("
+            BEGIN_MARKER@277..282
+              BEGIN_KW@277..282 "begin"
+            RPAREN@282..283 ")"
+      RBRACKET@283..284 "]"
+  NEWLINE@284..285 "\n"
+  INDEX_EXPR@285..323
+    NAME@285..286
+      IDENT@285..286 "a"
+    ARG_LIST@286..323
+      LBRACKET@286..287 "["
+      ARG@287..322
+        RETURN_EXPR@287..322
+          RETURN_KW@287..293 "return"
+          WHITESPACE@293..294 " "
+          BINARY_EXPR@294..322
+            BEGIN_MARKER@294..299
+              BEGIN_KW@294..299 "begin"
+            WHITESPACE@299..300 " "
+            BLOCK_COMMENT@300..318 "#= index marker =#"
+            WHITESPACE@318..319 " "
+            PLUS@319..320 "+"
+            WHITESPACE@320..321 " "
+            LITERAL@321..322
+              INTEGER@321..322 "1"
+      RBRACKET@322..323 "]"
+  NEWLINE@323..324 "\n"
+  INDEX_EXPR@324..347
+    NAME@324..325
+      IDENT@324..325 "a"
+    ARG_LIST@325..347
+      LBRACKET@325..326 "["
+      ARG@326..346
+        RETURN_EXPR@326..346
+          RETURN_KW@326..332 "return"
+          WHITESPACE@332..333 " "
+          MATRIX_EXPR@333..346
+            LBRACKET@333..334 "["
+            ARG@334..339
+              BEGIN_MARKER@334..339
+                BEGIN_KW@334..339 "begin"
+            WHITESPACE@339..340 " "
+            ARG@340..341
+              NAME@340..341
+                IDENT@340..341 "x"
+            WHITESPACE@341..342 " "
+            ARG@342..345
+              END_MARKER@342..345
+                END_KW@342..345 "end"
+            RBRACKET@345..346 "]"
+      RBRACKET@346..347 "]"
+  NEWLINE@347..348 "\n"
+  INDEX_EXPR@348..363
+    NAME@348..349
+      IDENT@348..349 "a"
+    ARG_LIST@349..363
+      LBRACKET@349..350 "["
+      ARG@350..362
+        RETURN_EXPR@350..362
+          RETURN_KW@350..356 "return"
+          WHITESPACE@356..357 " "
+          VECT_EXPR@357..362
+            LBRACKET@357..358 "["
+            ARG@358..361
+              END_MARKER@358..361
+                END_KW@358..361 "end"
+            RBRACKET@361..362 "]"
+      RBRACKET@362..363 "]"
+  NEWLINE@363..364 "\n"
+  INDEX_EXPR@364..385
+    NAME@364..365
+      IDENT@364..365 "a"
+    ARG_LIST@365..385
+      LBRACKET@365..366 "["
+      ARG@366..384
+        RETURN_EXPR@366..384
+          RETURN_KW@366..372 "return"
+          WHITESPACE@372..373 " "
+          RANGE_EXPR@373..384
+            BEGIN_MARKER@373..378
+              BEGIN_KW@373..378 "begin"
+            COLON@378..379 ":"
+            LITERAL@379..380
+              INTEGER@379..380 "2"
+            COLON@380..381 ":"
+            END_MARKER@381..384
+              END_KW@381..384 "end"
+      RBRACKET@384..385 "]"
+  NEWLINE@385..386 "\n"
+  TYPED_COMPREHENSION@386..411
+    NAME@386..387
+      IDENT@386..387 "a"
+    GENERATOR@387..411
+      LBRACKET@387..388 "["
+      RETURN_EXPR@388..398
+        RETURN_KW@388..394 "return"
+        WHITESPACE@394..395 " "
+        END_MARKER@395..398
+          END_KW@395..398 "end"
+      WHITESPACE@398..399 " "
+      FOR_BINDING@399..410
+        FOR_KW@399..402 "for"
+        WHITESPACE@402..403 " "
+        NAME@403..404
+          IDENT@403..404 "i"
+        WHITESPACE@404..405 " "
+        IDENT@405..407 "in"
+        WHITESPACE@407..408 " "
+        NAME@408..410
+          IDENT@408..410 "xs"
+      RBRACKET@410..411 "]"
+  NEWLINE@411..412 "\n"
+  TYPED_COMPREHENSION@412..449
+    NAME@412..413
+      IDENT@412..413 "a"
+    GENERATOR@413..449
+      LBRACKET@413..414 "["
+      TERNARY_EXPR@414..436
+        NAME@414..415
+          IDENT@414..415 "x"
+        WHITESPACE@415..416 " "
+        QUESTION@416..417 "?"
+        WHITESPACE@417..418 " "
+        RETURN_EXPR@418..428
+          RETURN_KW@418..424 "return"
+          WHITESPACE@424..425 " "
+          END_MARKER@425..428
+            END_KW@425..428 "end"
+        WHITESPACE@428..429 " "
+        COLON@429..430 ":"
+        WHITESPACE@430..431 " "
+        BEGIN_MARKER@431..436
+          BEGIN_KW@431..436 "begin"
+      WHITESPACE@436..437 " "
+      FOR_BINDING@437..448
+        FOR_KW@437..440 "for"
+        WHITESPACE@440..441 " "
+        NAME@441..442
+          IDENT@441..442 "i"
+        WHITESPACE@442..443 " "
+        IDENT@443..445 "in"
+        WHITESPACE@445..446 " "
+        NAME@446..448
+          IDENT@446..448 "xs"
+      RBRACKET@448..449 "]"
+  NEWLINE@449..450 "\n"
+  TERNARY_EXPR@450..464
+    NAME@450..451
+      IDENT@450..451 "x"
+    WHITESPACE@451..452 " "
+    QUESTION@452..453 "?"
+    WHITESPACE@453..454 " "
+    RETURN_EXPR@454..460
+      RETURN_KW@454..460 "return"
+    WHITESPACE@460..461 " "
+    COLON@461..462 ":"
+    WHITESPACE@462..463 " "
+    NAME@463..464
+      IDENT@463..464 "y"
+  NEWLINE@464..465 "\n"
+  TERNARY_EXPR@465..481
+    NAME@465..466
+      IDENT@465..466 "x"
+    WHITESPACE@466..467 " "
+    QUESTION@467..468 "?"
+    WHITESPACE@468..469 " "
+    RETURN_EXPR@469..477
+      RETURN_KW@469..475 "return"
+      WHITESPACE@475..476 " "
+      NAME@476..477
+        IDENT@476..477 "a"
+    WHITESPACE@477..478 " "
+    COLON@478..479 ":"
+    WHITESPACE@479..480 " "
+    NAME@480..481
+      IDENT@480..481 "y"
+  NEWLINE@481..482 "\n"
+  TERNARY_EXPR@482..501
+    NAME@482..483
+      IDENT@482..483 "x"
+    WHITESPACE@483..484 " "
+    QUESTION@484..485 "?"
+    WHITESPACE@485..486 " "
+    RETURN_EXPR@486..497
+      RETURN_KW@486..492 "return"
+      WHITESPACE@492..493 " "
+      BARE_TUPLE_EXPR@493..497
+        NAME@493..494
+          IDENT@493..494 "a"
+        COMMA@494..495 ","
+        WHITESPACE@495..496 " "
+        NAME@496..497
+          IDENT@496..497 "b"
+    WHITESPACE@497..498 " "
+    COLON@498..499 ":"
+    WHITESPACE@499..500 " "
+    NAME@500..501
+      IDENT@500..501 "y"
+  NEWLINE@501..502 "\n"
+  TERNARY_EXPR@502..525
+    NAME@502..503
+      IDENT@502..503 "x"
+    WHITESPACE@503..504 " "
+    QUESTION@504..505 "?"
+    WHITESPACE@505..506 " "
+    RETURN_EXPR@506..521
+      RETURN_KW@506..512 "return"
+      WHITESPACE@512..513 " "
+      RETURN_EXPR@513..521
+        RETURN_KW@513..519 "return"
+        WHITESPACE@519..520 " "
+        NAME@520..521
+          IDENT@520..521 "a"
+    WHITESPACE@521..522 " "
+    COLON@522..523 ":"
+    WHITESPACE@523..524 " "
+    NAME@524..525
+      IDENT@524..525 "y"
+  NEWLINE@525..526 "\n"
+  TERNARY_EXPR@526..550
+    NAME@526..527
+      IDENT@526..527 "x"
+    WHITESPACE@527..528 " "
+    QUESTION@528..529 "?"
+    WHITESPACE@529..530 " "
+    TERNARY_EXPR@530..546
+      NAME@530..531
+        IDENT@530..531 "y"
+      WHITESPACE@531..532 " "
+      QUESTION@532..533 "?"
+      WHITESPACE@533..534 " "
+      RETURN_EXPR@534..542
+        RETURN_KW@534..540 "return"
+        WHITESPACE@540..541 " "
+        NAME@541..542
+          IDENT@541..542 "a"
+      WHITESPACE@542..543 " "
+      COLON@543..544 ":"
+      WHITESPACE@544..545 " "
+      NAME@545..546
+        IDENT@545..546 "b"
+    WHITESPACE@546..547 " "
+    COLON@547..548 ":"
+    WHITESPACE@548..549 " "
+    NAME@549..550
+      IDENT@549..550 "z"
+  NEWLINE@550..551 "\n"
+  TERNARY_EXPR@551..575
+    NAME@551..552
+      IDENT@551..552 "x"
+    WHITESPACE@552..553 " "
+    QUESTION@553..554 "?"
+    WHITESPACE@554..555 " "
+    RETURN_EXPR@555..571
+      RETURN_KW@555..561 "return"
+      WHITESPACE@561..562 " "
+      TERNARY_EXPR@562..571
+        NAME@562..563
+          IDENT@562..563 "y"
+        WHITESPACE@563..564 " "
+        QUESTION@564..565 "?"
+        WHITESPACE@565..566 " "
+        NAME@566..567
+          IDENT@566..567 "a"
+        WHITESPACE@567..568 " "
+        COLON@568..569 ":"
+        WHITESPACE@569..570 " "
+        NAME@570..571
+          IDENT@570..571 "b"
+    WHITESPACE@571..572 " "
+    COLON@572..573 ":"
+    WHITESPACE@573..574 " "
+    NAME@574..575
+      IDENT@574..575 "z"
+  NEWLINE@575..576 "\n"
+  TERNARY_EXPR@576..596
+    NAME@576..577
+      IDENT@576..577 "x"
+    WHITESPACE@577..578 " "
+    QUESTION@578..579 "?"
+    WHITESPACE@579..580 " "
+    RETURN_EXPR@580..592
+      RETURN_KW@580..586 "return"
+      WHITESPACE@586..587 " "
+      PAREN_EXPR@587..592
+        LPAREN@587..588 "("
+        BINARY_EXPR@588..591
+          NAME@588..589
+            IDENT@588..589 "a"
+          COLON@589..590 ":"
+          NAME@590..591
+            IDENT@590..591 "b"
+        RPAREN@591..592 ")"
+    WHITESPACE@592..593 " "
+    COLON@593..594 ":"
+    WHITESPACE@594..595 " "
+    NAME@595..596
+      IDENT@595..596 "y"
+  NEWLINE@596..597 "\n"
+  TERNARY_EXPR@597..618
+    NAME@597..598
+      IDENT@597..598 "x"
+    WHITESPACE@598..599 " "
+    QUESTION@599..600 "?"
+    WHITESPACE@600..601 " "
+    RETURN_EXPR@601..614
+      RETURN_KW@601..607 "return"
+      WHITESPACE@607..608 " "
+      CALL_EXPR@608..614
+        NAME@608..609
+          IDENT@608..609 "f"
+        ARG_LIST@609..614
+          LPAREN@609..610 "("
+          ARG@610..613
+            BINARY_EXPR@610..613
+              NAME@610..611
+                IDENT@610..611 "a"
+              COLON@611..612 ":"
+              NAME@612..613
+                IDENT@612..613 "b"
+          RPAREN@613..614 ")"
+    WHITESPACE@614..615 " "
+    COLON@615..616 ":"
+    WHITESPACE@616..617 " "
+    NAME@617..618
+      IDENT@617..618 "y"
+  NEWLINE@618..619 "\n"
+  TERNARY_EXPR@619..639
+    NAME@619..620
+      IDENT@619..620 "x"
+    WHITESPACE@620..621 " "
+    QUESTION@621..622 "?"
+    WHITESPACE@622..623 " "
+    RETURN_EXPR@623..635
+      RETURN_KW@623..629 "return"
+      WHITESPACE@629..630 " "
+      VECT_EXPR@630..635
+        LBRACKET@630..631 "["
+        ARG@631..634
+          BINARY_EXPR@631..634
+            NAME@631..632
+              IDENT@631..632 "a"
+            COLON@632..633 ":"
+            NAME@633..634
+              IDENT@633..634 "b"
+        RBRACKET@634..635 "]"
+    WHITESPACE@635..636 " "
+    COLON@636..637 ":"
+    WHITESPACE@637..638 " "
+    NAME@638..639
+      IDENT@638..639 "y"
+  NEWLINE@639..640 "\n"
+  TERNARY_EXPR@640..659
+    NAME@640..641
+      IDENT@640..641 "x"
+    WHITESPACE@641..642 " "
+    QUESTION@642..643 "?"
+    WHITESPACE@643..644 " "
+    RETURN_EXPR@644..655
+      RETURN_KW@644..650 "return"
+      WHITESPACE@650..651 " "
+      PAREN_EXPR@651..655
+        LPAREN@651..652 "("
+        QUOTE_SYM@652..654
+          COLON@652..653 ":"
+          NAME@653..654
+            IDENT@653..654 "a"
+        RPAREN@654..655 ")"
+    WHITESPACE@655..656 " "
+    COLON@656..657 ":"
+    WHITESPACE@657..658 " "
+    NAME@658..659
+      IDENT@658..659 "y"
+  NEWLINE@659..660 "\n"
+  TERNARY_EXPR@660..680
+    NAME@660..661
+      IDENT@660..661 "x"
+    WHITESPACE@661..662 " "
+    QUESTION@662..663 "?"
+    WHITESPACE@663..664 " "
+    RETURN_EXPR@664..676
+      RETURN_KW@664..670 "return"
+      WHITESPACE@670..671 " "
+      ASSIGNMENT_EXPR@671..676
+        NAME@671..672
+          IDENT@671..672 "a"
+        WHITESPACE@672..673 " "
+        EQ@673..674 "="
+        WHITESPACE@674..675 " "
+        NAME@675..676
+          IDENT@675..676 "b"
+    WHITESPACE@676..677 " "
+    COLON@677..678 ":"
+    WHITESPACE@678..679 " "
+    NAME@679..680
+      IDENT@679..680 "y"
+  NEWLINE@680..681 "\n"
+  TERNARY_EXPR@681..707
+    NAME@681..682
+      IDENT@681..682 "x"
+    WHITESPACE@682..683 " "
+    QUESTION@683..684 "?"
+    WHITESPACE@684..685 " "
+    RETURN_EXPR@685..691
+      RETURN_KW@685..691 "return"
+    WHITESPACE@691..692 " "
+    BLOCK_COMMENT@692..703 "#= empty =#"
+    WHITESPACE@703..704 " "
+    COLON@704..705 ":"
+    WHITESPACE@705..706 " "
+    NAME@706..707
+      IDENT@706..707 "y"
+  NEWLINE@707..708 "\n"
+  TERNARY_EXPR@708..736
+    NAME@708..709
+      IDENT@708..709 "x"
+    WHITESPACE@709..710 " "
+    QUESTION@710..711 "?"
+    WHITESPACE@711..712 " "
+    RETURN_EXPR@712..720
+      RETURN_KW@712..718 "return"
+      WHITESPACE@718..719 " "
+      NAME@719..720
+        IDENT@719..720 "a"
+    WHITESPACE@720..721 " "
+    BLOCK_COMMENT@721..732 "#= value =#"
+    WHITESPACE@732..733 " "
+    COLON@733..734 ":"
+    WHITESPACE@734..735 " "
+    NAME@735..736
+      IDENT@735..736 "y"
+  NEWLINE@736..737 "\n"
+  TERNARY_EXPR@737..760
+    NAME@737..738
+      IDENT@737..738 "x"
+    WHITESPACE@738..739 " "
+    QUESTION@739..740 "?"
+    WHITESPACE@740..741 " "
+    RETURN_EXPR@741..747
+      RETURN_KW@741..747 "return"
+    WHITESPACE@747..748 " "
+    COLON@748..749 ":"
+    WHITESPACE@749..750 " "
+    RETURN_EXPR@750..760
+      RETURN_KW@750..756 "return"
+      WHITESPACE@756..757 " "
+      BINARY_EXPR@757..760
+        NAME@757..758
+          IDENT@757..758 "a"
+        COLON@758..759 ":"
+        NAME@759..760
+          IDENT@759..760 "b"
+  NEWLINE@760..761 "\n"
+  RETURN_EXPR@761..771
+    RETURN_KW@761..767 "return"
+    WHITESPACE@767..768 " "
+    BINARY_EXPR@768..771
+      NAME@768..769
+        IDENT@768..769 "a"
+      COLON@769..770 ":"
+      NAME@770..771
+        IDENT@770..771 "b"
+  NEWLINE@771..772 "\n"
+  VECT_EXPR@772..792
+    LBRACKET@772..773 "["
+    ARG@773..791
+      RETURN_EXPR@773..791
+        RETURN_KW@773..779 "return"
+        WHITESPACE@779..780 " "
+        BEGIN_EXPR@780..791
+          BEGIN_KW@780..785 "begin"
+          BLOCK@785..788
+            WHITESPACE@785..786 " "
+            NAME@786..787
+              IDENT@786..787 "a"
+            WHITESPACE@787..788 " "
+          END_KW@788..791 "end"
+    RBRACKET@791..792 "]"
+  NEWLINE@792..793 "\n"
+  CALL_EXPR@793..807
+    NAME@793..794
+      IDENT@793..794 "f"
+    ARG_LIST@794..807
+      LPAREN@794..795 "("
+      ARG@795..806
+        RETURN_EXPR@795..806
+          RETURN_KW@795..801 "return"
+          WHITESPACE@801..802 " "
+          BARE_TUPLE_EXPR@802..806
+            NAME@802..803
+              IDENT@802..803 "a"
+            COMMA@803..804 ","
+            WHITESPACE@804..805 " "
+            NAME@805..806
+              IDENT@805..806 "b"
+      RPAREN@806..807 ")"
+  NEWLINE@807..808 "\n"
+  COMPREHENSION@808..830
+    LBRACKET@808..809 "["
+    RETURN_EXPR@809..817
+      RETURN_KW@809..815 "return"
+      WHITESPACE@815..816 " "
+      NAME@816..817
+        IDENT@816..817 "x"
+    WHITESPACE@817..818 " "
+    FOR_BINDING@818..829
+      FOR_KW@818..821 "for"
+      WHITESPACE@821..822 " "
+      NAME@822..823
+        IDENT@822..823 "i"
+      WHITESPACE@823..824 " "
+      IDENT@824..826 "in"
+      WHITESPACE@826..827 " "
+      NAME@827..829
+        IDENT@827..829 "xs"
+    RBRACKET@829..830 "]"
+  NEWLINE@830..831 "\n"
+  PAREN_EXPR@831..863
+    LPAREN@831..832 "("
+    TERNARY_EXPR@832..862
+      NAME@832..833
+        IDENT@832..833 "x"
+      WHITESPACE@833..834 " "
+      QUESTION@834..835 "?"
+      WHITESPACE@835..836 " "
+      RETURN_EXPR@836..843
+        RETURN_KW@836..842 "return"
+        WHITESPACE@842..843 " "
+      COMMENT@843..857 "# empty branch"
+      NEWLINE@857..858 "\n"
+      WHITESPACE@858..859 " "
+      COLON@859..860 ":"
+      WHITESPACE@860..861 " "
+      NAME@861..862
+        IDENT@861..862 "y"
+    RPAREN@862..863 ")"
+  NEWLINE@863..864 "\n"
+  PAREN_EXPR@864..899
+    LPAREN@864..865 "("
+    TERNARY_EXPR@865..898
+      NAME@865..866
+        IDENT@865..866 "x"
+      WHITESPACE@866..867 " "
+      QUESTION@867..868 "?"
+      WHITESPACE@868..869 " "
+      RETURN_EXPR@869..878
+        RETURN_KW@869..875 "return"
+        WHITESPACE@875..876 " "
+        NAME@876..877
+          IDENT@876..877 "a"
+        WHITESPACE@877..878 " "
+      COMMENT@878..893 "# valued branch"
+      NEWLINE@893..894 "\n"
+      WHITESPACE@894..895 " "
+      COLON@895..896 ":"
+      WHITESPACE@896..897 " "
+      NAME@897..898
+        IDENT@897..898 "y"
+    RPAREN@898..899 ")"
+  NEWLINE@899..900 "\n"
+  FUNCTION_DEF@900..946
+    FUNCTION_KW@900..908 "function"
+    WHITESPACE@908..909 " "
+    SIGNATURE@909..912
+      CALL_EXPR@909..912
+        NAME@909..910
+          IDENT@909..910 "f"
+        ARG_LIST@910..912
+          LPAREN@910..911 "("
+          RPAREN@911..912 ")"
+    BLOCK@912..943
+      NEWLINE@912..913 "\n"
+      WHITESPACE@913..917 "    "
+      TERNARY_EXPR@917..931
+        NAME@917..918
+          IDENT@917..918 "x"
+        WHITESPACE@918..919 " "
+        QUESTION@919..920 "?"
+        WHITESPACE@920..921 " "
+        RETURN_EXPR@921..927
+          RETURN_KW@921..927 "return"
+        WHITESPACE@927..928 " "
+        COLON@928..929 ":"
+        WHITESPACE@929..930 " "
+        NAME@930..931
+          IDENT@930..931 "y"
+      NEWLINE@931..932 "\n"
+      WHITESPACE@932..936 "    "
+      RETURN_EXPR@936..942
+        RETURN_KW@936..942 "return"
+      NEWLINE@942..943 "\n"
+    END_KW@943..946 "end"
+  NEWLINE@946..947 "\n"

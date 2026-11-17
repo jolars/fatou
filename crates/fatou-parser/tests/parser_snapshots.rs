@@ -60,6 +60,42 @@ fn standalone_colon_accepts_trailing_whitespace() {
 }
 
 #[test]
+fn return_operands_keep_index_and_ternary_context() {
+    let input = include_str!("fixtures/parser/return_context/input.jl");
+    for newline in ["\n", "\r\n"] {
+        let input = input.replace('\n', newline);
+        let output = parse(&input);
+        assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+        assert_eq!(reconstruct(&input), input);
+    }
+}
+
+#[test]
+fn return_context_keeps_newline_and_declaration_boundaries() {
+    for input in [
+        "[return end]",
+        "(return end)",
+        "f(return end)",
+        "a[return\nend]",
+        "a[return # comment\nend]",
+        "x ? return\n: y",
+        "x ? return a\n: y",
+        "x ? return :a : y",
+        "a[return begin x end]",
+        "a[return global x = end]",
+        "a[global x = end]",
+        "x ? global x = y : z",
+    ] {
+        for newline in ["\n", "\r\n"] {
+            let input = input.replace('\n', newline);
+            let output = parse(&input);
+            assert!(!output.diagnostics.is_empty(), "{input:?}");
+            assert_eq!(reconstruct(&input), input);
+        }
+    }
+}
+
+#[test]
 fn quote_colon_keeps_whitespace_diagnostics() {
     for input in [
         ": name",

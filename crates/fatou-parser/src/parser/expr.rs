@@ -11,9 +11,9 @@ use crate::parser::events::{Event, ExprParse, finish, push_range};
 use crate::parser::lexer::{TokKind, Token, is_op_suffix_char};
 use crate::parser::recovery::{error_expr_to_line_end, error_expr_with_range};
 use crate::parser::structural::{
-    KwStmt, is_op_name, parse_abstract_type, parse_begin_expr, parse_do_block, parse_for_expr,
-    parse_function_expr, parse_if_expr, parse_import_stmt, parse_keyword_stmt, parse_let_expr,
-    parse_macro_def, parse_module_expr, parse_name_list_stmt, parse_primitive_type,
+    KwOperandContext, KwStmt, is_op_name, parse_abstract_type, parse_begin_expr, parse_do_block,
+    parse_for_expr, parse_function_expr, parse_if_expr, parse_import_stmt, parse_keyword_stmt,
+    parse_let_expr, parse_macro_def, parse_module_expr, parse_name_list_stmt, parse_primitive_type,
     parse_quote_expr, parse_struct_expr, parse_try_expr, parse_typegroup_expr, parse_while_expr,
 };
 use crate::syntax::SyntaxKind;
@@ -129,7 +129,7 @@ struct ExprFlags {
     /// of such a keyword that is *itself* in generator position, so a nested one
     /// inherits the boundary (`[global const x = 1 for i in 1:1]` — the inner
     /// `const` must stop at the `for` too). Everywhere else the boundary is
-    /// derived from `stmt_comma`; see [`KwStmt::ExprTuple`]'s `for_ends`.
+    /// derived from `stmt_comma`; see [`KwOperandContext::for_ends`].
     kw_generator_body: bool,
 }
 
@@ -198,17 +198,20 @@ pub(crate) fn parse_block_stmt(
 
 /// Parse the operand of a `const`/`global`/`local`/`return` statement. Like
 /// [`parse_block_stmt`] (a top-level comma folds into a bare tuple), but
-/// `for_ends` propagates the enclosing generator boundary so a nested keyword
-/// statement stops at the same `for` (`[global const x = 1 for i in 1:1]`).
+/// `context` propagates the enclosing index, ternary, and generator boundaries.
+/// Other flags reset to statement scope, including newline and space sensitivity.
 pub(crate) fn parse_kw_stmt_operand(
     tokens: &[Token],
     start: usize,
-    for_ends: bool,
+    context: KwOperandContext,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
     let flags = ExprFlags {
         stmt_comma: true,
-        kw_generator_body: for_ends,
+        kw_generator_body: context.for_ends,
+        end_marker: context.end_marker,
+        begin_marker: context.begin_marker,
+        no_range: context.colon_ends,
         ..ExprFlags::default()
     };
     parse_expr_in(tokens, start, 0, diagnostics, flags)
@@ -340,7 +343,10 @@ fn parse_expr_in(
     // `(comprehension (generator (const (= x 1)) (= i (call-i 1 : 1))))`). That is
     // every non-statement position — bracket elements, arguments, parenthesized
     // expressions — plus a nested keyword operand that inherits it.
-    let kw_for_ends = !stmt_comma || kw_generator_body;
+    let kw_context = KwOperandContext {
+        for_ends: !stmt_comma || kw_generator_body,
+        ..KwOperandContext::default()
+    };
     let ctx = ParserCtx::new(tokens);
 
     // The contextual keyword `public` (a plain identifier elsewhere) opens a
@@ -431,7 +437,12 @@ fn parse_expr_in(
                     SyntaxKind::RETURN_EXPR,
                     KwStmt::ExprTuple {
                         optional_value: true,
-                        for_ends: kw_for_ends,
+                        context: KwOperandContext {
+                            end_marker: flags.end_marker,
+                            begin_marker,
+                            colon_ends: no_range,
+                            ..kw_context
+                        },
                     },
                     diagnostics,
                 );
@@ -471,7 +482,7 @@ fn parse_expr_in(
                     SyntaxKind::CONST_STMT,
                     KwStmt::ExprTuple {
                         optional_value: false,
-                        for_ends: kw_for_ends,
+                        context: kw_context,
                     },
                     diagnostics,
                 );
@@ -483,7 +494,7 @@ fn parse_expr_in(
                     SyntaxKind::GLOBAL_STMT,
                     KwStmt::ExprTuple {
                         optional_value: false,
-                        for_ends: kw_for_ends,
+                        context: kw_context,
                     },
                     diagnostics,
                 );
@@ -495,7 +506,7 @@ fn parse_expr_in(
                     SyntaxKind::LOCAL_STMT,
                     KwStmt::ExprTuple {
                         optional_value: false,
-                        for_ends: kw_for_ends,
+                        context: kw_context,
                     },
                     diagnostics,
                 );
@@ -3958,9 +3969,9 @@ fn parse_ternary(
 
     // The `:` separator (newlines insignificant inside brackets, like operators).
     let colon = if inside_brackets {
-        ctx.skip_ws_and_newlines(then_br.end)
+        ctx.skip_trivia(then_br.end)
     } else {
-        ctx.skip_ws(then_br.end)
+        ctx.skip_ws_and_block_comments(then_br.end)
     };
     let has_colon = ctx.token(colon).map(|t| t.kind) == Some(TokKind::Colon);
 

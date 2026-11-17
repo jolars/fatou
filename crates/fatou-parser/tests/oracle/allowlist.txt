@@ -210,6 +210,7 @@ raw_string
 raw_triple_string
 raw_triple_string_quote
 regex_string
+return_context
 return_stray_close
 short_circuit_assoc
 short_function_def

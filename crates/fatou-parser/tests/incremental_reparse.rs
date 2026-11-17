@@ -224,9 +224,83 @@ const HAZARD_SNIPPETS: &[&str] = &[
     include_str!("fixtures/parser/macro_newline_operator/input.jl"),
     include_str!("fixtures/parser/parenthesized_multiline_macro/input.jl"),
     include_str!("fixtures/parser/macro_newline_boundaries/input.jl"),
+    include_str!("fixtures/parser/return_context/input.jl"),
     "(x, @m a\n b)\n",
     "\"$(@m a\n b)\"\n",
 ];
+
+#[test]
+fn return_edits_preserve_index_and_ternary_context() {
+    for (source, before, after, expected) in [
+        ("a[return end]", "end", "begin", "(ref a (return begin))"),
+        ("a[return begin]", "begin", "end", "(ref a (return end))"),
+        ("a[return value]", "value", "end", "(ref a (return end))"),
+        ("a[return end]", "return ", "", "(ref a end)"),
+        (
+            "a[return end]",
+            "return ",
+            "return return ",
+            "(ref a (return (return end)))",
+        ),
+        ("return a : b", "return", "x ? return", "(? x (return a) b)"),
+        (
+            "x ? return a : b",
+            "x ? return",
+            "return",
+            "(return (call-i a : b))",
+        ),
+        ("x ? return : y", "return", "return a", "(? x (return a) y)"),
+        ("x ? return a : y", " a ", " ", "(? x (return) y)"),
+        (
+            "a[x ? return end : begin]",
+            "return end",
+            "return",
+            "(ref a (? x (return) begin))",
+        ),
+        (
+            "a[return begin + value]",
+            "value",
+            "renamed",
+            "(ref a (return (call-i begin + renamed)))",
+        ),
+    ] {
+        for newline in ["\n", "\r\n"] {
+            let input = format!("function f()\n before()\n {source}\n after()\nend\n")
+                .replace('\n', newline);
+            let old = parse(&input);
+            assert!(old.diagnostics.is_empty(), "{:?}", old.diagnostics);
+            let start = input.find(before).unwrap();
+            let edit = Edit {
+                range: start..start + before.len(),
+                insert: after.to_string(),
+            };
+            let edited = edit.apply(&input);
+            let full = parse(&edited);
+            assert!(full.diagnostics.is_empty(), "{:?}", full.diagnostics);
+            assert_eq!(
+                fatou_parser::parser::to_juliasyntax_sexpr(&full.cst, &full.diagnostics),
+                format!(
+                    "(toplevel (function (call f) (block (call before) {expected} (call after))))"
+                ),
+                "{edited:?}",
+            );
+            let reparsed = reparse(
+                &input,
+                &old.cst.green().to_owned(),
+                &old.diagnostics,
+                &edit,
+                &edited,
+            )
+            .expect("an interior return edit should reparse");
+            assert_eq!(
+                fingerprint(&SyntaxNode::new_root(reparsed.green)),
+                fingerprint(&full.cst),
+                "{edit:?} on {input:?}",
+            );
+            assert_eq!(reparsed.diagnostics, full.diagnostics);
+        }
+    }
+}
 
 #[test]
 fn multiline_macro_edits_preserve_parenthesis_context() {
