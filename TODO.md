@@ -22,10 +22,11 @@
   pass. See
   [JuliaLang/julia#60181](https://github.com/JuliaLang/julia/pull/60181).
 
-- [ ] Preserve the enclosing index and ternary context when parsing `return`.
-  Julia 1.14 accepts `a[return end]`, `a[return begin]`, `x ? return : y`,
-  and `x ? return a : y`; Fatou currently rejects them. Thread the relevant
-  parse context through the keyword operand parser, as for labeled `break`.
+- [x] Preserve the enclosing index and ternary context when parsing `return`.
+  Support Julia 1.14's `a[return end]`, `a[return begin]`, `x ? return : y`,
+  and `x ? return a : y` by threading context through keyword operands.
+  Cover nested returns, tuples, ranges, comments, CRLF, and incremental edits
+  against the locked oracle while retaining newline and declaration boundaries.
 
 - [ ] Update the lexer for Unicode 18. Regenerate the identifier tables from the
   locked Julia binary, and add the ten missing operator suffixes: `ᵅ`, `ᵋ`,
@@ -62,8 +63,8 @@
 - [ ] Extend `julia-version-compat` to Julia 1.14 additions: `typegroup`,
   wrapping arithmetic and assignment operators (including broadcasts),
   labeled `break`/`continue`, and primitive types with non-byte-multiple
-  widths and parenthesized multiline macro arguments. Add checks for the new
-  `return` forms as parser support lands. These constructs currently produce
+  widths and parenthesized multiline macro arguments. Check the new `return`
+  forms in index and ternary contexts. These constructs currently produce
   no compatibility finding when targeting Julia 1.13. Keep runtime
   compatibility separate from the selected syntax edition.
 

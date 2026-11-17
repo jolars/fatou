@@ -13,10 +13,10 @@ formatter, linter, or other downstream follow-up, put the active task in that
 consumer's `RECAP.md` and `TODO.md` section; retain at most a historical note in
 the parser session log.
 
-Follow the remaining Parser tasks in `TODO.md`: preserve index and ternary
-context in `return` operands, then update Unicode 18 identifiers and operator
-suffixes. The parenthesized multiline macro cluster is complete, including all
-58 harvested cases. Other JuliaSyntax 2 migration clusters remain classified in
+Follow the remaining Parser task in `TODO.md`: update Unicode 18 identifiers and
+operator suffixes. Return operands now preserve index and ternary context. The
+parenthesized multiline macro cluster is complete, including all 58 harvested
+cases. Other JuliaSyntax 2 migration clusters remain classified in
 `tests/oracle/blocked.txt` and `tests/oracle/juliasyntax-blocked.txt`: adjacent
 assignment/comparison tokens, qualified literal macro callees, and the seven
 changed curated grammar cases.
@@ -54,6 +54,10 @@ changed curated grammar cases.
 - **Parentheses inherit macro generator context.** `inside_brackets` controls
   newline sensitivity, not whether `for` ends macro arguments. `(@m for … end)`
   takes a loop; `f((@m for i in xs))` inherits the call's generator boundary.
+- **Return operands inherit only their relevant context.** Retain index markers,
+  ternary colon boundaries, and the existing generator boundary while resetting
+  newline and space sensitivity. Declarations still reset index and ternary
+  context. Leave separator trivia to the enclosing ternary, including comments.
 - **A/B before calling a diff a regression.** Stash and re-run: most surprising
   diffs on real code are pre-existing error shapes.
 - **Reseed allowlists with the `grep -E '^#|^$'` header-preserving recipe.**
@@ -72,7 +76,7 @@ changed curated grammar cases.
 JS corpus (**907 cases**, error shapes included): **885 allowlisted**, 22
 classified divergences, 0 unsupported. All 756 original inputs remain, including
 six removed from upstream's harvested binding, and all 749 original passing
-cases remain allowlisted. Dir corpus (**277 cases**): **269 allowlisted**, 8
+cases remain allowlisted. Dir corpus (**278 cases**): **270 allowlisted**, 8
 blocked. Seven curated grammar changes moved to blocked with identical parser
 fixtures and reviewed CST snapshots; numeric display remains blocked. Both
 corpora enforce complete triage and reject stale blocked entries.
@@ -117,42 +121,40 @@ prefix `**a`/`--a` (`call-pre`, in neither corpus); trailing block-body junk
 keyword in `(@m x\n end)`. The last two remain pre-existing divergences in the
 multiline-macro probe set.
 
-## Latest session (2026-11-17 — parenthesized multiline macros)
+## Latest session (2026-11-17 — return operand context)
 
-- **Grammar**: track the first expression in bare parentheses. Only its macro
-  call consumes newline-separated arguments; nested macros, blocks, string
-  interpolation, tuple separators, generators, and following operator lines keep
-  their own boundaries. Qualified callees retain the whole expression's start.
-- **Recovery**: keep invalid suffixes inside their delimiters, leave foreign
-  bracket closers outside truncated blocks, and retain the parentheses around an
-  unclosed generator. Diagnostics supply missing-closer markers. Tuple/block
-  classification counts consumed separators rather than commas inside arguments.
-- **Projection**: qualified macro names unwrap any leading callee expression,
-  including calls and parentheses. Numeric coefficients may juxtapose with
-  macros; ordinary closed values still reject a glued sigil.
-- **Coverage**: harvested **827/907 -> 885/907**, with all 58 macro cases
-  removed from blocked and no regressions. Curated **267/275 -> 269/277** adds
-  `parenthesized_multiline_macro` and `macro_newline_boundaries`; 8 blocked
-  cases remain. All earlier generated artifacts replay unchanged. The 116-input
-  probe improves from 16 to 114 matches; its remaining two recovery differences
-  predate this work. New tests fail on an isolated unchanged checkout.
-- **Formatter coupling**: nonfinal arguments fence undelimited macro tails and
-  operator values; bare tuples fence their final item without changing tuple
-  syntax. LF/CRLF and width 24/80 checks require canonical agreement, program
-  preservation, and idempotence. The new fixture joins the existing `where`
-  normalization policy group. The runtime compatibility follow-up stays in the
-  existing `julia-version-compat` roadmap task.
-- **Validation**: focused parser/oracle, incremental, formatter, and full
-  workspace tests pass, along with clippy, rustfmt, and both engine Wasm builds.
-  The valid parser fixture formats idempotently and reparses cleanly with LF and
-  CRLF.
+- **Grammar**: carry index markers and the enclosing ternary's colon boundary
+  through `KwOperandContext` into `return` operands, including nested returns.
+  Preserve the existing generator boundary while resetting newline and space
+  sensitivity. Declarations retain their previous context reset.
+- **Trivia**: leave the ternary separator and its preceding trivia outside the
+  return. Ternary parsing skips block comments, plus line comments and newlines
+  inside parentheses. Remove the unused whitespace-only cursor helper. The
+  projector needs no changes.
+- **Coverage**: `return_context` adds 40 valid expressions and a reviewed CST
+  snapshot. LF/CRLF tests check clean parsing, losslessness, 12 invalid context
+  boundaries, and 11 incremental edits; the fixture also joins the seeded edit
+  sweep. The new regression fails on the unchanged parser. The locked oracle
+  confirms the four roadmap forms with syntax version 1.14 as well as 1.15.
+- **Parity**: curated **269/277 -> 270/278**, harvested **885/907 -> 885/907**,
+  with no regressions or new blocked entries. Earlier generated artifacts replay
+  unchanged. The 76-input probe improves from 25 to 65 matches, including all
+  **53 valid inputs** (previously 15). Its 11 remaining recovery divergences
+  also diverged before the change.
+- **Validation**: focused parser/oracle and incremental tests, full workspace
+  tests, clippy, rustfmt, and both engine Wasm builds pass. Formatting the valid
+  fixture is program-preserving, clean, and idempotent at widths 24/80 with LF
+  and CRLF. Runtime compatibility checks remain in the existing
+  `julia-version-compat` roadmap task.
 
-**Ranked next target:** preserve the enclosing index and ternary context in
-`return` operands, as queued in `TODO.md`.
+**Ranked next target:** Unicode 18 identifiers and operator suffixes in `TODO.md`.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
+
+- **2026-11-17** — parenthesized multiline macros, 58 harvested cases, delimiter
+  recovery, and formatter argument fences. 885 / 269.
 
 - **2026-11-17** — locked JuliaSyntax 2 oracle migration, encoding translation,
   complete divergence triage, and unchanged replay of generated artifacts. 827 / 267.
@@ -257,19 +259,11 @@ Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 - **2026-08-07c** — `∈` as the iteration separator; loop-variable parsing stops
   before Unicode `∈`, and the formatter normalizes the new flat shape. 677 / 249.
 
-- **2026-08-07b** — `for outer i` iteration spec. New `OUTER_BINDING` node;
-  JuliaSyntax nests `outer` around the *variable*, inside the `=`
-  (`(= (outer i) …)`), so the pattern parses at `COMMA_ITEM_BP` and the spec `=`
-  is consumed as a loose separator. `outer` is contextual, detected by a
-  speculative parse. Linter needed no change. Fixture `for_outer_binding`. 677 / 248.
+- **2026-08-07b** — contextual `outer` loop bindings and the `OUTER_BINDING`
+  node, with speculative pattern parsing. Fixture `for_outer_binding`. 677 / 248.
 
-- **2026-08-07** — keyword statement as a comprehension/generator body.
-  `[const x = 1 for i in 1:1]` swallowed the `for` as loose tokens;
-  `KwStmt::ExprTuple` gained `for_ends`, set via
-  `!stmt_comma ||   kw_generator_body` (keying on `inside_brackets` would have
-  missed `[…]`). Operand position deliberately not gated. Fixture
-  `keyword_stmt_generator_body`. Drive-by: fixed
-  `update-juliasyntax-corpus.jl`'s stale pre-crate-split `CORPUS_DIR`. 677 / 247.
+- **2026-08-07** — keyword statements preserve generator boundaries without
+  gating the operand. Fixture `keyword_stmt_generator_body`. 677 / 247.
 
 - **2026-07-30** — prefix-operator space-arg then whitespace opener
   (`@jl_assert !is_leaf(st) (st, "msg")`). `parse_prefix`'s unary arm hard-coded
