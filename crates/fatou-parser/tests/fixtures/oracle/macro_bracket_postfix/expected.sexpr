@@ -1,1 +1,1 @@
-(toplevel (. (macrocall @S (vect a)) b) (. (macrocall @S (braces a)) b) (call (macrocall @S (vect a)) x) (ref (macrocall @S (vect a)) b) (. (macrocall (. S @x) (vect a)) b) (. (. (macrocall @S (vect a)) b) c))
+(toplevel (. (macrocall (macro_name S) (vect a)) b) (. (macrocall (macro_name S) (braces a)) b) (call (macrocall (macro_name S) (vect a)) x) (ref (macrocall (macro_name S) (vect a)) b) (. (macrocall (macro_name (. S x)) (vect a)) b) (. (. (macrocall (macro_name S) (vect a)) b) c))

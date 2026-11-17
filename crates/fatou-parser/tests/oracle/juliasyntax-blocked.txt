@@ -1,0 +1,103 @@
+# JuliaSyntax harvested cases with a known divergence. Each group records
+# its cause; the allowlist and this file cover the complete corpus.
+# The original 749 passing harvested regressions remain allowlisted.
+
+# Float display uses Julia values rather than source spelling.
+js-3fdf9080
+js-5c474566
+js-7d3a7230
+js-850f4dbf
+js-ae1c5672
+js-d89d29e0
+
+# N-ary juxtaposition differs from JuliaSyntax.
+js-56b3bc34
+
+# Character-literal recovery needs bracket-sensitive prime lexing.
+js-68f7107f
+js-840df0f6
+
+# Adjacent assignment and comparison operators need separate lexer tokens.
+js-0b3bccd9
+js-515ee99c
+js-aa35190c
+js-bddb5929
+js-c88fa5b9
+js-fa5766c6
+
+# Qualified string and command macro callees have the wrong CST topology.
+js-87dd3b0f
+js-fbe1eb33
+
+# Invalid dotted bracket and brace forms need recovery instead of field access.
+js-7a721d8d
+js-a822675e
+
+# A question-mark field name is diagnosed as a lone operator.
+js-72e85c2f
+
+# An incomplete anonymous function signature needs parameter-tuple recovery.
+js-ba3a8941
+
+# Adjacent unary operators after a dot-only name need a spacing diagnostic.
+js-f73f3c31
+
+# Parenthesized macro newline arguments, boundaries, and recovery need Julia 1.14 support.
+js-013fbba7
+js-04af2a88
+js-17352b00
+js-181781a1
+js-1de6e0df
+js-202fd898
+js-23e24872
+js-28712974
+js-2de1a8eb
+js-3121c813
+js-46407c9d
+js-4657e34f
+js-489110d2
+js-4e073f34
+js-4e17b2c3
+js-51a8ec5b
+js-556e6100
+js-673cd9b1
+js-6d333c40
+js-711915d1
+js-729490e1
+js-7571da6c
+js-757b5c01
+js-7bb24f23
+js-81f06a95
+js-84d13620
+js-882ec56f
+js-89733d87
+js-8af03d33
+js-8e6f7c64
+js-8f34c013
+js-8f8ece9f
+js-8fb2f6df
+js-93c21e44
+js-9ba52855
+js-9c15339d
+js-9eb5d1db
+js-9fb853f1
+js-a0ac17bd
+js-a10e8bf1
+js-a7e81b9a
+js-a9370d0e
+js-acb124a0
+js-b5c09704
+js-bd0d7611
+js-c1600f34
+js-c3d20940
+js-c5052273
+js-d723ec95
+js-d7f94db7
+js-dba11856
+js-e0967877
+js-e57784e1
+js-e92bf4f3
+js-ed4ce869
+js-f1f3d8af
+js-f8232b4c
+js-f8f0d284

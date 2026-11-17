@@ -1,2 +1,8 @@
-julia_version=1.13.0
-juliasyntax_version=1.0.2
+julia_version=1.15.0-DEV.783
+julia_commit=a11d632fa5768e9324c6e752b7a15196605f6b92
+juliasyntax_version=2.0.0-DEV
+syntax_version=1.15.0
+juliasyntax_repository=https://github.com/JuliaLang/julia
+juliasyntax_revision=a11d632fa5768e9324c6e752b7a15196605f6b92
+julia_binary_source=archive
+julia_archive_sha256=c70c968914629112e04e507416a74636b94b74f85ef91416643983762f8ae7bf

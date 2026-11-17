@@ -1,1 +1,1 @@
-(toplevel (quote-: =) (quote-: ::) (quote-: :) (quote-: +) (quote-: &&) (quote-: <:) (quote-: +=) (quote-: ==) (quote-: .) (quote-: ...) (quote-: (. =)) (quote-: (. +=)) (quote-: (. &&)) (quote-: (. ||)) (quote-: (. ÷=)) (call Expr (quote-: call) (quote-: (. =)) x))
+(toplevel (quote-: =) (quote-: ::) (quote-: :) (quote-: +) (quote-: &&) (quote-: <:) (quote-: (op= +)) (quote-: ==) (quote-: .) (quote-: (DotsIdentifier-3)) (quote-: (. =)) (quote-: (.op= +)) (quote-: (. &&)) (quote-: (. ||)) (quote-: (.op= ÷)) (call Expr (quote-: call) (quote-: (. =)) x))

@@ -30,14 +30,12 @@ const BLOCKED_REL: &str = "tests/oracle/blocked.txt";
 const REPORT_REL: &str = "tests/oracle/report.txt";
 
 /// The harvested JuliaSyntax sub-corpus (`scripts/harvest-juliasyntax-corpus.jl`):
-/// 685 micro-cases from JuliaSyntax's own `test/parser.jl` (error shapes
-/// included), one JSON object per line. Gated **opt-in** (like the dir corpus):
-/// every allowlisted slug must match Julia, guarding against regression. The
-/// corpus is exhausted of fixable cases — the remaining divergences are permanent
-/// (float display, `(2)(3)x`, the `x 'y` char lexer), so treat the full report as
-/// a regression gate rather than a backlog to work through.
+/// Micro-cases from JuliaSyntax's own `test/parser.jl`, plus retained inputs
+/// removed upstream, with error shapes included. Every case belongs to the
+/// allowlist or the blocked list, where each deferred gap has a rationale.
 const JS_CORPUS_REL: &str = "tests/fixtures/oracle/juliasyntax.jsonl";
 const JS_ALLOWLIST_REL: &str = "tests/oracle/juliasyntax-allowlist.txt";
+const JS_BLOCKED_REL: &str = "tests/oracle/juliasyntax-blocked.txt";
 const JS_REPORT_REL: &str = "tests/oracle/juliasyntax-report.txt";
 
 struct Case {
@@ -97,11 +95,11 @@ fn read_js_corpus() -> Vec<Case> {
 /// Outcome of projecting one case against its pinned expected s-expression.
 #[derive(PartialEq, Eq)]
 enum Outcome {
-    /// Fatou parses cleanly and the projection matches Julia.
+    /// The projection matches Julia, including any error recovery.
     Pass,
-    /// Fatou parses cleanly but the projection diverges from Julia.
+    /// The projection diverges from Julia.
     Fail,
-    /// Fatou reports parse diagnostics — unsupported syntax (the growth frontier).
+    /// The projector does not support a CST node kind.
     Unsupported,
 }
 
@@ -135,6 +133,18 @@ fn matches(case: &Case) -> bool {
     }
 }
 
+fn divergence_detail(case: &Case) -> String {
+    let output = parse(&case.input);
+    let actual = to_juliasyntax_sexpr(&output.cst, &output.diagnostics);
+    format!(
+        "\n  input: {:?}\n  expected: {}\n  actual:   {}\n  diagnostics: {:?}",
+        case.input,
+        normalize_sexpr(&case.expected),
+        normalize_sexpr(&actual),
+        output.diagnostics,
+    )
+}
+
 fn read_slug_file(rel: &str) -> BTreeSet<String> {
     let path = manifest_path(rel);
     let Ok(content) = fs::read_to_string(&path) else {
@@ -166,6 +176,56 @@ fn allowlist_and_blocked_are_disjoint() {
         overlap.is_empty(),
         "slugs in both allowlist and blocked: {overlap:?}"
     );
+}
+
+/// Re-triage must account for every input and ratchet resolved gaps back into
+/// the allowlists. Dropped upstream cases remain in the retained input source.
+#[test]
+fn every_case_has_current_triage() {
+    for (cases, allow_path, blocked_path) in [
+        (read_corpus(), ALLOWLIST_REL, BLOCKED_REL),
+        (read_js_corpus(), JS_ALLOWLIST_REL, JS_BLOCKED_REL),
+    ] {
+        let allowed = read_slug_file(allow_path);
+        let blocked = read_slug_file(blocked_path);
+        let slugs: BTreeSet<_> = cases.iter().map(|case| case.slug.clone()).collect();
+        assert_eq!(slugs.len(), cases.len(), "duplicate corpus slugs");
+        assert!(allowed.is_disjoint(&blocked), "overlapping triage lists");
+        assert_eq!(
+            allowed.union(&blocked).cloned().collect::<BTreeSet<_>>(),
+            slugs,
+            "{allow_path} and {blocked_path} must cover exactly the corpus"
+        );
+        for case in &cases {
+            if blocked.contains(&case.slug) {
+                assert!(
+                    outcome(case) != Outcome::Pass,
+                    "{} now matches the oracle; move it to {allow_path}",
+                    case.slug
+                );
+            }
+        }
+    }
+}
+
+/// A grammar difference must not remove the fixture's CST, diagnostic, and
+/// losslessness coverage when its JuliaSyntax comparison moves to blocked.
+#[test]
+fn blocked_curated_cases_retain_parser_fixtures() {
+    let blocked = read_slug_file(BLOCKED_REL);
+    for case in read_corpus() {
+        if blocked.contains(&case.slug) {
+            let path = manifest_path("tests/fixtures/parser")
+                .join(&case.slug)
+                .join("input.jl");
+            assert_eq!(
+                fs::read_to_string(&path).expect("blocked case needs a parser fixture"),
+                case.input,
+                "{} must retain identical input in the parser snapshot suite",
+                case.slug
+            );
+        }
+    }
 }
 
 /// Guard against regressions: every allowlisted slug must still match.
@@ -251,6 +311,7 @@ fn oracle_juliasyntax() {
 fn juliasyntax_full_report() {
     let cases = read_js_corpus();
     let allowed = read_slug_file(JS_ALLOWLIST_REL);
+    let blocked = read_slug_file(JS_BLOCKED_REL);
 
     let (mut pass, mut fail, mut unsupported) = (0u32, 0u32, 0u32);
     let mut lines = Vec::new();
@@ -271,15 +332,24 @@ fn juliasyntax_full_report() {
         };
         let tag = if allowed.contains(&case.slug) {
             " [allow]"
+        } else if blocked.contains(&case.slug) {
+            " [blocked]"
         } else {
-            ""
+            " [untriaged]"
         };
         // Keep the input on the line (escaped) so divergences are diagnosable.
-        lines.push(format!(
-            "{status:<12} {}{tag}  {:?}",
-            case.slug,
-            case.input.replace('\n', "\\n")
-        ));
+        let detail = if status == "FAIL" {
+            divergence_detail(case)
+        } else {
+            String::new()
+        };
+        lines.push(
+            format!(
+                "{status:<12} {}{tag}  {:?}",
+                case.slug,
+                case.input.replace('\n', "\\n")
+            ) + &detail,
+        );
     }
     lines.sort();
 
@@ -303,13 +373,13 @@ fn oracle_full_report() {
     let blocked = read_slug_file(BLOCKED_REL);
 
     let mut report = String::new();
-    let (mut pass, mut fail, mut skip) = (0u32, 0u32, 0u32);
+    let (mut pass, mut fail, mut unsupported) = (0u32, 0u32, 0u32);
 
     for case in &cases {
         let status = match render(case) {
             None => {
-                skip += 1;
-                "SKIP (parse diagnostics)"
+                unsupported += 1;
+                "UNSUPPORTED"
             }
             Some(rendered) if rendered == normalize_sexpr(&case.expected) => {
                 pass += 1;
@@ -328,10 +398,14 @@ fn oracle_full_report() {
             " [untriaged]"
         };
         report.push_str(&format!("{status:<24} {}{tag}\n", case.slug));
+        if status == "FAIL" {
+            report.push_str(&divergence_detail(case));
+            report.push('\n');
+        }
     }
 
     let summary = format!(
-        "\n{} cases: {pass} pass, {fail} fail, {skip} skipped\n",
+        "\n{} cases: {pass} pass, {fail} divergence, {unsupported} unsupported\n",
         cases.len()
     );
     report.push_str(&summary);

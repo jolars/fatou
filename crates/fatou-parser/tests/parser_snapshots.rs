@@ -126,12 +126,24 @@ fn macro_arguments_stop_before_newline_operators() {
         "\n # comment\n",
     ] {
         for (tail, expected) in [
-            ("- y", "(toplevel (call-i (macrocall @m x) - y))"),
-            ("-y", "(toplevel (call-i (macrocall @m x) - y))"),
-            ("+ y", "(toplevel (call-i (macrocall @m x) + y))"),
-            ("in ys", "(toplevel (call-i (macrocall @m x) in ys))"),
-            ("where T", "(toplevel (where (macrocall @m x) T))"),
-            ("::T", "(toplevel (::-i (macrocall @m x) T))"),
+            (
+                "- y",
+                "(toplevel (call-i (macrocall (macro_name m) x) - y))",
+            ),
+            ("-y", "(toplevel (call-i (macrocall (macro_name m) x) - y))"),
+            (
+                "+ y",
+                "(toplevel (call-i (macrocall (macro_name m) x) + y))",
+            ),
+            (
+                "in ys",
+                "(toplevel (call-i (macrocall (macro_name m) x) in ys))",
+            ),
+            (
+                "where T",
+                "(toplevel (where (macrocall (macro_name m) x) T))",
+            ),
+            ("::T", "(toplevel (::-i (macrocall (macro_name m) x) T))"),
         ] {
             let input = format!("(@m x{newline} {tail})");
             let output = parse(&input);

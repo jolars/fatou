@@ -29,6 +29,8 @@ use std::cell::RefCell;
 
 use SyntaxKind::*;
 
+const ORACLE_VERSION_VALUE: &str = "v\"1.15.0\"";
+
 // The projector reconstructs JuliaSyntax's `(error-t)`/`(error)` error shapes
 // from the parse diagnostics rather than from dedicated CST nodes (the
 // rust-analyzer model: recovery lives in a side-channel, not the tree). Since
@@ -47,6 +49,11 @@ thread_local! {
 /// The root projects to `(toplevel …)`, mirroring `parseall`. Pair with
 /// [`normalize_sexpr`] when comparing against captured Julia output to ignore
 /// pretty-print whitespace differences.
+///
+/// Encodings follow the committed JuliaSyntax 2 oracle at syntax version 1.15.
+/// Explicit macro sigils become `macro_name` nodes, modules include that syntax
+/// version, and operator values retain their structural heads. This projection
+/// does not select a grammar edition for [`super::parse`].
 pub fn to_juliasyntax_sexpr(tree: &SyntaxNode, diags: &[ParseDiagnostic]) -> String {
     PROJ_DIAGS.with(|d| {
         *d.borrow_mut() = diags.iter().map(|x| (x.kind, x.start, x.end)).collect();
@@ -251,7 +258,7 @@ fn project(node: &SyntaxNode) -> String {
                 .iter()
                 .find_map(|el| match el {
                     NodeOrToken::Token(t) if is_operator(t.kind()) => {
-                        Some(folded_op_text(t.text()).into_owned())
+                        Some(project_operator_value(t))
                     }
                     _ => None,
                 })
@@ -418,7 +425,7 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         MINUS_PERCENT => CallI("-%"),
         STAR_PERCENT => CallI("*%"),
         COLON => CallI(":"),
-        DOT_DOT => CallI(".."),
+        DOT_DOT => CallI("(DotsIdentifier-2)"),
         FAT_ARROW => CallI("=>"),
         PIPE_GT => CallI("|>"),
         PIPE_LT => CallI("<|"),
@@ -551,48 +558,52 @@ fn fold_ident_char(c: char) -> char {
 }
 
 /// A bare operator used as a value atom (`+` → `+`, `.&` → `(. &)`, `:` → `:`).
-/// Broadcast operators project to `(. op)` (via `operator_func_repr`); every
-/// other operator projects to its raw token text, so kinds without an
-/// `infix_head` entry (the Unicode radicals `√`/`¬`, `..`) project faithfully.
+/// Updating assignments retain `op=`/`.op=` heads, dot-only names retain their
+/// count, and other broadcast operators project to `(. op)`.
 fn project_operator_atom(node: &SyntaxNode) -> String {
     significant(node)
         .iter()
-        .find_map(|el| match el {
-            NodeOrToken::Token(t)
-                if matches!(
-                    t.kind(),
-                    DOT_PLUS_PERCENT_EQ | DOT_MINUS_PERCENT_EQ | DOT_STAR_PERCENT_EQ
-                ) =>
-            {
-                // These new operators use the development oracle's update
-                // encoding even when they appear as quoted values.
-                Some(format!("(.op= {})", &t.text()[1..t.text().len() - 1]))
-            }
-            NodeOrToken::Token(t) if matches!(infix_head(t.kind()), InfixHead::DotCallI(_)) => {
-                // A suffixed broadcast operator (`.+₁`) keeps its suffix, which
-                // `operator_func_repr` (keyed on kind) would drop; strip the
-                // leading broadcast dot from the text instead.
-                Some(if op_has_suffix(t.text()) {
-                    format!("(. {})", &t.text()[1..])
-                } else {
-                    operator_func_repr(t.kind())
-                })
-            }
-            // Dotted broadcast operators whose head is not `DotCallI` — the
-            // short-circuit `.&&`/`.||` and the assignment forms `.=`/`.+=` quote
-            // as `(. op)` too (`:.&&` ⇒ `(quote-: (. &&))`). Strip the leading
-            // broadcast dot; `..`/`...` lead with a doubled dot and are excluded.
-            NodeOrToken::Token(t)
-                if t.text().starts_with('.')
-                    && t.text().len() > 1
-                    && t.text().as_bytes()[1] != b'.' =>
-            {
-                Some(format!("(. {})", &t.text()[1..]))
-            }
-            NodeOrToken::Token(t) => Some(folded_op_text(t.text()).into_owned()),
-            _ => None,
-        })
+        .find_map(|el| el.as_token().map(project_operator_value))
         .unwrap_or_else(|| "(operator)".to_string())
+}
+
+fn project_operator_value(t: &SyntaxToken) -> String {
+    match t.kind() {
+        PLUS_EQ | MINUS_EQ | STAR_EQ | SLASH_EQ | BACKSLASH_EQ | SLASH_SLASH_EQ | CARET_EQ
+        | PERCENT_EQ | PLUS_PERCENT_EQ | MINUS_PERCENT_EQ | STAR_PERCENT_EQ | PIPE_EQ
+        | DOLLAR_EQ | AMP_EQ | SHL_EQ | SHR_EQ | USHR_EQ | DIV_EQ | XOR_EQ | DOT_PLUS_EQ
+        | DOT_MINUS_EQ | DOT_STAR_EQ | DOT_SLASH_EQ | DOT_BACKSLASH_EQ | DOT_SLASH_SLASH_EQ
+        | DOT_CARET_EQ | DOT_PERCENT_EQ | DOT_AMP_EQ | DOT_PIPE_EQ | DOT_SHL_EQ | DOT_SHR_EQ
+        | DOT_USHR_EQ | DOT_DIV_EQ | DOT_XOR_EQ | DOT_PLUS_PERCENT_EQ | DOT_MINUS_PERCENT_EQ
+        | DOT_STAR_PERCENT_EQ => update_operator_value(t.text()),
+        DOT_DOT | DOT_DOT_DOT => format!("(DotsIdentifier-{})", t.text().len()),
+        kind if matches!(infix_head(kind), InfixHead::DotCallI(_)) => {
+            // A suffixed broadcast operator (`.+₁`) keeps its suffix, which
+            // `operator_func_repr` (keyed on kind) would drop; strip the
+            // leading broadcast dot from the text instead.
+            if op_has_suffix(t.text()) {
+                format!("(. {})", &t.text()[1..])
+            } else {
+                operator_func_repr(t.kind())
+            }
+        }
+        // Dotted broadcast operators whose head is not `DotCallI` — the
+        // short-circuit `.&&`/`.||` and plain broadcast assignment `.=` quote
+        // as `(. op)` too (`:.&&` ⇒ `(quote-: (. &&))`). Strip the leading
+        // broadcast dot; `..`/`...` lead with a doubled dot and are excluded.
+        _ if t.text().starts_with('.') && t.text().len() > 1 && t.text().as_bytes()[1] != b'.' => {
+            format!("(. {})", &t.text()[1..])
+        }
+        _ => folded_op_text(t.text()).into_owned(),
+    }
+}
+
+fn update_operator_value(text: &str) -> String {
+    let (head, base) = match text.strip_prefix('.') {
+        Some(base) => (".op=", base),
+        None => ("op=", text),
+    };
+    format!("({head} {})", folded_op_text(base.trim_end_matches('=')))
 }
 
 /// The function-name representation of an operator used as a callee, e.g. in
@@ -1878,7 +1889,21 @@ fn project_module(node: &SyntaxNode) -> String {
         .children_with_tokens()
         .any(|el| el.kind() == BAREMODULE_KW);
     let head = if bare { "module-bare" } else { "module" };
-    let mut parts = vec![project_signature(node), project_block_child(node)];
+    let invalid_name = node
+        .children()
+        .find(|child| child.kind() == SIGNATURE)
+        .is_some_and(|signature| {
+            diag_count_from(
+                keyword_start(&signature),
+                DiagnosticKind::InvalidNameKeyword,
+            ) > 0
+        });
+    let mut parts = Vec::new();
+    // JuliaSyntax emits edition metadata only after accepting the name's start.
+    if !invalid_name {
+        parts.push(ORACLE_VERSION_VALUE.to_string());
+    }
+    parts.extend([project_signature(node), project_block_child(node)]);
     push_trailing_errors(node, &mut parts);
     sexp(head, parts)
 }
@@ -1915,6 +1940,9 @@ fn project_quote_sym(node: &SyntaxNode) -> String {
                 return format!("(quote-: {prefix}(error-t))");
             }
             NodeOrToken::Token(t) if is_trivia(t.kind()) => continue,
+            NodeOrToken::Token(t) if is_operator(t.kind()) => {
+                return format!("(quote-: {prefix}{})", project_operator_value(&t));
+            }
             NodeOrToken::Token(t) => {
                 return format!("(quote-: {prefix}{})", folded_op_text(t.text()));
             }
@@ -2136,7 +2164,7 @@ fn project_import_path(node: &SyntaxNode) -> String {
                 }
                 // After a name, a `...` is a separator dot fused with the `..`
                 // range operator as a component (`import A...` → `(importpath A ..)`).
-                DOT_DOT_DOT if seen_name => parts.push("..".to_string()),
+                DOT_DOT_DOT if seen_name => parts.push("(DotsIdentifier-2)".to_string()),
                 // Separator dots/colons between components carry no meaning here.
                 DOT | DOT_DOT | DOT_DOT_DOT | COLON => {}
                 // An operator-symbol name component (`import A.==`, `import A: +`).
@@ -2235,16 +2263,27 @@ fn project_import_alias(node: &SyntaxNode) -> String {
 // --- Macros ----------------------------------------------------------------
 
 fn project_macrocall(node: &SyntaxNode) -> String {
-    let name = node
-        .children()
-        .find(|c| c.kind() == MACRO_NAME)
-        .map(|c| project_macro_name(&c))
+    let macro_name = node.children().find(|c| c.kind() == MACRO_NAME);
+    let name = macro_name
+        .as_ref()
+        .map(project_macro_name)
         .unwrap_or_else(|| "@?".to_string());
+    let mut parts = vec![name];
+    // Like module metadata, @VERSION's invisible argument encodes the oracle
+    // edition rather than any additional source syntax.
+    if macro_name.is_some_and(|name| {
+        name.children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .filter(|token| !is_trivia(token.kind()))
+            .last()
+            .is_some_and(|token| token.kind() == IDENT && token.text() == "VERSION")
+    }) {
+        parts.push(ORACLE_VERSION_VALUE.to_string());
+    }
 
     // Paren form `@m(…)` carries a direct `ARG_LIST` child → `macrocall-p`;
     // the space form `@m a b` carries bare argument nodes → `macrocall`.
     if let Some(arg_list) = node.children().find(|c| c.kind() == ARG_LIST) {
-        let mut parts = vec![name];
         parts.extend(project_args(&arg_list));
         let head = if has_trailing_comma(&arg_list) {
             "macrocall-p-,"
@@ -2253,7 +2292,6 @@ fn project_macrocall(node: &SyntaxNode) -> String {
         };
         return sexp(head, parts);
     }
-    let mut parts = vec![name];
     parts.extend(
         node.children()
             .filter(|c| c.kind() != MACRO_NAME)
@@ -2272,16 +2310,14 @@ fn project_macro_name(node: &SyntaxNode) -> String {
             DiagnosticKind::InvalidMacroName,
         )
     {
-        return format!("(error {})", project(&child));
+        return format!("(macro_name (error {}))", project(&child));
     }
 
-    // A `var"…"` non-standard identifier name (`@var"#"` ⇒ `(var @#)`): the `@`
-    // sigil prefixes the identifier content. JuliaSyntax folds the `@` into the
-    // `var` name itself rather than wrapping it as a separate macro-name token.
+    // The sigil wraps the identifier, including a nonstandard `var"…"` name.
     let var_name = node
         .children()
         .find(|c| c.kind() == NONSTANDARD_IDENTIFIER)
-        .map(|c| format!("(var @{})", raw_content(&c)));
+        .map(|c| format!("(var {})", raw_content(&c)));
 
     // Trailing form (`A.@x`, `A.B.@x`, `$A.@x`, `A.$B.@x`): the module path is a
     // single leading node (`NAME`, `BINARY_EXPR`, or `INTERPOLATION`) that
@@ -2292,9 +2328,8 @@ fn project_macro_name(node: &SyntaxNode) -> String {
     {
         // Misplaced macro sigil (`A.@B.x`): the `@` names a non-final component
         // with a trailing `.ident` continuation (recorded as `MacroSigilTrailing`).
-        // JuliaSyntax relocates the sigil to the final component and splices a
-        // zero-width `(error-t)` before it: `A.@B.x` ⇒
-        // `(. (. A (quote B)) (error-t) (quote @x))`.
+        // Recovery marks the misplaced sigil's component and the final
+        // macro_name separately: `(. (. A (error-t) B) (macro_name (error-t) x))`.
         if var_name.is_none()
             && let Some(at_start) = node
                 .children_with_tokens()
@@ -2319,40 +2354,34 @@ fn project_macro_name(node: &SyntaxNode) -> String {
                     }
                 })
                 .collect();
-            // The first component after the module is the one the sigil named;
-            // every later step gets an `(error-t)`, and the final one also
-            // carries the relocated `@`.
+            // The recorded misplaced sigil explains both recovery markers.
             if let [first, rest @ ..] = comps.as_slice() {
-                let mut path = format!("(. {} {first})", project(&module));
+                let mut path = format!("(. {} (error-t) {first})", project(&module));
                 if let Some((last, mids)) = rest.split_last() {
                     for c in mids {
-                        path = format!("(. {path} (error-t) {c})");
+                        path = format!("(. {path} {c})");
                     }
-                    path = format!("(. {path} (error-t) @{last})");
+                    path = format!("(. {path} (macro_name (error-t) {last}))");
                 }
                 return path;
             }
         }
         let name = match &var_name {
             Some(v) => v.clone(),
-            None => format!("@{}", macro_name_after_at(node)),
+            None => macro_name_after_at(node),
         };
-        return format!("(. {} {name})", project(&module));
+        return format!("(. {} (macro_name {name}))", project(&module));
     }
 
-    // Prefix form with a `var"…"` name and no module (`@var"#"` ⇒ `(var @#)`).
+    // A leading sigil wraps the whole name, while a trailing sigil wraps only
+    // the final path component.
     if let Some(v) = var_name {
-        return v;
+        return format!("(macro_name {v})");
     }
 
-    // Prefix form with a `$`/inner-`@` dotted path (`@A.$x`, `@A.$x.y`,
-    // `@A.B.@x`): JuliaSyntax builds the dotted module path and relocates the
-    // macro sigil onto the final component. A `$` final or any inner/extra `@`
-    // is recovered with zero-width `(error-t)`/`(error …)` (recorded as
-    // `MacroSigilLeading`); a non-final `$` is a *valid* interpolation
-    // (`@A.$x.y`), so the extended path is entered on structure (a `.$`/`.@`
-    // step), not the diagnostic alone. Everything is derived from the lossless
-    // token sequence; the diagnostic only gates the error pieces.
+    // Enter extended paths on structure, since Fatou accepts non-final `$`
+    // interpolation without a diagnostic. Preserve that grammar divergence;
+    // only recorded misplaced sigils may contribute recovery markers.
     let sig_toks: Vec<SyntaxToken> = node
         .children_with_tokens()
         .filter_map(|el| el.into_token())
@@ -2362,7 +2391,7 @@ fn project_macro_name(node: &SyntaxNode) -> String {
         .windows(2)
         .any(|w| w[0].kind() == DOT && matches!(w[1].kind(), DOLLAR | AT))
     {
-        return project_leading_macro_path(&sig_toks);
+        return format!("(macro_name {})", project_leading_macro_path(&sig_toks));
     }
 
     // Prefix form (`@m`, `@A.x`, `@A.B.x`): a flat run of component tokens after
@@ -2384,17 +2413,17 @@ fn project_macro_name(node: &SyntaxNode) -> String {
 
     match comps.as_slice() {
         // `@.` — broadcast macro: `@` then the lone broadcast dot, no ident.
-        [] => "@.".to_string(),
+        [] => "(macro_name .)".to_string(),
         // Simple `@m`.
-        [one] => format!("@{one}"),
-        // Qualified `@Mod.mac` / `@A.B.x` → `(. <module> @macro)`.
+        [one] => format!("(macro_name {one})"),
+        // Qualified `@Mod.mac` / `@A.B.x` keep the path inside the wrapper.
         rest => {
             let (macro_name, module) = rest.split_last().unwrap();
             let mut path = module[0].clone();
             for c in &module[1..] {
                 path = format!("(. {path} {c})");
             }
-            format!("(. {path} @{macro_name})")
+            format!("(macro_name (. {path} {macro_name}))")
         }
     }
 }
@@ -2402,17 +2431,12 @@ fn project_macro_name(node: &SyntaxNode) -> String {
 /// Project a leading-`@` qualified macro name whose dotted path carries a `$`
 /// interpolation or an inner/extra `@` sigil (`sig_toks` is the name's flat run
 /// of significant tokens `@`, `IDENT`, `.`, `$`/`@`, …). JuliaSyntax builds the
-/// module path left-to-right and relocates the macro sigil onto the final
-/// component:
-/// - a non-final ident is `B`, the final ident `@x` (the sigil);
-/// - a non-final `$x` is the valid `($ x)`, a final `$x` the recovered
-///   `(error x)` (an interpolation cannot take the sigil);
-/// - any `@x` component is a misplaced/extra sigil: inner ⇒ `(error-t) B`,
-///   final ⇒ `(error-t) @x`, and an inner `@` also splices a zero-width
-///   `(error-t)` into the final dot step.
+/// module path left-to-right inside the macro_name wrapper. Recorded extra
+/// sigils produce recovery markers at the affected path steps.
 ///
 /// The error pieces are gated on the recorded `MacroSigilLeading` diagnostic; a
-/// fully valid path (`@A.$x.y`) carries none and renders without recovery.
+/// path such as `@A.$x.y` carries none in Fatou and remains a visible grammar
+/// divergence when the new oracle rejects it.
 fn project_leading_macro_path(sig_toks: &[SyntaxToken]) -> String {
     let at_start = usize::from(sig_toks[0].text_range().start());
     let invalid = diag_at(at_start, DiagnosticKind::MacroSigilLeading);
@@ -2444,7 +2468,7 @@ fn project_leading_macro_path(sig_toks: &[SyntaxToken]) -> String {
     }
 
     let Some(((_, root), steps)) = comps.split_first() else {
-        return "@.".to_string();
+        return ".".to_string();
     };
     let last = steps.len().saturating_sub(1);
     let inner_at = steps[..last].iter().any(|(k, _)| *k == AT);
@@ -2455,10 +2479,10 @@ fn project_leading_macro_path(sig_toks: &[SyntaxToken]) -> String {
         let step = match (*kind, is_final) {
             (DOLLAR, true) if invalid => format!("(error {name})"),
             (DOLLAR, _) => format!("($ {name})"),
-            (AT, true) if invalid => format!("(error-t) @{name}"),
+            (AT, true) if invalid => format!("(error-t) {name}"),
             (AT, false) if invalid => format!("(error-t) {name}"),
-            (_, true) if invalid && inner_at => format!("(error-t) @{name}"),
-            (_, true) => format!("@{name}"),
+            (_, true) if invalid && inner_at => format!("(error-t) {name}"),
+            (_, true) => name.clone(),
             (_, false) => name.clone(),
         };
         path = format!("(. {path} {step})");
@@ -3515,7 +3539,7 @@ fn name_run_item(el: SyntaxElement) -> Option<String> {
         NodeOrToken::Node(n) if n.kind() == NONSTANDARD_IDENTIFIER => Some(project_var(&n)),
         // An operator used as a name (`export +, ==`, `export ⊕`) → the bare
         // operator text.
-        NodeOrToken::Token(t) if is_operator(t.kind()) => Some(t.text().to_string()),
+        NodeOrToken::Token(t) if is_operator(t.kind()) => Some(project_operator_value(&t)),
         // A contextual keyword used as a name (`public export` ⇒ `(public
         // export)`): the parser places it in the name slot, so render its text.
         NodeOrToken::Token(t) if is_keyword(t.kind()) => Some(t.text().to_string()),
@@ -3561,6 +3585,7 @@ fn project_element(el: &SyntaxElement) -> Option<String> {
             TRUE_KW => Some("true".to_string()),
             FALSE_KW => Some("false".to_string()),
             END_KW => Some("end".to_string()),
+            DOT_DOT | DOT_DOT_DOT => Some(project_operator_value(t)),
             k if is_operator(k) => Some(t.text().to_string()),
             _ => None,
         },
@@ -3626,6 +3651,49 @@ mod tests {
         );
     }
 
+    #[test]
+    fn juliasyntax_two_macro_names_keep_the_sigil_position() {
+        assert_eq!(
+            sexpr("@A.B.x\nA.B.@x\n@var\"#\"\n"),
+            "(toplevel (macrocall (macro_name (. (. A B) x))) \
+             (macrocall (. (. A B) (macro_name x))) \
+             (macrocall (macro_name (var #))))"
+        );
+    }
+
+    #[test]
+    fn juliasyntax_two_modules_record_the_oracle_edition() {
+        assert_eq!(
+            sexpr("module A\nend\nbaremodule B\nend\n"),
+            "(toplevel (module v\"1.15.0\" A (block)) \
+             (module-bare v\"1.15.0\" B (block)))"
+        );
+        assert_eq!(
+            sexpr("module do\nend\n"),
+            "(toplevel (module (error do) (block)))"
+        );
+    }
+
+    #[test]
+    fn juliasyntax_two_version_macros_record_the_oracle_edition() {
+        assert_eq!(
+            sexpr("@VERSION\n@A.B.VERSION\nA.B.@VERSION\n@var\"VERSION\"\n"),
+            "(toplevel (macrocall (macro_name VERSION) v\"1.15.0\") \
+             (macrocall (macro_name (. (. A B) VERSION)) v\"1.15.0\") \
+             (macrocall (. (. A B) (macro_name VERSION)) v\"1.15.0\") \
+             (macrocall (macro_name (var VERSION))))"
+        );
+    }
+
+    #[test]
+    fn juliasyntax_two_operator_values_keep_their_structural_heads() {
+        assert_eq!(
+            sexpr(":+=\n:.+=\na .. b\n:(...)\n"),
+            "(toplevel (quote-: (op= +)) (quote-: (.op= +)) \
+             (call-i a (DotsIdentifier-2) b) (quote-: (DotsIdentifier-3)))"
+        );
+    }
+
     /// Julia accepts `do` only after a parenthesized call, and splices the clause
     /// in as that call's last argument.
     #[test]
@@ -3636,7 +3704,7 @@ mod tests {
         );
         assert_eq!(
             sexpr("@m(x) do y\nend\n"),
-            "(toplevel (macrocall-p @m x (do (tuple y) (block))))"
+            "(toplevel (macrocall-p (macro_name m) x (do (tuple y) (block))))"
         );
     }
 

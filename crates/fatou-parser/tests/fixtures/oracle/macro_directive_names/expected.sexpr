@@ -1,1 +1,1 @@
-(toplevel (export @a) (export a @b) (export @a b) (import (importpath @x)) (import (importpath A @x)) (import (importpath A B @x)) (import (importpath . @x)) (using (importpath A @x)))
+(toplevel (export (macro_name a)) (export a (macro_name b)) (export (macro_name a) b) (import (importpath (macro_name x))) (import (importpath A (macro_name x))) (import (importpath A B (macro_name x))) (import (importpath . (macro_name x))) (using (importpath A (macro_name x))))

@@ -1,0 +1,11 @@
+# JuliaSyntax 2 moved these cases outside the harvested `tests` binding.
+# Keep their content-derived slugs and regenerate expectations with the current
+# oracle so an upstream test reorganization cannot remove regression coverage.
+inputs = [
+    "return\nx",
+    "break",
+    "return x",
+    "return)",
+    "continue",
+    "return x,y",
+]

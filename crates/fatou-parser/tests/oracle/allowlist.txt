@@ -29,7 +29,6 @@ block_trailing_junk
 braces_generator
 braces_newline_comprehension
 bracescat
-break_continue_tuple
 broadcast_bitshift
 broadcast_bitwise_assign
 broadcast_bitwise_operators
@@ -151,7 +150,6 @@ macro_keyword_name
 macro_name_brackets
 macro_newline_operator
 macro_operator_names
-macro_sigil_leading
 macro_sigil_trailing
 macro_space_arg_block_end
 macro_space_arg_emoji
@@ -174,7 +172,6 @@ nonstandard_identifier_escape
 nonstandard_identifier_forward_declaration
 number_exponent_marker_identifier
 operator_call
-operator_method_declaration
 operator_missing_rhs
 operator_suffixes
 operator_symbol_quote
@@ -188,9 +185,7 @@ paren_block_juxtapose_error
 paren_colon_import
 paren_macro_name
 paren_operator
-parenthesized_anonymous_function_parameters
 parenthesized_leading_comma
-parenthesized_macro_function_signature
 parenthesized_macro_loop_argument
 plus_plus_operator
 postfix_space_error
@@ -207,8 +202,6 @@ quoted_import_name
 quoted_literal
 quoted_macro_name
 quoted_var_identifier
-radical_juxtaposition
-radical_juxtaposition_boundary
 range_operator
 range_operator_name
 raw_string

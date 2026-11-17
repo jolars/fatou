@@ -1,1 +1,1 @@
-(toplevel (macrocall @macro a b c) (macrocall-p @macro x) (macrocall (. Base @macro) x) (quote-: macro))
+(toplevel (macrocall (macro_name macro) a b c) (macrocall-p (macro_name macro) x) (macrocall (. Base (macro_name macro)) x) (quote-: macro))

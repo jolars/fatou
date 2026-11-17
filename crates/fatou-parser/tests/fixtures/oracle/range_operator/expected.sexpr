@@ -1,1 +1,1 @@
-(toplevel (call-i a .. b) (call-i 1 .. n) (call-i (call f x) .. (call g y)) (call-i a .. (call-i b + c)) (call-i (call-pre - a) .. b) (ref x (call-i i .. j)))
+(toplevel (call-i a (DotsIdentifier-2) b) (call-i 1 (DotsIdentifier-2) n) (call-i (call f x) (DotsIdentifier-2) (call g y)) (call-i a (DotsIdentifier-2) (call-i b + c)) (call-i (call-pre - a) (DotsIdentifier-2) b) (ref x (call-i i (DotsIdentifier-2) j)))

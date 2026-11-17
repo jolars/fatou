@@ -1,1 +1,1 @@
-(toplevel (macrocall (. (. A B) @x)) (macrocall (. (. A B) @x)) (macrocall (. ($ A) @x)) (macrocall (. (. A ($ B)) @x)))
+(toplevel (macrocall (macro_name (. (. A B) x))) (macrocall (. (. A B) (macro_name x))) (macrocall (. ($ A) (macro_name x))) (macrocall (. (. A ($ B)) (macro_name x))))

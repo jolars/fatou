@@ -1,1 +1,1 @@
-(toplevel (comprehension (generator (macrocall @inbounds (call g r)) (iteration (in r xs)))) (comprehension (generator (macrocall @inbounds (ref m i)) (iteration (in i refarray)))) (call f (generator (macrocall @m x) (iteration (in y z)))))
+(toplevel (comprehension (generator (macrocall (macro_name inbounds) (call g r)) (iteration (in r xs)))) (comprehension (generator (macrocall (macro_name inbounds) (ref m i)) (iteration (in i refarray)))) (call f (generator (macrocall (macro_name m) x) (iteration (in y z)))))

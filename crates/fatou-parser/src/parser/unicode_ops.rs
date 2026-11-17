@@ -1,9 +1,9 @@
 //! Single-codepoint Unicode operators and their precedence tiers.
 //!
-//! Generated from JuliaSyntax's operator-kind tables (julia_version=1.13.0 juliasyntax_version=1.0.2).
-//! Every entry is a length-1 non-ASCII operator string from
-//! `Tokenize._nondot_symbolic_operator_kinds()`, classified by the
-//! `is_prec_*` predicate for its kind. The table is sorted by code point so
+//! Generated from JuliaSyntax's lexer (julia_version=1.15.0-DEV.783 juliasyntax_version=2.0.0-DEV).
+//! Julia and JuliaSyntax commit: a11d632fa5768e9324c6e752b7a15196605f6b92.
+//! Every entry is a non-ASCII operator start character, classified by the
+//! `is_prec_*` predicates on its token. The table is sorted by code point so
 //! [`unicode_op_kind`] can binary-search it. Regenerate with
 //! `scripts/generate-unicode-ops.jl` on a Julia or JuliaSyntax bump;
 //! do not hand-edit.
@@ -25,8 +25,10 @@ static UNICODE_OPS: &[(char, TokKind)] = &[
     ('\u{a6}', TokKind::UniPlus), // ¦
     ('\u{ac}', TokKind::UniRadical), // ¬
     ('\u{b1}', TokKind::UniPlus), // ±
+    ('\u{b7}', TokKind::UniTimes), // ·
     ('\u{d7}', TokKind::UniTimes), // ×
     ('\u{f7}', TokKind::UniTimes), // ÷
+    ('\u{387}', TokKind::UniTimes), // ·
     ('\u{2026}', TokKind::UniColon), // …
     ('\u{205d}', TokKind::UniColon), // ⁝
     ('\u{214b}', TokKind::UniTimes), // ⅋
@@ -94,6 +96,7 @@ static UNICODE_OPS: &[(char, TokKind)] = &[
     ('\u{220b}', TokKind::UniComparison), // ∋
     ('\u{220c}', TokKind::UniComparison), // ∌
     ('\u{220d}', TokKind::UniComparison), // ∍
+    ('\u{2212}', TokKind::UniPlus), // −
     ('\u{2213}', TokKind::UniPlus), // ∓
     ('\u{2214}', TokKind::UniPlus), // ∔
     ('\u{2217}', TokKind::UniTimes), // ∗

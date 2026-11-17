@@ -1,1 +1,1 @@
-(toplevel (block (macrocall @m 10)) (if c (block (macrocall @m x)) (block y)) (try (block (macrocall @m x)) (catch e (block))))
+(toplevel (block (macrocall (macro_name m) 10)) (if c (block (macrocall (macro_name m) x)) (block y)) (try (block (macrocall (macro_name m) x)) (catch e (block))))

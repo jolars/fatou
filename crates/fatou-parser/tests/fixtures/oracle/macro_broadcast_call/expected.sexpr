@@ -1,1 +1,1 @@
-(toplevel (macrocall (dotcall @M (error-t) x)))
+(toplevel (macrocall (dotcall (macro_name M) (error-t) x)))

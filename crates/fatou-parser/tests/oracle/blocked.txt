@@ -6,3 +6,27 @@
 # stripped, oct/bin shown as hex, floats canonicalized); Fatou preserves the
 # source text. Literal display parity is out of scope for the parser.
 numeric_literals
+
+# These grammar differences retain identical parser fixtures and reviewed CST
+# snapshots. Their former oracle coverage is not silently discarded.
+
+# Grammar: Julia 1.14 permits commas after empty break and continue statements.
+break_continue_tuple
+
+# Grammar: JuliaSyntax 2 rejects interpolation inside a leading macro-name path.
+macro_sigil_leading
+
+# Grammar: a dot-only name is no longer a valid bare function declaration.
+operator_method_declaration
+
+# Grammar: a parenthesized where-expression is an anonymous parameter tuple.
+parenthesized_anonymous_function_parameters
+
+# Recovery: redundant signature parentheses change macro/interpolation ambiguity.
+parenthesized_macro_function_signature
+
+# Grammar: a dotted radical cannot juxtapose with an expression on its left.
+radical_juxtaposition
+
+# Lexer/recovery: dotted radicals are now separate dot and radical tokens.
+radical_juxtaposition_boundary

@@ -1,1 +1,1 @@
-(toplevel (macrocall (. (. A B) (error-t) @x)) (macrocall (. (. A B) (error-t) @x) y) (macrocall (. (. (. A B) (error-t) C) (error-t) @x)))
+(toplevel (macrocall (. (. A (error-t) B) (macro_name (error-t) x))) (macrocall (. (. A (error-t) B) (macro_name (error-t) x)) y) (macrocall (. (. (. A (error-t) B) C) (macro_name (error-t) x))))

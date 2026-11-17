@@ -51,6 +51,11 @@ decoded without evaluating Julia, with byte ranges mapped in both directions
 between the decoded value and source; interpolated and custom payloads remain
 opaque.
 
+`parser::to_juliasyntax_sexpr` follows the pinned JuliaSyntax 2 encoding at
+syntax version 1.15. Explicit macro names use `macro_name` nodes, modules carry
+`v"1.15.0"` metadata, and compound assignment values use `op=` or `.op=` heads.
+This diagnostic projection does not select a project's Julia syntax edition.
+
 Decoded documentation can be parsed as Julia Markdown without invoking Julia:
 
 ```rust

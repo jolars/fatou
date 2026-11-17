@@ -6,6 +6,7 @@
 //! single-byte tokens rather than being dropped, which keeps losslessness a
 //! property of the lexer alone.
 //!
+use super::unicode_ops::unicode_op_kind;
 use crate::keywords::keyword_table;
 use crate::tokens::token_table;
 
@@ -1140,19 +1141,6 @@ const MINUS_SIGN: char = '\u{2212}';
 /// augmented-assign form (`÷=`, `⊻=`).
 const DIVIDE_SIGN: char = '\u{f7}';
 const XOR_SIGN: char = '\u{22bb}';
-
-/// [`unicode_ops::unicode_op_kind`], extended with the operator chars Julia
-/// folds onto an existing operator rather than giving a kind of their own: the
-/// two middle dots `·` (U+00B7) and `·` (U+0387) both lex as the times-tier
-/// `⋅` (U+22C5). They are absent from the generated table because it is keyed
-/// on JuliaSyntax's *kinds*, where all three share the `⋅` entry; the
-/// projector folds their text back to `⋅`.
-fn unicode_op_kind(ch: char) -> Option<TokKind> {
-    match ch {
-        '\u{b7}' | '\u{387}' => Some(TokKind::UniTimes),
-        _ => super::unicode_ops::unicode_op_kind(ch),
-    }
-}
 
 /// Whether a Unicode operator tier is an infix `call-i` tier (so a broadcast
 /// `.` may fuse to it as `dotcall-i`). Excludes the prefix-only radicals and the

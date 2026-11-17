@@ -1,1 +1,1 @@
-(toplevel (macrocall @assert (call-i nl > 1)) (macrocall @foo x))
+(toplevel (macrocall (macro_name assert) (call-i nl > 1)) (macrocall (macro_name foo) x))

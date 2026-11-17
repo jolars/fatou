@@ -1,0 +1,289 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+assertion_line: 41
+expression: rendered
+---
+ROOT@0..403
+  FUNCTION_DEF@0..16
+    FUNCTION_KW@0..8 "function"
+    WHITESPACE@8..9 " "
+    SIGNATURE@9..12
+      OPERATOR_ATOM@9..12
+        UNICODE_OP@9..12 "⊑"
+    BLOCK@12..13
+      WHITESPACE@12..13 " "
+    END_KW@13..16 "end"
+  NEWLINE@16..17 "\n"
+  FUNCTION_DEF@17..33
+    FUNCTION_KW@17..25 "function"
+    WHITESPACE@25..26 " "
+    SIGNATURE@26..29
+      OPERATOR_ATOM@26..29
+        UNICODE_OP@26..29 "⊇"
+    BLOCK@29..30
+      WHITESPACE@29..30 " "
+    END_KW@30..33 "end"
+  NEWLINE@33..34 "\n"
+  FUNCTION_DEF@34..50
+    FUNCTION_KW@34..42 "function"
+    WHITESPACE@42..43 " "
+    SIGNATURE@43..46
+      OPERATOR_ATOM@43..46
+        UNICODE_OP@43..46 "∘"
+    BLOCK@46..47
+      WHITESPACE@46..47 " "
+    END_KW@47..50 "end"
+  NEWLINE@50..51 "\n"
+  FUNCTION_DEF@51..65
+    FUNCTION_KW@51..59 "function"
+    WHITESPACE@59..60 " "
+    SIGNATURE@60..61
+      OPERATOR_ATOM@60..61
+        PLUS@60..61 "+"
+    BLOCK@61..62
+      WHITESPACE@61..62 " "
+    END_KW@62..65 "end"
+  NEWLINE@65..66 "\n"
+  FUNCTION_DEF@66..80
+    FUNCTION_KW@66..74 "function"
+    WHITESPACE@74..75 " "
+    SIGNATURE@75..76
+      OPERATOR_ATOM@75..76
+        STAR@75..76 "*"
+    BLOCK@76..77
+      WHITESPACE@76..77 " "
+    END_KW@77..80 "end"
+  NEWLINE@80..81 "\n"
+  FUNCTION_DEF@81..97
+    FUNCTION_KW@81..89 "function"
+    WHITESPACE@89..90 " "
+    SIGNATURE@90..93
+      OPERATOR_ATOM@90..93
+        UNICODE_OP@90..93 "≤"
+    BLOCK@93..94
+      WHITESPACE@93..94 " "
+    END_KW@94..97 "end"
+  NEWLINE@97..98 "\n"
+  FUNCTION_DEF@98..113
+    FUNCTION_KW@98..106 "function"
+    WHITESPACE@106..107 " "
+    SIGNATURE@107..109
+      OPERATOR_ATOM@107..109
+        SUBTYPE@107..109 "<:"
+    BLOCK@109..110
+      WHITESPACE@109..110 " "
+    END_KW@110..113 "end"
+  NEWLINE@113..114 "\n"
+  FUNCTION_DEF@114..129
+    FUNCTION_KW@114..122 "function"
+    WHITESPACE@122..123 " "
+    SIGNATURE@123..125
+      OPERATOR_ATOM@123..125
+        DOT_PLUS@123..125 ".+"
+    BLOCK@125..126
+      WHITESPACE@125..126 " "
+    END_KW@126..129 "end"
+  NEWLINE@129..130 "\n"
+  FUNCTION_DEF@130..145
+    FUNCTION_KW@130..138 "function"
+    WHITESPACE@138..139 " "
+    SIGNATURE@139..141
+      OPERATOR_ATOM@139..141
+        DOT_DOT@139..141 ".."
+    BLOCK@141..142
+      WHITESPACE@141..142 " "
+    END_KW@142..145 "end"
+  NEWLINE@145..146 "\n"
+  FUNCTION_DEF@146..160
+    FUNCTION_KW@146..154 "function"
+    WHITESPACE@154..155 " "
+    SIGNATURE@155..156
+      OPERATOR_ATOM@155..156
+        AMP@155..156 "&"
+    BLOCK@156..157
+      WHITESPACE@156..157 " "
+    END_KW@157..160 "end"
+  NEWLINE@160..161 "\n"
+  FUNCTION_DEF@161..175
+    FUNCTION_KW@161..169 "function"
+    WHITESPACE@169..170 " "
+    SIGNATURE@170..171
+      ERROR@170..171
+        OPERATOR_ATOM@170..171
+          EQ@170..171 "="
+    BLOCK@171..172
+      WHITESPACE@171..172 " "
+    END_KW@172..175 "end"
+  NEWLINE@175..176 "\n"
+  MACRO_DEF@176..187
+    MACRO_KW@176..181 "macro"
+    WHITESPACE@181..182 " "
+    SIGNATURE@182..183
+      OPERATOR_ATOM@182..183
+        PLUS@182..183 "+"
+    BLOCK@183..184
+      WHITESPACE@183..184 " "
+    END_KW@184..187 "end"
+  NEWLINE@187..188 "\n"
+  ASSIGNMENT_EXPR@188..266
+    BINARY_EXPR@188..240
+      CALL_EXPR@188..220
+        NAME@188..196
+          IDENT@188..196 "typename"
+        ARG_LIST@196..220
+          LPAREN@196..197 "("
+          ARG@197..219
+            CALL_EXPR@197..219
+              NAME@197..203
+                IDENT@197..203 "typeof"
+              ARG_LIST@203..219
+                LPAREN@203..204 "("
+                ARG@204..218
+                  FUNCTION_DEF@204..218
+                    FUNCTION_KW@204..212 "function"
+                    WHITESPACE@212..213 " "
+                    SIGNATURE@213..214
+                      OPERATOR_ATOM@213..214
+                        PLUS@213..214 "+"
+                    BLOCK@214..215
+                      WHITESPACE@214..215 " "
+                    END_KW@215..218 "end"
+                RPAREN@218..219 ")"
+          RPAREN@219..220 ")"
+      DOT@220..221 "."
+      NAME@221..240
+        IDENT@221..240 "constprop_heuristic"
+    WHITESPACE@240..241 " "
+    EQ@241..242 "="
+    WHITESPACE@242..243 " "
+    BINARY_EXPR@243..266
+      NAME@243..247
+        IDENT@243..247 "Core"
+      DOT@247..248 "."
+      NAME@248..266
+        IDENT@248..266 "SAMETYPE_HEURISTIC"
+  NEWLINE@266..267 "\n"
+  STRUCT_DEF@267..279
+    STRUCT_KW@267..273 "struct"
+    WHITESPACE@273..274 " "
+    SIGNATURE@274..275
+      OPERATOR_ATOM@274..275
+        PLUS@274..275 "+"
+    BLOCK@275..276
+      WHITESPACE@275..276 " "
+    END_KW@276..279 "end"
+  NEWLINE@279..280 "\n"
+  FUNCTION_DEF@280..297
+    FUNCTION_KW@280..288 "function"
+    WHITESPACE@288..289 " "
+    SIGNATURE@289..293
+      CALL_EXPR@289..293
+        PLUS@289..290 "+"
+        ARG_LIST@290..293
+          LPAREN@290..291 "("
+          ARG@291..292
+            NAME@291..292
+              IDENT@291..292 "x"
+          RPAREN@292..293 ")"
+    BLOCK@293..294
+      WHITESPACE@293..294 " "
+    END_KW@294..297 "end"
+  NEWLINE@297..298 "\n"
+  FUNCTION_DEF@298..318
+    FUNCTION_KW@298..306 "function"
+    WHITESPACE@306..307 " "
+    SIGNATURE@307..314
+      CALL_EXPR@307..314
+        MINUS@307..308 "-"
+        ARG_LIST@308..314
+          LPAREN@308..309 "("
+          ARG@309..310
+            NAME@309..310
+              IDENT@309..310 "x"
+          COMMA@310..311 ","
+          WHITESPACE@311..312 " "
+          ARG@312..313
+            NAME@312..313
+              IDENT@312..313 "y"
+          RPAREN@313..314 ")"
+    BLOCK@314..315
+      WHITESPACE@314..315 " "
+    END_KW@315..318 "end"
+  NEWLINE@318..319 "\n"
+  FUNCTION_DEF@319..337
+    FUNCTION_KW@319..327 "function"
+    WHITESPACE@327..328 " "
+    SIGNATURE@328..333
+      CALL_EXPR@328..333
+        DOT_PLUS@328..330 ".+"
+        ARG_LIST@330..333
+          LPAREN@330..331 "("
+          ARG@331..332
+            NAME@331..332
+              IDENT@331..332 "x"
+          RPAREN@332..333 ")"
+    BLOCK@333..334
+      WHITESPACE@333..334 " "
+    END_KW@334..337 "end"
+  NEWLINE@337..338 "\n"
+  FUNCTION_DEF@338..360
+    FUNCTION_KW@338..346 "function"
+    WHITESPACE@346..347 " "
+    SIGNATURE@347..356
+      CALL_EXPR@347..356
+        UNICODE_OP@347..350 "⊑"
+        ARG_LIST@350..356
+          LPAREN@350..351 "("
+          ARG@351..352
+            NAME@351..352
+              IDENT@351..352 "a"
+          COMMA@352..353 ","
+          WHITESPACE@353..354 " "
+          ARG@354..355
+            NAME@354..355
+              IDENT@354..355 "b"
+          RPAREN@355..356 ")"
+    BLOCK@356..357
+      WHITESPACE@356..357 " "
+    END_KW@357..360 "end"
+  NEWLINE@360..361 "\n"
+  FUNCTION_DEF@361..381
+    FUNCTION_KW@361..369 "function"
+    WHITESPACE@369..370 " "
+    SIGNATURE@370..377
+      TYPE_ANNOTATION@370..377
+        CALL_EXPR@370..374
+          PLUS@370..371 "+"
+          ARG_LIST@371..374
+            LPAREN@371..372 "("
+            ARG@372..373
+              NAME@372..373
+                IDENT@372..373 "x"
+            RPAREN@373..374 ")"
+        COLON_COLON@374..376 "::"
+        NAME@376..377
+          IDENT@376..377 "T"
+    BLOCK@377..378
+      WHITESPACE@377..378 " "
+    END_KW@378..381 "end"
+  NEWLINE@381..382 "\n"
+  FUNCTION_DEF@382..402
+    FUNCTION_KW@382..390 "function"
+    WHITESPACE@390..391 " "
+    SIGNATURE@391..392
+      OPERATOR_ATOM@391..392
+        PLUS@391..392 "+"
+    BLOCK@392..399
+      NEWLINE@392..393 "\n"
+      WHITESPACE@393..397 "    "
+      NAME@397..398
+        IDENT@397..398 "x"
+      NEWLINE@398..399 "\n"
+    END_KW@399..402 "end"
+  NEWLINE@402..403 "\n"
+
+diagnostic [170..171]: operator is not a valid value
+diagnostic [123..123]: invalid function signature: expected a call, not a bare name
+diagnostic [155..155]: invalid function signature: expected a call, not a bare name
+diagnostic [170..170]: invalid function signature: expected a call, not a bare name
+diagnostic [391..391]: invalid function signature: expected a call, not a bare name

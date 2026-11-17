@@ -1,9 +1,10 @@
 # JuliaSyntax harvested sub-corpus allowlist — slugs whose projection matches
 # the pinned expected.sexpr. Guarded against regression by `oracle_juliasyntax`
-# (no Julia needed). Seed/refresh from `juliasyntax_full_report`. The report's
-# divergence + unsupported buckets are the backlog for growing parser parity.
+# (no Julia needed). Seed/refresh from `juliasyntax_full_report`. Deferred
+# cases are classified in `juliasyntax-blocked.txt`; both lists cover the corpus.
 
 js-0026fb4f
+js-005a1cdd
 js-006f1f57
 js-00f6acf2
 js-013ac273
@@ -14,6 +15,7 @@ js-02e33bec
 js-03480054
 js-037931f4
 js-038a64f2
+js-040897c0
 js-043bf02a
 js-0492d7fb
 js-04a6fb16
@@ -24,6 +26,7 @@ js-063e192a
 js-0648bea1
 js-0661a137
 js-066dacc4
+js-067880ed
 js-06bb63a0
 js-06d614bc
 js-06e57e65
@@ -35,6 +38,7 @@ js-08afc666
 js-08b441c9
 js-092058de
 js-095e7fab
+js-0a2a4acd
 js-0b140e41
 js-0b7cc7fb
 js-0c461409
@@ -45,7 +49,9 @@ js-0e0b82d8
 js-0e1915ed
 js-0e5c696e
 js-0ed0f9f1
+js-0f276ebf
 js-0f48ee8b
+js-0f66c978
 js-0f96a7fe
 js-100fb985
 js-107798e5
@@ -69,7 +75,9 @@ js-16406744
 js-1669b4f6
 js-16fc0b00
 js-171fe9b8
+js-174aeb10
 js-174fabda
+js-18678a38
 js-1892c0bc
 js-18f5a4bd
 js-19111e49
@@ -81,13 +89,16 @@ js-19e5c1d9
 js-19f5d851
 js-1ac6ceb0
 js-1b0af392
+js-1b2f6b1c
 js-1b9f9fa4
 js-1ba87cf7
 js-1bd822b7
 js-1beba79b
 js-1c86494f
 js-1c95c72d
+js-1c968a13
 js-1cd46e85
+js-1d72f747
 js-1dd1a9c7
 js-1df14924
 js-1e18ed2c
@@ -108,12 +119,14 @@ js-22ffbcb0
 js-230ec15d
 js-238e9ee4
 js-23e6b6dc
+js-2465471c
 js-24b37147
 js-24c4fb24
 js-24eb7adf
 js-2516c70f
 js-2537c6e0
 js-255bf916
+js-2562381f
 js-259072e6
 js-25d98952
 js-25f334e5
@@ -124,11 +137,14 @@ js-27399b6e
 js-273c37c1
 js-27604c64
 js-2846887e
+js-285976df
 js-28af1263
 js-28b460a4
 js-2a5f37a6
 js-2aaf22a3
 js-2aced3e3
+js-2af81eb1
+js-2b3dc376
 js-2c39b030
 js-2c4e6866
 js-2ccc4fb2
@@ -169,6 +185,7 @@ js-357d871f
 js-358671ae
 js-359448d5
 js-35c649e9
+js-360a51c5
 js-36189cdf
 js-36619afa
 js-36696d34
@@ -190,9 +207,14 @@ js-39f9affb
 js-3a22c71b
 js-3a445ddd
 js-3af347c3
+js-3b669fa5
 js-3b74833d
 js-3b792c7c
+js-3bac20e7
+js-3bc23b97
 js-3bdaee7b
+js-3c2702c4
+js-3c49c7f5
 js-3caba4f1
 js-3d20577f
 js-3d2d4883
@@ -211,6 +233,7 @@ js-3fcc48ca
 js-402d281a
 js-408b2118
 js-40a457ac
+js-40fe3789
 js-41462599
 js-41917023
 js-419c8358
@@ -222,6 +245,7 @@ js-43931954
 js-441c57c2
 js-443dcfda
 js-44884b3e
+js-44c7d59c
 js-44daafd1
 js-45090b5c
 js-454012b6
@@ -264,6 +288,7 @@ js-4d9b1311
 js-4dc53c96
 js-4e757add
 js-4e93f00d
+js-4ec2b373
 js-4ee80e59
 js-4eeda108
 js-4f46be13
@@ -277,8 +302,11 @@ js-52167c1b
 js-52b4338f
 js-5309dd8f
 js-538e61ed
+js-53d14d48
+js-53df3f33
 js-54d626e0
 js-54da521b
+js-5500242c
 js-557adcf4
 js-55e3b646
 js-56543f8a
@@ -294,6 +322,7 @@ js-5c3f2893
 js-5cfc3298
 js-5d39e3d6
 js-5d3b9cc6
+js-5d80ca04
 js-5dde8968
 js-5df56d75
 js-5f34ad69
@@ -324,6 +353,7 @@ js-665cf559
 js-66be05fe
 js-671608d5
 js-671e86ec
+js-6721a27e
 js-673aeeb0
 js-6808df30
 js-68347271
@@ -337,6 +367,7 @@ js-69e0ae28
 js-6b8f02f5
 js-6be56bdb
 js-6c8d108a
+js-6cc5cc5a
 js-6d57a341
 js-6d75e682
 js-6e93ce7c
@@ -358,8 +389,10 @@ js-72a0bc77
 js-72b7e374
 js-73475cb4
 js-73c24f26
+js-73cd6c80
 js-73e7b6f8
 js-741f2569
+js-742a10ea
 js-74a9b301
 js-74bdfbc9
 js-750a6d97
@@ -367,19 +400,23 @@ js-7574f4ae
 js-7655f5a4
 js-76784071
 js-76ba1459
+js-7780af32
 js-77c30e64
 js-786e4ea4
+js-78e061fe
 js-78f0be89
 js-78f9ac01
 js-790279e4
 js-793e9fa9
 js-79b7f48e
+js-79e47594
 js-7a07fde8
 js-7a0eec4b
 js-7a161b5a
 js-7a6211e2
 js-7aa14e86
 js-7ace431c
+js-7b6ef79f
 js-7c3e5c83
 js-7cc6658a
 js-7cdb3086
@@ -387,6 +424,7 @@ js-7d231ce2
 js-7e0330f6
 js-7e18f737
 js-7e642569
+js-7ee59d8b
 js-7f73ec42
 js-801f1af0
 js-80259ca2
@@ -406,12 +444,14 @@ js-84685b8e
 js-84d15ff4
 js-85271fa5
 js-867a1817
+js-868823e9
 js-86bdef9b
 js-8715376f
 js-8718e0b3
 js-871a4d6b
 js-8749407b
 js-87c39e60
+js-87e80bbf
 js-8846a394
 js-886eef61
 js-887fcea6
@@ -425,7 +465,10 @@ js-8ad53fd6
 js-8bf1e2ef
 js-8cf24212
 js-8d65be34
+js-8d7158ba
+js-8d9eb6c2
 js-8daf5e52
+js-8ddf4a81
 js-8e7af68d
 js-8ead66b4
 js-8f21bbfe
@@ -436,6 +479,7 @@ js-8fd3d513
 js-8fdce19e
 js-90827a2e
 js-90ac2f43
+js-90d0ea41
 js-90fb496e
 js-9100dc2a
 js-91521263
@@ -463,6 +507,7 @@ js-99360f4e
 js-99727443
 js-99937636
 js-99b81986
+js-99ec6452
 js-9a1149da
 js-9a292ca6
 js-9a2b0b62
@@ -479,6 +524,7 @@ js-9d9e506d
 js-9ddf0017
 js-9e4bd06b
 js-9e7cde70
+js-9e85658f
 js-9ec2caf4
 js-9ec4a934
 js-9ecaac93
@@ -488,12 +534,14 @@ js-9f8d2fe1
 js-9fbb7d97
 js-9fd36568
 js-9fdd0b63
+js-a04f8bef
 js-a0cc4633
 js-a0d94ca2
 js-a1112011
 js-a134572b
 js-a15cb95f
 js-a1ca6b11
+js-a1fc77b1
 js-a2a98d77
 js-a2d8af0b
 js-a2d9120b
@@ -523,10 +571,12 @@ js-a916f049
 js-a991f61a
 js-a9ef4778
 js-aa0e6a42
+js-aa1811dd
 js-aae7e166
 js-aae88021
 js-aaefc5cc
 js-ab3caeec
+js-ab545a0c
 js-ab5df625
 js-abbe51ed
 js-abfeab52
@@ -545,19 +595,24 @@ js-af666625
 js-afa84f7f
 js-afbd989d
 js-afd77ca0
+js-b013d12e
 js-b02302d3
 js-b035c294
 js-b0576c05
 js-b10fa164
 js-b125918f
 js-b1495613
+js-b14a6f0d
 js-b1ac400e
+js-b1eb21f3
 js-b242d390
 js-b2c5bc29
+js-b2d3eaf2
 js-b2e95475
 js-b32e242a
 js-b3691b92
 js-b3d1db31
+js-b4134db2
 js-b47ce3a1
 js-b4a566a6
 js-b4ff6d3b
@@ -573,6 +628,7 @@ js-b74f62c4
 js-b7bb6850
 js-b86d9989
 js-b8cce2e4
+js-b907f472
 js-ba5ec51d
 js-babd656c
 js-bade3d11
@@ -580,11 +636,13 @@ js-bb93e85b
 js-bc08a2b0
 js-bd62db04
 js-bdc67126
+js-be334df4
 js-beb4a3a3
 js-bf651d22
 js-bf71b3b1
 js-bf904048
 js-bfe1d9bd
+js-bffb5944
 js-c009e298
 js-c143c4d8
 js-c1e6b03f
@@ -602,6 +660,7 @@ js-c58e7df3
 js-c5f10289
 js-c5f76b75
 js-c651c24f
+js-c6dc1030
 js-c6f083a9
 js-c74994ac
 js-c75e926e
@@ -618,7 +677,10 @@ js-cb76cc75
 js-cb885216
 js-cba287e8
 js-cbd92fc9
+js-cceeee37
+js-cd12b62e
 js-cd3e3ee0
+js-cdb308fb
 js-cdb4ee2a
 js-cdf6c5ab
 js-cee17e6f
@@ -631,6 +693,7 @@ js-d08565c3
 js-d0b8bf98
 js-d0c63a7a
 js-d0d79879
+js-d143ea50
 js-d18b6658
 js-d24d5634
 js-d27f8e09
@@ -645,6 +708,8 @@ js-d4bd65f7
 js-d5375db9
 js-d5e18c3b
 js-d65b3394
+js-d664f104
+js-d6ca6b16
 js-d7026b1a
 js-d7273fe6
 js-d749929f
@@ -660,13 +725,16 @@ js-daaceab4
 js-db694f69
 js-db974d0b
 js-dbcfafe9
+js-dbe4f745
 js-dc95e5f6
 js-dcc67116
 js-dd6bb2e4
+js-dd98a9ee
 js-ddc5134e
 js-ddd5bff2
 js-de2ad4fa
 js-def56ca1
+js-df7106e3
 js-df9f20f0
 js-dff7ff2d
 js-e03ef02a
@@ -680,7 +748,9 @@ js-e16974cd
 js-e197c4bd
 js-e256ee8e
 js-e26dee19
+js-e275a9e0
 js-e27f8a68
+js-e2ba8dc1
 js-e2c9c2c6
 js-e43a2f0a
 js-e50ae35d
@@ -699,6 +769,7 @@ js-e811d4a1
 js-e83b620a
 js-e8b41b39
 js-e8bedab7
+js-e8d7646f
 js-e9213d60
 js-ea753461
 js-ec84ac67
@@ -707,6 +778,7 @@ js-ee0a3ae4
 js-ee1eea21
 js-ee8d7fdd
 js-ee8e4e0c
+js-eebdb673
 js-ef1156e2
 js-efa48a00
 js-efa5ade7
@@ -717,6 +789,7 @@ js-f14de2d1
 js-f1e7f9d3
 js-f29bbabe
 js-f29edd35
+js-f397fd0f
 js-f3aa762e
 js-f3da47b9
 js-f3ffd2f5
@@ -727,14 +800,17 @@ js-f62b4241
 js-f68656dd
 js-f6b3387f
 js-f6bfe0fc
+js-f6c4dec4
 js-f6fe37ab
 js-f6ffd56a
 js-f70459ee
+js-f7497d65
 js-f74d3ac9
 js-f84311da
 js-f94dcc4b
 js-f965a412
 js-f9a269a2
+js-f9ac37ef
 js-f9c36919
 js-f9c7015b
 js-f9f66cc8
@@ -745,9 +821,11 @@ js-fb523956
 js-fb550c33
 js-fc03650e
 js-fc2338c2
+js-fc39a358
 js-fc56a645
 js-fcd63ed7
 js-fd12849d
+js-fd79dc33
 js-fe010859
 js-fe911108
 js-ff024f11

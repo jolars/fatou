@@ -229,8 +229,8 @@ fn macro_newline_edits_change_operator_owner() {
     use fatou_parser::parser::to_juliasyntax_sexpr;
 
     for (gap, replacement, expected) in [
-        (" ", "\n ", "(call-i (macrocall @m x) - y)"),
-        ("\n ", " ", "(macrocall @m (call-i x - y))"),
+        (" ", "\n ", "(call-i (macrocall (macro_name m) x) - y)"),
+        ("\n ", " ", "(macrocall (macro_name m) (call-i x - y))"),
     ] {
         let input = format!("function f()\n    before()\n    (@m x{gap}- y)\n    after()\nend\n");
         let old = parse(&input);
