@@ -32,6 +32,13 @@ fn parser_fixtures() {
 
         let output = parse(&input);
         let mut rendered = format!("{:#?}", output.cst);
+        // Rust's Unicode tables change which new characters Debug escapes.
+        // Normalize this fixture so snapshots also work on older toolchains.
+        if name == "unicode_18_identifiers" {
+            for ch in input.chars().filter(|ch| !ch.is_ascii()) {
+                rendered = rendered.replace(ch, &format!("\\u{{{:x}}}", ch as u32));
+            }
+        }
         for diag in &output.diagnostics {
             rendered.push_str(&format!(
                 "\ndiagnostic [{}..{}]: {}",
