@@ -77,8 +77,9 @@ fn lower_node(node: &SyntaxNode) -> Ir {
 }
 
 /// Fence an undelimited macro at the end of an operand before printing an
-/// operator. Otherwise, replacing a semantic newline with a space gives that
-/// operator to the macro's last argument instead of the enclosing expression.
+/// operator, comma, or generator clause. Otherwise, replacing a semantic newline
+/// with a space gives the following syntax to the macro instead of its enclosing
+/// node.
 fn lower_before_operator(node: &SyntaxNode) -> Ir {
     let body = lower_node(node);
     let mut tail = node.clone();
@@ -114,6 +115,24 @@ fn lower_before_operator(node: &SyntaxNode) -> Ir {
             Some(child) => tail = child,
             None => return body,
         }
+    }
+}
+
+fn lower_comma_item(node: &SyntaxNode) -> Ir {
+    let another_item = node
+        .next_sibling()
+        .is_some_and(|next| matches!(next.kind(), SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG));
+    let singleton_tuple = node.parent().is_some_and(|parent| {
+        parent.kind() == SyntaxKind::TUPLE_EXPR
+            && node.prev_sibling().is_none()
+            && node.next_sibling().is_none()
+    });
+    // A positional item's comma must belong to its list. The singleton tuple's
+    // comma is semantic even though there is no following item.
+    if node.kind() == SyntaxKind::ARG && (another_item || singleton_tuple) {
+        lower_before_operator(node)
+    } else {
+        lower_node(node)
     }
 }
 
@@ -2190,7 +2209,7 @@ fn collect_arg_list(node: &SyntaxNode) -> Option<ArgListParts> {
                         return None;
                     }
                     last_huggable = item_is_huggable(&child);
-                    items.push(lower_node(&child));
+                    items.push(lower_comma_item(&child));
                     pending_comma = false;
                 }
                 // `;`-separated parameters attach directly (the `;` is the
@@ -3026,7 +3045,7 @@ fn collect_collection_items(node: &SyntaxNode) -> Option<CollectionParts> {
                         return None;
                     }
                     last_huggable = item_is_huggable_in_collection(&child);
-                    items.push(lower_node(&child));
+                    items.push(lower_comma_item(&child));
                     pending_comma = false;
                 }
                 _ => return None,
@@ -3269,7 +3288,11 @@ fn comprehension_reflow_body(node: &SyntaxNode) -> Option<Ir> {
                     if element.is_some() || !clauses.is_empty() {
                         return None;
                     }
-                    element = Some(lower_node(&child));
+                    element = Some(if open.as_deref() == Some("(") {
+                        lower_before_operator(&child)
+                    } else {
+                        lower_node(&child)
+                    });
                 }
             },
         }
@@ -3593,7 +3616,7 @@ fn collect_param_items(node: &SyntaxNode) -> Option<(Vec<Ir>, bool)> {
                     return None;
                 }
                 last_huggable = item_is_huggable(&child);
-                items.push(lower_node(&child));
+                items.push(lower_comma_item(&child));
                 pending_comma = false;
             }
         }
@@ -3653,7 +3676,7 @@ fn lower_parameters(node: &SyntaxNode) -> Ir {
                     }
                     parts.push(Ir::text(", "));
                 }
-                parts.push(lower_node(&child));
+                parts.push(lower_comma_item(&child));
                 first_item = false;
                 pending_comma = false;
             }
@@ -3716,7 +3739,7 @@ fn lower_commented_parameters(node: &SyntaxNode) -> Ir {
                 if !in_body {
                     return Ir::indent(lower_transparent(node));
                 }
-                body.push(lower_node(&child));
+                body.push(lower_comma_item(&child));
                 pending_newline = false;
             }
         }
@@ -4001,7 +4024,7 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
                         }
                         gaps.push(std::mem::take(&mut gap));
                     }
-                    items.push(lower_node(&child));
+                    items.push(lower_comma_item(&child));
                     item_comments.push(None);
                     comma = false;
                     on_line = true;

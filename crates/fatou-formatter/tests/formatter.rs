@@ -158,6 +158,52 @@ fn macro_operator_fences_follow_expression_structure() {
     }
 }
 
+#[test]
+fn macro_generator_bodies_preserve_the_program() {
+    for (input, explicit) in [
+        ("(@m x\n for i in xs)", "((@m x) for i in xs)"),
+        ("(@m x\r\n for i in xs)", "((@m x) for i in xs)\r\n"),
+        ("(@m\n for i in xs)", "((@m) for i in xs)"),
+        ("(@m @n x\n for i in xs)", "((@m @n x) for i in xs)"),
+        ("(@m [x]\n for i in xs)", "(@m[x] for i in xs)"),
+    ] {
+        assert_eq!(ast_shape(input), ast_shape(explicit), "{input:?}");
+        for line_width in [24, 80] {
+            let style = FormatStyle {
+                line_width,
+                ..FormatStyle::default()
+            };
+            let formatted = format_with_style(input, style).unwrap();
+            verify_format(input, &formatted).unwrap();
+            assert_eq!(format_with_style(explicit, style).unwrap(), formatted);
+            assert_eq!(format_with_style(&formatted, style).unwrap(), formatted);
+        }
+    }
+}
+
+#[test]
+fn macro_list_items_keep_commas_outside_the_call() {
+    for (input, explicit) in [
+        ("(@m a\n, b)", "((@m a), b)"),
+        ("[@m a\n, b]", "[(@m a), b]"),
+        ("f(@m a\n, b)", "f((@m a), b)"),
+        ("(@m a\n,)", "((@m a),)"),
+        ("(@m a\n, @n b\n, c)", "((@m a), (@n b), c)"),
+    ] {
+        assert_eq!(ast_shape(input), ast_shape(explicit), "{input:?}");
+        for line_width in [24, 80] {
+            let style = FormatStyle {
+                line_width,
+                ..FormatStyle::default()
+            };
+            let formatted = format_with_style(input, style).unwrap();
+            verify_format(input, &formatted).unwrap();
+            assert_eq!(format_with_style(explicit, style).unwrap(), formatted);
+            assert_eq!(format_with_style(&formatted, style).unwrap(), formatted);
+        }
+    }
+}
+
 /// Gate: every fixture with an `expected.jl` must format to it exactly.
 #[test]
 fn formatter_fixtures_match_expected() {
