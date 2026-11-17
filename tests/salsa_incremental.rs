@@ -360,6 +360,64 @@ fn edit_rebuilds_the_control_flow_graph() {
 }
 
 #[test]
+fn label_and_break_value_edits_refresh_semantics_and_control_flow() {
+    let mut db = IncrementalDatabase::new();
+    for newline in ["\n", "\r\n"] {
+        let mut text = "function f(value)\n    @label outer while true\n        @label begin\n            break _ value\n            inner_dead()\n        end\n        outer_tail()\n        break outer\n    end\nend\n".replace('\n', newline);
+        let file = db.add_file(text.as_str());
+        for (before, after) in [
+            ("break _ value", "break outer value"),
+            ("break outer value", "break missing value"),
+            ("break missing value", "continue outer"),
+            ("continue outer", "break _ missing_value"),
+            ("@label outer", "@label other"),
+        ] {
+            let old_graph = control_flow(&db, file).clone();
+            let start = text.find(before).unwrap();
+            let change = edit(start..start + before.len(), after);
+            text = apply_edits(&text, std::slice::from_ref(&change));
+            db.reparse_stage_edits(file, Some(vec![change]));
+            db.set_file_text(file, text.as_str());
+            let fresh = parse(&text);
+            assert!(fresh.diagnostics.is_empty(), "{:?}", fresh.diagnostics);
+            let root = parsed_tree_root(&db, file);
+            assert_eq!(root.to_string(), text);
+            assert_eq!(
+                fatou::parser::fingerprint(&root),
+                fatou::parser::fingerprint(&fresh.cst)
+            );
+            assert_eq!(parse_diagnostics(&db, file), fresh.diagnostics);
+            assert_eq!(
+                semantic_model(&db, file),
+                &fatou::semantic::SemanticModel::build(&fresh.cst)
+            );
+            assert_eq!(
+                control_flow(&db, file),
+                &fatou::semantic::FileControlFlow::build(&fresh.cst)
+            );
+            assert_ne!(
+                control_flow(&db, file),
+                &old_graph,
+                "jump edit must change the graph"
+            );
+            let reads: Vec<_> = file_free_reads(&db, file)
+                .iter()
+                .map(String::as_str)
+                .collect();
+            assert!(
+                !reads
+                    .iter()
+                    .any(|name| matches!(*name, "outer" | "other" | "missing"))
+            );
+            assert_eq!(
+                reads.contains(&"missing_value"),
+                text.contains("missing_value")
+            );
+        }
+    }
+}
+
+#[test]
 fn parse_populates_and_refreshes_the_reparse_base() {
     let mut db = IncrementalDatabase::new();
     let file = db.add_file("x = 1\n");

@@ -20,6 +20,7 @@ use crate::parser::{is_ident_continue, is_ident_start};
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use super::binding::{Binding, BindingId, BindingKind};
+use super::control::{ControlBody, ControlMacro, control_macro};
 use super::import::{
     ExportEntry, ImportItem, LoadKind, ModuleLoad, ModulePath, QualifiedRead, Visibility,
 };
@@ -124,6 +125,18 @@ fn is_macro_kwarg(node: &SyntaxNode) -> bool {
             .children()
             .next()
             .is_some_and(|lhs| lhs.kind() == SyntaxKind::NAME)
+}
+
+/// Parenthesized statement blocks reuse the argument-list CST shape. Their
+/// `KEYWORD_ARG`s are assignments, including those after the first semicolon.
+fn is_block_assignment(node: &SyntaxNode) -> bool {
+    node.parent().is_some_and(|parent| {
+        parent.kind() == SyntaxKind::PAREN_BLOCK
+            || (parent.kind() == SyntaxKind::PARAMETERS
+                && parent
+                    .parent()
+                    .is_some_and(|outer| outer.kind() == SyntaxKind::PAREN_BLOCK))
+    })
 }
 
 /// Split the forms for which Test provides a static scope contract. The
@@ -886,7 +899,16 @@ impl Builder {
             }
             SyntaxKind::MACRO_CALL => {
                 let call = MacroCall::cast(node.clone()).unwrap();
-                if self.model.is_test_macro(&call, scope, "testset")
+                if let Some(control) = control_macro(&call) {
+                    if let ControlMacro::Block { body, .. } = control {
+                        match body {
+                            ControlBody::Expr(_) => self.declare_node(body.syntax(), scope),
+                            ControlBody::Assignment(_) => {
+                                self.declare_assignment(body.syntax(), scope)
+                            }
+                        }
+                    }
+                } else if self.model.is_test_macro(&call, scope, "testset")
                     && testset_arguments(&call).is_some()
                 {
                     self.pending_macros.push((call, scope));
@@ -898,45 +920,50 @@ impl Builder {
             }
             SyntaxKind::QUOTE_EXPR | SyntaxKind::QUOTE_SYM => self.declare_quoted(node, scope),
             kind if creates_scope(kind) => {}
-            SyntaxKind::ASSIGNMENT_EXPR => {
-                let mut children = node.children();
-                let lhs = children.next();
-                if let Some(lhs) = &lhs
-                    && assign_op(node) == AssignOp::Plain
-                    && has_call_core(lhs)
-                {
-                    // Short-form `f(x) = ...`: bind the name; the right-hand
-                    // side is the function body, a nested scope.
-                    self.declare_signature_name(lhs.clone(), scope, BindingKind::Function);
-                    return;
-                }
-                // Infix operator method definition `a OP b = body`: the
-                // operator names the function, extending any same-named import;
-                // the operands are parameters, not targets in this scope.
-                if let Some(lhs) = &lhs
-                    && assign_op(node) == AssignOp::Plain
-                    && let Some(op) = infix_def_operator(lhs)
-                {
-                    self.mark_import_extended(op.text(), scope);
-                    return;
-                }
-                if let Some(lhs) = lhs
-                    && assign_op(node) != AssignOp::Broadcast
-                {
-                    self.declare_target(&lhs, scope);
-                }
-                // Nested assignments hide in the value (`a = b = 1`) and in
-                // non-binding target positions (`x[i] = ...` indices).
-                if let Some(lhs) = node.children().next()
-                    && !is_binding_target(lhs.kind())
-                {
-                    self.declare_node(&lhs, scope);
-                }
-                for rest in children {
-                    self.declare_node(&rest, scope);
-                }
+            SyntaxKind::ASSIGNMENT_EXPR => self.declare_assignment(node, scope),
+            SyntaxKind::KEYWORD_ARG if is_block_assignment(node) => {
+                self.declare_assignment(node, scope)
             }
             _ => self.declare_children(node, scope),
+        }
+    }
+
+    fn declare_assignment(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        let mut children = node.children();
+        let lhs = children.next();
+        if let Some(lhs) = &lhs
+            && assign_op(node) == AssignOp::Plain
+            && has_call_core(lhs)
+        {
+            // Short-form `f(x) = ...`: bind the name; the right-hand
+            // side is the function body, a nested scope.
+            self.declare_signature_name(lhs.clone(), scope, BindingKind::Function);
+            return;
+        }
+        // Infix operator method definition `a OP b = body`: the
+        // operator names the function, extending any same-named import;
+        // the operands are parameters, not targets in this scope.
+        if let Some(lhs) = &lhs
+            && assign_op(node) == AssignOp::Plain
+            && let Some(op) = infix_def_operator(lhs)
+        {
+            self.mark_import_extended(op.text(), scope);
+            return;
+        }
+        if let Some(lhs) = lhs
+            && assign_op(node) != AssignOp::Broadcast
+        {
+            self.declare_target(&lhs, scope);
+        }
+        // Nested assignments hide in the value (`a = b = 1`) and in
+        // non-binding target positions (`x[i] = ...` indices).
+        if let Some(lhs) = node.children().next()
+            && !is_binding_target(lhs.kind())
+        {
+            self.declare_node(&lhs, scope);
+        }
+        for rest in children {
+            self.declare_node(&rest, scope);
         }
     }
 
@@ -1305,6 +1332,9 @@ impl Builder {
                 self.mark_operator_imports(node, scope);
                 self.walk_children(node, scope);
             }
+            SyntaxKind::KEYWORD_ARG if is_block_assignment(node) => {
+                self.handle_assignment(node, scope)
+            }
             SyntaxKind::KEYWORD_ARG => {
                 // Call-site `f(x = v)`: the keyword name is not a variable.
                 for child in node.children().skip(1) {
@@ -1322,6 +1352,16 @@ impl Builder {
                 self.walk_children(node, scope);
             }
             SyntaxKind::INTERPOLATION => self.walk_interpolation(node, scope),
+            SyntaxKind::BREAK_EXPR | SyntaxKind::CONTINUE_EXPR => {
+                // The first operand is a control-flow name. Interpolation is
+                // still evaluated when constructing quoted code; any value
+                // after the label is an ordinary expression.
+                for (index, child) in node.children().enumerate() {
+                    if index != 0 || child.kind() == SyntaxKind::INTERPOLATION {
+                        self.walk_node(&child, scope);
+                    }
+                }
+            }
             SyntaxKind::MACRO_CALL => self.walk_macro_call(node, scope),
             SyntaxKind::QUOTE_EXPR | SyntaxKind::QUOTE_SYM => self.walk_quoted(node, scope),
             _ => self.walk_children(node, scope),
@@ -2300,6 +2340,19 @@ impl Builder {
     /// value and records the whole chain as a qualified read — it must not
     /// resolve to a local macro of the same name.
     fn walk_macro_call(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        let call = MacroCall::cast(node.clone()).unwrap();
+        if let Some(control) = control_macro(&call) {
+            if let Some(name) = call.name() {
+                self.walk_macro_name(name.syntax(), scope);
+            }
+            if let ControlMacro::Block { body, .. } = control {
+                match body {
+                    ControlBody::Expr(_) => self.walk_node(body.syntax(), scope),
+                    ControlBody::Assignment(_) => self.handle_assignment(body.syntax(), scope),
+                }
+            }
+            return;
+        }
         if self.testsets.contains(&node.text_range()) {
             self.walk_testset(&MacroCall::cast(node.clone()).unwrap(), scope);
             return;

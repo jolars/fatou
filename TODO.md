@@ -50,13 +50,12 @@
 
 ## Semantic analysis
 
-- [ ] Model labeled `@label` blocks and loop exits. Treat label names as
-  control-flow names rather than variable reads, resolve labeled
-  `break`/`continue` to their named targets, and account for break values
-  and anonymous `@label` / `_` scopes. Preserve the existing `@goto` /
-  `@label` behavior. The parser already supports labeled keywords, but the
-  semantic model counts labels as variable uses, and the CFG ignores jump
-  labels.
+- [x] Model labeled `@label` blocks and loop exits. Keep label names out
+  of variable reads, resolve labeled `break` and `continue` to their named
+  targets, and evaluate break values before exiting. Honor anonymous
+  `@label` and `_` scopes while preserving standalone `@goto` and
+  `@label` behavior. Cover nested loops, value positions, function
+  boundaries, macro opacity, and incremental edits with LF and CRLF.
 
 ## Linter
 

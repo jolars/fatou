@@ -4,9 +4,10 @@
 //! level, each `module` body, and each function-like body (`function`, `macro`,
 //! and a `do` block, all of which own a `BLOCK`). Regions are the boundaries
 //! the flow-affecting keywords respect: `return` leaves the enclosing
-//! *function*, `break`/`continue` the enclosing *loop*, and `@goto` may only
-//! reach a `@label` in the same function. A [`FileControlFlow`] bundles the
-//! top-level region with one CFG per region owner (keyed by [`NodePtr`]),
+//! *function*, `break`/`continue` their enclosing loop or labeled block, and
+//! `@goto` may only reach a standalone `@label` in the same function.
+//! A [`FileControlFlow`] bundles the top-level region with one CFG per region
+//! owner (keyed by [`NodePtr`]),
 //! and is what [`crate::incremental::control_flow`] memoizes per file.
 //!
 //! The graph is built by **structured recursive descent** over the CST —
@@ -22,6 +23,8 @@
 //! as are the bodies that are single expressions rather than blocks (short-form
 //! `f(x) = ...`, `x -> ...`). An opaque statement is conservative: it never
 //! makes anything look unreachable.
+//! Labeled blocks, break values, and operands containing loop exits are evaluated
+//! explicitly, including in value positions such as `x = @label ...`.
 //!
 //! Reachability is computed from the entry block once the graph is built, so
 //! [`FileControlFlow::is_unreachable`] answers for the tail after an
@@ -46,8 +49,10 @@ use rowan::TextRange;
 use rowan::ast::AstNode as _;
 use smol_str::SmolStr;
 
-use crate::ast::{AstToken as _, CallExpr, body_of, condition_of};
+use crate::ast::{Arg, AstToken as _, CallExpr, Expr, MacroCall, body_of, condition_of};
 use crate::syntax::{NodePtr, SyntaxElement, SyntaxKind, SyntaxNode};
+
+use super::control::{ControlMacro, control_macro, label_name};
 
 /// Index of a [`BasicBlock`] within a [`ControlFlowGraph`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -171,9 +176,10 @@ impl ControlFlowGraph {
             blocks: Vec::new(),
             labels,
             label_blocks: HashMap::new(),
+            exit_scopes: Vec::new(),
         };
         let entry = builder.new_block();
-        if let Some(exit) = builder.lower_seq(stmts, entry, None) {
+        if let Some(exit) = builder.lower_seq(stmts, entry) {
             builder.set_term(exit, Terminator::Return);
         }
         let mut roots = vec![entry];
@@ -323,14 +329,30 @@ struct Builder {
     /// The block each label names, allocated on first mention so a forward
     /// `@goto` and its later `@label` agree.
     label_blocks: HashMap<SmolStr, BlockId>,
+    /// Lexically enclosing loops and labeled blocks, innermost last. These
+    /// targets are unrelated to the region-wide standalone `@goto` labels.
+    exit_scopes: Vec<ExitScope>,
 }
 
-/// The enclosing loop's targets, threaded through lowering so `break`/`continue`
-/// know where to jump.
+/// The default exit and iteration targets of an enclosing loop.
 #[derive(Clone, Copy)]
 struct LoopCtx {
     header: BlockId,
     after: BlockId,
+}
+
+enum ExitScope {
+    Loop(LoopCtx),
+    Block {
+        name: Option<SmolStr>,
+        after: BlockId,
+        continue_to: Option<BlockId>,
+    },
+}
+
+struct GuardedArm {
+    test: Option<SyntaxNode>,
+    stmts: Vec<SyntaxElement>,
 }
 
 /// A statement (or a short-circuit's right side) that leaves the straight-line
@@ -339,8 +361,8 @@ struct LoopCtx {
 enum Jump {
     /// `return`, `throw`, `error`, `rethrow`: leaves the region.
     Diverge,
-    Break,
-    Continue,
+    Break(Option<SmolStr>),
+    Continue(Option<SmolStr>),
     Goto(SmolStr),
 }
 
@@ -381,16 +403,57 @@ impl Builder {
     /// The terminator a [`Jump`] becomes here, or `None` when it has no target
     /// in this region (a `break`/`continue` outside any loop, a `@goto` naming
     /// an undefined label) — invalid Julia, left as a plain statement.
-    fn jump_terminator(&mut self, jump: &Jump, loop_ctx: Option<LoopCtx>) -> Option<Terminator> {
+    fn jump_terminator(&mut self, jump: &Jump) -> Option<Terminator> {
         match jump {
             Jump::Diverge => Some(Terminator::Diverge),
-            Jump::Break => loop_ctx.map(|lc| Terminator::Goto(lc.after)),
-            Jump::Continue => loop_ctx.map(|lc| Terminator::Goto(lc.header)),
+            Jump::Break(name) | Jump::Continue(name) => {
+                let is_continue = matches!(jump, Jump::Continue(_));
+                let target = self.exit_target(name.as_deref(), is_continue)?;
+                Some(Terminator::Goto(target))
+            }
             Jump::Goto(name) => self
                 .labels
                 .contains(name)
                 .then(|| Terminator::Goto(self.label_block(name))),
         }
+    }
+
+    fn exit_target(&self, name: Option<&str>, is_continue: bool) -> Option<BlockId> {
+        let named = name.filter(|name| *name != "_");
+        for scope in self.exit_scopes.iter().rev() {
+            match scope {
+                ExitScope::Block {
+                    name,
+                    after,
+                    continue_to,
+                } if named.is_some() => {
+                    if name.as_deref() == named {
+                        return if is_continue {
+                            *continue_to
+                        } else {
+                            Some(*after)
+                        };
+                    }
+                }
+                ExitScope::Loop(ctx) if named.is_none() => {
+                    return Some(if is_continue { ctx.header } else { ctx.after });
+                }
+                ExitScope::Block { name, after, .. } if named.is_none() => {
+                    if !is_continue {
+                        // Julia forbids a default break from crossing a named
+                        // block. Anonymous blocks supply the default target.
+                        return name.is_none().then_some(*after);
+                    }
+                    if name.is_none() {
+                        // An anonymous block also prevents a default continue
+                        // from jumping to a surrounding loop.
+                        return None;
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     /// Lower a statement sequence into `cur`, returning the block control
@@ -400,15 +463,10 @@ impl Builder {
     /// `@label`**: a label is an entry point, so lowering resumes there (the
     /// label's block is reachable only if some `@goto` targets it, which the
     /// reachability pass decides).
-    fn lower_seq(
-        &mut self,
-        stmts: &[SyntaxElement],
-        mut cur: BlockId,
-        loop_ctx: Option<LoopCtx>,
-    ) -> Option<BlockId> {
+    fn lower_seq(&mut self, stmts: &[SyntaxElement], mut cur: BlockId) -> Option<BlockId> {
         let mut i = 0;
         while i < stmts.len() {
-            match self.lower_stmt(&stmts[i], cur, loop_ctx) {
+            match self.lower_stmt(&stmts[i], cur) {
                 Some(next) => {
                     cur = next;
                     i += 1;
@@ -438,12 +496,7 @@ impl Builder {
         Some(cur)
     }
 
-    fn lower_stmt(
-        &mut self,
-        stmt: &SyntaxElement,
-        cur: BlockId,
-        loop_ctx: Option<LoopCtx>,
-    ) -> Option<BlockId> {
+    fn lower_stmt(&mut self, stmt: &SyntaxElement, cur: BlockId) -> Option<BlockId> {
         let Some(node) = stmt.as_node() else {
             self.push_stmt(cur, stmt.text_range());
             return Some(cur);
@@ -459,59 +512,214 @@ impl Builder {
         }
 
         if let Some(jump) = jump_of(node) {
-            self.push_stmt(cur, node.text_range());
-            return match self.jump_terminator(&jump, loop_ctx) {
-                Some(terminator) => {
-                    self.set_term(cur, terminator);
-                    None
-                }
-                None => Some(cur),
+            let Some(terminator) = self.jump_terminator(&jump) else {
+                self.push_stmt(cur, node.text_range());
+                return Some(cur);
             };
+            // A valued break evaluates its value before taking the exit. In
+            // particular, a return or another break in that value wins.
+            let cur = if node.kind() == SyntaxKind::BREAK_EXPR {
+                match node.children().nth(1) {
+                    Some(value) => self.lower_value(&value, cur)?,
+                    None => cur,
+                }
+            } else {
+                let mut cur = cur;
+                for child in node.children() {
+                    cur = self.lower_value(&child, cur)?;
+                }
+                cur
+            };
+            self.push_stmt(cur, node.text_range());
+            self.set_term(cur, terminator);
+            return None;
+        }
+
+        if let Some(ControlMacro::Block { name, body }) =
+            MacroCall::cast(node.clone()).and_then(|call| control_macro(&call))
+        {
+            self.push_stmt(cur, node.text_range());
+            return self.lower_labeled_block(name, body.syntax(), cur);
         }
 
         match node.kind() {
             // `begin`/`let` bodies inline into the current flow: they scope
             // names, not control. Only their statements are recorded — the
             // wrapper is not a step of its own.
-            SyntaxKind::BLOCK => self.lower_seq(&region_statements(node), cur, loop_ctx),
-            SyntaxKind::BEGIN_EXPR | SyntaxKind::LET_EXPR => match body_of(node) {
-                Some(body) => self.lower_seq(&region_statements(&body), cur, loop_ctx),
-                None => Some(cur),
-            },
+            SyntaxKind::BLOCK => self.lower_seq(&region_statements(node), cur),
+            SyntaxKind::BEGIN_EXPR | SyntaxKind::LET_EXPR => {
+                let mut exit = Some(cur);
+                if node.kind() == SyntaxKind::LET_EXPR {
+                    for header in node
+                        .children()
+                        .filter(|child| child.kind() != SyntaxKind::BLOCK)
+                    {
+                        exit = exit.and_then(|cur| self.lower_value(&header, cur));
+                    }
+                }
+                let body_entry = exit.unwrap_or_else(|| self.new_block());
+                let body_exit = match body_of(node) {
+                    Some(body) => self.lower_seq(&region_statements(&body), body_entry),
+                    None => Some(body_entry),
+                };
+                exit.and(body_exit)
+            }
             SyntaxKind::IF_EXPR => {
                 self.push_stmt(cur, node.text_range());
                 let (guarded, unguarded) = if_arms(node);
-                self.lower_if(&guarded, unguarded.as_ref(), cur, loop_ctx)
+                self.lower_if(&guarded, unguarded.as_ref(), cur)
             }
             SyntaxKind::FOR_EXPR | SyntaxKind::WHILE_EXPR => {
                 self.push_stmt(cur, node.text_range());
-                let body = body_of(node);
-                // Only a loop with no exit of its own can make its continuation
-                // unreachable, so only there does a `break` hidden in a macro
-                // expansion matter.
-                let never_exits = node.kind() == SyntaxKind::WHILE_EXPR
-                    && has_literal_true_test(node)
-                    && !body.as_ref().is_some_and(contains_opaque_macro);
-                let stmts = body.map(|b| region_statements(&b));
-                self.lower_loop(cur, stmts.as_deref().unwrap_or_default(), never_exits)
+                self.lower_loop(node, cur, false)
             }
             SyntaxKind::TRY_EXPR => {
                 self.push_stmt(cur, node.text_range());
-                self.lower_try(node, cur, loop_ctx)
+                self.lower_try(node, cur)
             }
             SyntaxKind::BINARY_EXPR => {
                 self.push_stmt(cur, node.text_range());
                 match short_circuit_jump(node) {
-                    Some((jump_node, jump)) => {
-                        self.lower_conditional_jump(cur, jump_node.text_range(), &jump, loop_ctx)
+                    Some((jump_node, jump))
+                        if !node
+                            .children()
+                            .next()
+                            .is_some_and(|lhs| contains_labeled_flow(&lhs)) =>
+                    {
+                        self.lower_conditional_jump(cur, &jump_node, &jump)
                     }
-                    None => Some(cur),
+                    _ => self.lower_embedded_flow(node, cur),
                 }
             }
             _ => {
+                let cur = self.lower_embedded_flow(node, cur)?;
                 self.push_stmt(cur, node.text_range());
                 Some(cur)
             }
+        }
+    }
+
+    fn lower_labeled_block(
+        &mut self,
+        name: Option<SmolStr>,
+        body: &SyntaxNode,
+        cur: BlockId,
+    ) -> Option<BlockId> {
+        let after = self.new_block();
+        // An unknown macro can expand to a break from this block, even when
+        // the visible body always returns. Keep that potential exit alive.
+        let body_blk = if is_opaque_macro(body) || contains_opaque_macro(body) {
+            let body_blk = self.new_block();
+            self.set_term(
+                cur,
+                Terminator::Branch {
+                    then_blk: body_blk,
+                    else_blk: after,
+                },
+            );
+            body_blk
+        } else {
+            cur
+        };
+        self.exit_scopes.push(ExitScope::Block {
+            name,
+            after,
+            continue_to: None,
+        });
+        let exit = if matches!(body.kind(), SyntaxKind::FOR_EXPR | SyntaxKind::WHILE_EXPR) {
+            self.push_stmt(body_blk, body.text_range());
+            self.lower_loop(body, body_blk, true)
+        } else {
+            self.lower_value(body, body_blk)
+        };
+        self.exit_scopes.pop();
+        if let Some(exit) = exit {
+            self.set_term(exit, Terminator::Goto(after));
+        }
+        if self.has_predecessor(after) {
+            Some(after)
+        } else {
+            self.set_term(after, Terminator::Unreachable);
+            None
+        }
+    }
+
+    /// Evaluate an expression used as a labeled block's body or a break's
+    /// value. Other operands remain opaque unless they contain a labeled
+    /// block or loop exit, preserving the statement-level contract elsewhere.
+    fn lower_value(&mut self, node: &SyntaxNode, mut cur: BlockId) -> Option<BlockId> {
+        if is_flow_boundary(node) || is_opaque_macro(node) {
+            return Some(cur);
+        }
+        match node.kind() {
+            SyntaxKind::PAREN_BLOCK => self.lower_seq(&paren_statements(node), cur),
+            SyntaxKind::BLOCK
+            | SyntaxKind::BEGIN_EXPR
+            | SyntaxKind::LET_EXPR
+            | SyntaxKind::IF_EXPR
+            | SyntaxKind::FOR_EXPR
+            | SyntaxKind::WHILE_EXPR
+            | SyntaxKind::TRY_EXPR
+            | SyntaxKind::RETURN_EXPR
+            | SyntaxKind::BREAK_EXPR
+            | SyntaxKind::CONTINUE_EXPR
+            | SyntaxKind::MACRO_CALL => self.lower_stmt(&node.clone().into(), cur),
+            SyntaxKind::BINARY_EXPR if is_short_circuit(node) => {
+                let mut children = node.children();
+                if let Some(lhs) = children.next() {
+                    cur = self.lower_value(&lhs, cur)?;
+                }
+                let Some(rhs) = children.next() else {
+                    return Some(cur);
+                };
+                let taken = self.new_block();
+                let fallthrough = self.new_block();
+                self.set_term(
+                    cur,
+                    Terminator::Branch {
+                        then_blk: taken,
+                        else_blk: fallthrough,
+                    },
+                );
+                let exit = self.lower_value(&rhs, taken);
+                self.join(&[exit, Some(fallthrough)])
+            }
+            SyntaxKind::TERNARY_EXPR => {
+                let mut children = node.children();
+                if let Some(condition) = children.next() {
+                    cur = self.lower_value(&condition, cur)?;
+                }
+                let then_blk = self.new_block();
+                let else_blk = self.new_block();
+                self.set_term(cur, Terminator::Branch { then_blk, else_blk });
+                let then_exit = children
+                    .next()
+                    .map_or(Some(then_blk), |arm| self.lower_value(&arm, then_blk));
+                let else_exit = children
+                    .next()
+                    .map_or(Some(else_blk), |arm| self.lower_value(&arm, else_blk));
+                self.join(&[then_exit, else_exit])
+            }
+            _ => {
+                for child in node.children() {
+                    cur = self.lower_value(&child, cur)?;
+                }
+                if matches!(jump_of(node), Some(Jump::Diverge)) {
+                    self.push_stmt(cur, node.text_range());
+                    self.set_term(cur, Terminator::Diverge);
+                    None
+                } else {
+                    Some(cur)
+                }
+            }
+        }
+    }
+
+    fn lower_embedded_flow(&mut self, node: &SyntaxNode, cur: BlockId) -> Option<BlockId> {
+        if contains_labeled_flow(node) {
+            self.lower_value(node, cur)
+        } else {
+            Some(cur)
         }
     }
 
@@ -521,14 +729,13 @@ impl Builder {
     fn lower_conditional_jump(
         &mut self,
         cur: BlockId,
-        range: TextRange,
+        node: &SyntaxNode,
         jump: &Jump,
-        loop_ctx: Option<LoopCtx>,
     ) -> Option<BlockId> {
         // No target: not a jump after all, so control just falls through.
-        let Some(terminator) = self.jump_terminator(jump, loop_ctx) else {
+        if self.jump_terminator(jump).is_none() {
             return Some(cur);
-        };
+        }
         let taken = self.new_block();
         let fallthrough = self.new_block();
         self.set_term(
@@ -538,8 +745,7 @@ impl Builder {
                 else_blk: fallthrough,
             },
         );
-        self.push_stmt(taken, range);
-        self.set_term(taken, terminator);
+        self.lower_stmt(&node.clone().into(), taken);
         Some(fallthrough)
     }
 
@@ -548,24 +754,28 @@ impl Builder {
     /// the rest of the chain, so the graph nests exactly as the language does.
     fn lower_if(
         &mut self,
-        guarded: &[Vec<SyntaxElement>],
+        guarded: &[GuardedArm],
         unguarded: Option<&Vec<SyntaxElement>>,
         cur: BlockId,
-        loop_ctx: Option<LoopCtx>,
     ) -> Option<BlockId> {
         let Some((first, rest)) = guarded.split_first() else {
             // Malformed `if` with no arm at all.
             return Some(cur);
         };
+        let test_exit = match &first.test {
+            Some(test) => self.lower_value(test, cur),
+            None => Some(cur),
+        };
+        let branch = test_exit.unwrap_or_else(|| self.new_block());
         let then_blk = self.new_block();
-        let then_exit = self.lower_seq(first, then_blk, loop_ctx);
+        let then_exit = self.lower_seq(&first.stmts, then_blk);
 
         if rest.is_empty() && unguarded.is_none() {
             // No `else`: the false path falls straight to the join, so the `if`
             // never fully diverges.
             let join = self.new_block();
             self.set_term(
-                cur,
+                branch,
                 Terminator::Branch {
                     then_blk,
                     else_blk: join,
@@ -574,50 +784,82 @@ impl Builder {
             if let Some(exit) = then_exit {
                 self.set_term(exit, Terminator::Goto(join));
             }
-            return Some(join);
+            return test_exit.map(|_| join);
         }
 
         let else_blk = self.new_block();
         let else_exit = if rest.is_empty() {
-            self.lower_seq(unguarded.expect("checked above"), else_blk, loop_ctx)
+            self.lower_seq(unguarded.expect("checked above"), else_blk)
         } else {
-            self.lower_if(rest, unguarded, else_blk, loop_ctx)
+            self.lower_if(rest, unguarded, else_blk)
         };
-        self.set_term(cur, Terminator::Branch { then_blk, else_blk });
-        self.join(&[then_exit, else_exit])
+        self.set_term(branch, Terminator::Branch { then_blk, else_blk });
+        let exit = self.join(&[then_exit, else_exit]);
+        test_exit.and(exit)
     }
 
     /// Lower a `for`/`while`. Both may run zero iterations, so control reaches
-    /// the continuation — unless `never_exits`, which the caller sets for
-    /// `while true` (Julia's infinite-loop idiom, exited only by `break`) when
-    /// it can also see the whole body. The header then has no skip edge, and
+    /// the continuation — except for `while true` (Julia's infinite-loop
+    /// idiom, exited only by `break`) when the whole body is visible.
+    /// The header then has no skip edge, and
     /// the continuation is unreachable if no `break` targets it.
-    fn lower_loop(
-        &mut self,
-        cur: BlockId,
-        body: &[SyntaxElement],
-        never_exits: bool,
-    ) -> Option<BlockId> {
+    fn lower_loop(&mut self, node: &SyntaxNode, cur: BlockId, labeled: bool) -> Option<BlockId> {
+        let body = body_of(node);
+        // An opaque macro may hide a loop exit.
+        let never_exits = node.kind() == SyntaxKind::WHILE_EXPR
+            && has_literal_true_test(node)
+            && !body.as_ref().is_some_and(contains_opaque_macro);
+        let stmts = body
+            .map(|body| region_statements(&body))
+            .unwrap_or_default();
         let header = self.new_block();
-        self.set_term(cur, Terminator::Goto(header));
         let after = self.new_block();
         let body_blk = self.new_block();
-        if never_exits {
-            self.set_term(header, Terminator::Goto(body_blk));
+        let loop_ctx = LoopCtx { header, after };
+        self.exit_scopes.push(ExitScope::Loop(loop_ctx));
+        let header_exit = if node.kind() == SyntaxKind::WHILE_EXPR {
+            self.set_term(cur, Terminator::Goto(header));
+            match condition_of(node) {
+                Some(test) => self.lower_value(&test, header),
+                None => Some(header),
+            }
         } else {
-            self.set_term(
-                header,
+            // A for iterator is evaluated once, before entering its header.
+            let mut exit = Some(cur);
+            for binding in node
+                .children()
+                .filter(|child| child.kind() == SyntaxKind::FOR_BINDING)
+            {
+                exit = exit.and_then(|cur| self.lower_value(&binding, cur));
+            }
+            if let Some(exit) = exit {
+                self.set_term(exit, Terminator::Goto(header));
+            }
+            exit.map(|_| header)
+        };
+        if let Some(exit) = header_exit {
+            let term = if never_exits {
+                Terminator::Goto(body_blk)
+            } else {
                 Terminator::Branch {
                     then_blk: body_blk,
                     else_blk: after,
-                },
-            );
+                }
+            };
+            self.set_term(exit, term);
         }
-
-        let loop_ctx = LoopCtx { header, after };
-        if let Some(exit) = self.lower_seq(body, body_blk, Some(loop_ctx)) {
+        // Named continue applies to the syntactic loop's body, rather than
+        // the iterator or condition expression.
+        if labeled {
+            let outer = self.exit_scopes.len() - 2;
+            if let ExitScope::Block { continue_to, .. } = &mut self.exit_scopes[outer] {
+                *continue_to = Some(header);
+            }
+        }
+        if let Some(exit) = self.lower_seq(&stmts, body_blk) {
             self.set_term(exit, Terminator::Goto(header)); // back-edge
         }
+        self.exit_scopes.pop();
 
         if never_exits && !self.has_predecessor(after) {
             self.set_term(after, Terminator::Unreachable);
@@ -636,12 +878,7 @@ impl Builder {
     /// statement is reachable whenever the `finally` falls through, even if
     /// both other arms diverge: `finally` runs on the exception path too, and
     /// this errs toward *reachable*.
-    fn lower_try(
-        &mut self,
-        node: &SyntaxNode,
-        cur: BlockId,
-        loop_ctx: Option<LoopCtx>,
-    ) -> Option<BlockId> {
+    fn lower_try(&mut self, node: &SyntaxNode, cur: BlockId) -> Option<BlockId> {
         let catch = clause_body(node, SyntaxKind::CATCH_CLAUSE);
         let finally = clause_body(node, SyntaxKind::FINALLY_CLAUSE);
 
@@ -682,17 +919,17 @@ impl Builder {
         let try_body = body_of(node)
             .map(|b| region_statements(&b))
             .unwrap_or_default();
-        let try_exit = self.lower_seq(&try_body, try_blk, loop_ctx);
+        let try_exit = self.lower_seq(&try_body, try_blk);
         let catch_exit = catch
             .zip(catch_blk)
-            .and_then(|(stmts, blk)| self.lower_seq(&region_statements(&stmts), blk, loop_ctx));
+            .and_then(|(stmts, blk)| self.lower_seq(&region_statements(&stmts), blk));
 
         match (finally, finally_blk) {
             (Some(stmts), Some(blk)) => {
                 for exit in [try_exit, catch_exit].into_iter().flatten() {
                     self.set_term(exit, Terminator::Goto(blk));
                 }
-                let finally_exit = self.lower_seq(&region_statements(&stmts), blk, loop_ctx);
+                let finally_exit = self.lower_seq(&region_statements(&stmts), blk);
                 self.join(&[finally_exit])
             }
             _ => self.join(&[try_exit, catch_exit]),
@@ -748,6 +985,25 @@ fn region_statements(container: &SyntaxNode) -> Vec<SyntaxElement> {
         .collect()
 }
 
+/// Parenthesized statement blocks use `ARG` wrappers and a `PARAMETERS`
+/// group for statements after the first semicolon. Flatten those containers
+/// so a valued break can evaluate the block in ordinary statement order.
+fn paren_statements(container: &SyntaxNode) -> Vec<SyntaxElement> {
+    let mut stmts = Vec::new();
+    for node in container.children() {
+        if node.kind() == SyntaxKind::PARAMETERS {
+            stmts.extend(paren_statements(&node));
+        } else if let Some(arg) = Arg::cast(node.clone()) {
+            if let Some(expr) = arg.expr() {
+                stmts.push(expr.syntax().clone().into());
+            }
+        } else {
+            stmts.push(node.into());
+        }
+    }
+    stmts
+}
+
 /// Trivia and separators, which are not statements.
 fn is_ignorable(kind: SyntaxKind) -> bool {
     matches!(
@@ -763,17 +1019,23 @@ fn is_ignorable(kind: SyntaxKind) -> bool {
 
 /// An `if`'s arms: the statements of the `if` body followed by each `elseif`
 /// body (all guarded by a condition), and the `else` body if there is one.
-fn if_arms(node: &SyntaxNode) -> (Vec<Vec<SyntaxElement>>, Option<Vec<SyntaxElement>>) {
+fn if_arms(node: &SyntaxNode) -> (Vec<GuardedArm>, Option<Vec<SyntaxElement>>) {
     let mut guarded = Vec::new();
     let mut unguarded = None;
     if let Some(body) = body_of(node) {
-        guarded.push(region_statements(&body));
+        guarded.push(GuardedArm {
+            test: condition_of(node),
+            stmts: region_statements(&body),
+        });
     }
     for child in node.children() {
         match child.kind() {
             SyntaxKind::ELSEIF_CLAUSE => {
                 if let Some(body) = body_of(&child) {
-                    guarded.push(region_statements(&body));
+                    guarded.push(GuardedArm {
+                        test: condition_of(&child),
+                        stmts: region_statements(&body),
+                    });
                 }
             }
             SyntaxKind::ELSE_CLAUSE => {
@@ -812,60 +1074,74 @@ fn has_literal_true_test(node: &SyntaxNode) -> bool {
 fn jump_of(node: &SyntaxNode) -> Option<Jump> {
     match node.kind() {
         SyntaxKind::RETURN_EXPR => Some(Jump::Diverge),
-        SyntaxKind::BREAK_EXPR => Some(Jump::Break),
-        SyntaxKind::CONTINUE_EXPR => Some(Jump::Continue),
+        SyntaxKind::BREAK_EXPR | SyntaxKind::CONTINUE_EXPR => {
+            let name = match node.children().next() {
+                Some(label) => Some(label_name(&Expr::cast(label)?)?),
+                None => None,
+            };
+            Some(if node.kind() == SyntaxKind::BREAK_EXPR {
+                Jump::Break(name)
+            } else {
+                Jump::Continue(name)
+            })
+        }
         SyntaxKind::CALL_EXPR => {
             let callee = CallExpr::cast(node.clone())?.callee_ident()?;
             matches!(callee.text(), "throw" | "error" | "rethrow").then_some(Jump::Diverge)
         }
-        SyntaxKind::MACRO_CALL => macro_with_label(node, "goto").map(Jump::Goto),
+        SyntaxKind::MACRO_CALL => match control_macro(&MacroCall::cast(node.clone())?)? {
+            ControlMacro::Goto(name) => Some(Jump::Goto(name)),
+            _ => None,
+        },
         _ => None,
     }
 }
 
 /// The label a `@label name` statement defines.
 fn label_definition(stmt: &SyntaxElement) -> Option<SmolStr> {
-    let node = stmt.as_node()?;
-    (node.kind() == SyntaxKind::MACRO_CALL)
-        .then(|| macro_with_label(node, "label"))
-        .flatten()
+    match control_macro(&MacroCall::cast(stmt.as_node()?.clone())?)? {
+        ControlMacro::Label(name) => Some(name),
+        _ => None,
+    }
 }
 
-/// The label named by `@goto name` / `@label name`, when `node` is a macro call
-/// to `@<name>` with a bare-name argument.
-fn macro_with_label(node: &SyntaxNode, macro_name: &str) -> Option<SmolStr> {
-    let name = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::MACRO_NAME)?;
-    let simple = name
-        .children_with_tokens()
-        .filter_map(|e| e.into_token())
-        .filter(|t| t.kind() == SyntaxKind::IDENT)
-        .last()?;
-    if simple.text() != macro_name {
-        return None;
+fn is_opaque_macro(node: &SyntaxNode) -> bool {
+    MacroCall::cast(node.clone()).is_some_and(|call| control_macro(&call).is_none())
+}
+
+/// Closures and quoted code do not execute as part of the enclosing flow.
+fn is_flow_boundary(node: &SyntaxNode) -> bool {
+    is_region_owner(node.kind())
+        || matches!(
+            node.kind(),
+            SyntaxKind::ARROW_EXPR
+                | SyntaxKind::QUOTE_EXPR
+                | SyntaxKind::QUOTE_SYM
+                | SyntaxKind::GENERATOR
+                | SyntaxKind::COMPREHENSION
+                | SyntaxKind::TYPED_COMPREHENSION
+                | SyntaxKind::BRACES_COMPREHENSION
+        )
+        || (node.kind() == SyntaxKind::ASSIGNMENT_EXPR
+            && node
+                .children()
+                .next()
+                .is_some_and(|lhs| super::signature::has_call_core(&lhs)))
+}
+
+fn contains_labeled_flow(node: &SyntaxNode) -> bool {
+    if is_flow_boundary(node) || is_opaque_macro(node) {
+        return false;
     }
-    // `@goto lbl` leaves the label a bare `NAME`; `@goto(lbl)` wraps it in an
-    // argument list.
-    let arg = node
-        .children()
-        .skip_while(|c| c.kind() != SyntaxKind::MACRO_NAME)
-        .skip(1)
-        .find(|c| !is_ignorable(c.kind()))?;
-    let label = match arg.kind() {
-        SyntaxKind::NAME => arg,
-        SyntaxKind::ARG_LIST => arg
-            .children()
-            .find(|c| c.kind() == SyntaxKind::ARG)?
-            .children()
-            .find(|c| c.kind() == SyntaxKind::NAME)?,
-        _ => return None,
-    };
-    label
-        .children_with_tokens()
-        .filter_map(|e| e.into_token())
-        .find(|t| t.kind() == SyntaxKind::IDENT)
-        .map(|t| SmolStr::new(t.text()))
+    (matches!(
+        node.kind(),
+        SyntaxKind::BREAK_EXPR | SyntaxKind::CONTINUE_EXPR
+    ) && jump_of(node).is_some())
+        || matches!(
+            MacroCall::cast(node.clone()).and_then(|call| control_macro(&call)),
+            Some(ControlMacro::Block { .. })
+        )
+        || node.children().any(|child| contains_labeled_flow(&child))
 }
 
 /// Whether `body` contains a macro call other than `@goto`/`@label`, excluding
@@ -873,13 +1149,10 @@ fn macro_with_label(node: &SyntaxNode, macro_name: &str) -> Option<SmolStr> {
 /// it may hide a jump — see [`reachable_from`] and [`Builder::lower_loop`].
 fn contains_opaque_macro(body: &SyntaxNode) -> bool {
     body.children().any(|child| {
-        if is_region_owner(child.kind()) {
+        if is_flow_boundary(&child) {
             return false;
         }
-        let opaque = child.kind() == SyntaxKind::MACRO_CALL
-            && macro_with_label(&child, "goto").is_none()
-            && macro_with_label(&child, "label").is_none();
-        opaque || contains_opaque_macro(&child)
+        is_opaque_macro(&child) || contains_opaque_macro(&child)
     })
 }
 
@@ -887,10 +1160,12 @@ fn contains_opaque_macro(body: &SyntaxNode) -> bool {
 /// — Julia requires a `@goto` and its `@label` to share a function.
 fn collect_labels(body: &SyntaxNode, out: &mut HashSet<SmolStr>) {
     for child in body.children() {
-        if is_region_owner(child.kind()) {
+        if is_flow_boundary(&child) {
             continue;
         }
-        if let Some(name) = macro_with_label(&child, "label") {
+        if let Some(ControlMacro::Label(name)) =
+            MacroCall::cast(child.clone()).and_then(|call| control_macro(&call))
+        {
             out.insert(name);
         }
         collect_labels(&child, out);
@@ -901,11 +1176,7 @@ fn collect_labels(body: &SyntaxNode, out: &mut HashSet<SmolStr>) {
 /// Recurses through a chained `a && b && return x`, whose jump is the innermost
 /// right side.
 fn short_circuit_jump(node: &SyntaxNode) -> Option<(SyntaxNode, Jump)> {
-    if !node
-        .children_with_tokens()
-        .filter_map(|e| e.into_token())
-        .any(|t| matches!(t.kind(), SyntaxKind::AND_AND | SyntaxKind::OR_OR))
-    {
+    if !is_short_circuit(node) {
         return None;
     }
     let rhs = node.children().nth(1)?;
@@ -915,6 +1186,12 @@ fn short_circuit_jump(node: &SyntaxNode) -> Option<(SyntaxNode, Jump)> {
     (rhs.kind() == SyntaxKind::BINARY_EXPR)
         .then(|| short_circuit_jump(&rhs))
         .flatten()
+}
+
+fn is_short_circuit(node: &SyntaxNode) -> bool {
+    node.children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .any(|t| matches!(t.kind(), SyntaxKind::AND_AND | SyntaxKind::OR_OR))
 }
 
 fn render_region(cfg: &ControlFlowGraph, src: &str, out: &mut String) {

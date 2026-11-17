@@ -26,10 +26,15 @@
 //! the model never evaluates Julia or expands arbitrary macros.
 //! Macro definitions bind Julia's implicit `__source__` and `__module__`
 //! parameters locally, including in closures nested in the macro body.
+//!
+//! `@label` and `@goto` names and `break`/`continue` targets are control-flow
+//! names, separate from variable bindings and reads. A labeled block adds no
+//! variable scope; its body and any break value use ordinary binding rules.
 
 pub mod binding;
 pub mod builder;
 pub mod cfg;
+mod control;
 mod eval;
 pub mod import;
 pub mod scope;

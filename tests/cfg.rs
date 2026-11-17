@@ -5,7 +5,7 @@
 //! ([`FileControlFlow::is_unreachable`]) is asserted directly.
 
 use fatou::parser::parse;
-use fatou::semantic::FileControlFlow;
+use fatou::semantic::{FileControlFlow, Terminator};
 use insta::assert_snapshot;
 
 fn build(src: &str) -> FileControlFlow {
@@ -222,6 +222,190 @@ fn short_circuit_continue_branches_inside_a_loop() {
 }
 
 // --- goto/label ------------------------------------------------------------
+
+#[test]
+fn labeled_break_exits_its_block_and_keeps_the_continuation_reachable() {
+    let src = "@label done begin\n    break done value\n    dead()\nend\nalive()\n";
+    assert!(unreachable(src, "dead()"));
+    assert!(!unreachable(src, "alive()"));
+}
+
+#[test]
+fn labeled_break_exits_an_outer_loop() {
+    let src = "@label outer while true\n    while true\n        break outer\n        inner_dead()\n    end\n    outer_dead()\nend\nalive()\n";
+    assert!(unreachable(src, "inner_dead()"));
+    assert!(unreachable(src, "outer_dead()"));
+    assert!(!unreachable(src, "alive()"));
+}
+
+#[test]
+fn labeled_continue_restarts_the_named_loop() {
+    let src = "@label outer while true\n    while true\n        continue outer\n        inner_dead()\n    end\n    outer_dead()\nend\nafter_dead()\n";
+    for needle in ["inner_dead()", "outer_dead()", "after_dead()"] {
+        assert!(unreachable(src, needle), "{needle}");
+    }
+    // Assert the edge itself: reachability alone cannot distinguish two
+    // nested infinite loops' continue targets.
+    let cfg = build(src);
+    let graph = cfg.toplevel();
+    let Terminator::Goto(outer_header) = graph.block(graph.entry()).terminator else {
+        panic!("outer loop has a header");
+    };
+    let (_, jump) = graph
+        .iter()
+        .find(|(_, block)| {
+            block
+                .stmts
+                .iter()
+                .any(|range| &src[*range] == "continue outer")
+        })
+        .unwrap();
+    assert_eq!(jump.terminator, Terminator::Goto(outer_header));
+}
+
+#[test]
+fn anonymous_labels_and_underscore_breaks_use_the_nearest_default_scope() {
+    for keyword in ["break", "break _", "break _ value"] {
+        let src = format!(
+            "while true\n    @label begin\n        {keyword}\n        dead()\n    end\n    alive()\n    break\nend\nafter()\n"
+        );
+        assert!(unreachable(&src, "dead()"), "{keyword}");
+        assert!(!unreachable(&src, "alive()"), "{keyword}");
+        assert!(!unreachable(&src, "after()"), "{keyword}");
+    }
+    let src = "@label begin\n    while true\n        break _\n    end\n    alive()\nend\n";
+    assert!(!unreachable(src, "alive()"));
+}
+
+#[test]
+fn labeled_blocks_are_not_opaque_macros_or_goto_definitions() {
+    let src = "while true\n    @label inner begin\n        break inner\n    end\nend\ndead()\n";
+    assert!(unreachable(src, "dead()"));
+    let src = "@label done begin\n    work()\nend\n@goto done\nalive()\n";
+    assert!(!unreachable(src, "alive()"));
+}
+
+#[test]
+fn unknown_labeled_jumps_do_not_exit_the_innermost_loop() {
+    for keyword in ["break missing", "continue missing", "break missing error()"] {
+        let src = format!("while true\n    {keyword}\n    alive()\nend\n");
+        assert!(!unreachable(&src, "alive()"), "{keyword}");
+    }
+}
+
+#[test]
+fn conditional_labeled_exits_and_parenthesized_macros() {
+    let src = "Base.@label(done, begin\n    ready && break done value\n    middle()\n    break done\n    dead()\nend)\nalive()\n";
+    assert!(!unreachable(src, "middle()"));
+    assert!(unreachable(src, "dead()"));
+    assert!(!unreachable(src, "alive()"));
+}
+
+#[test]
+fn labeled_blocks_in_value_positions_and_break_values_keep_their_flow() {
+    for wrapper in ["result = ", "return ", "consume("] {
+        let close = if wrapper == "consume(" { ")" } else { "" };
+        let src = format!(
+            "function f()\n    {wrapper}@label done begin\n        break done value\n        dead()\n    end{close}\nend\n"
+        );
+        assert!(unreachable(&src, "dead()"), "{wrapper}");
+    }
+    let src = "@label done begin\n    break done (return value)\nend\ndead()\n";
+    assert!(unreachable(src, "dead()"));
+}
+
+#[test]
+fn named_continue_requires_a_loop_and_labels_stop_at_function_boundaries() {
+    for src in [
+        "@label outer begin\n    continue outer\n    alive()\nend\n",
+        "@label outer while ready\n    function inner()\n        break outer\n        alive()\n    end\nend\n",
+        "@label outer while ready\n    inner() do\n        continue outer\n        alive()\n    end\nend\n",
+    ] {
+        assert!(!unreachable(src, "alive()"), "{src}");
+    }
+}
+
+#[test]
+fn parenthesized_labeled_loops_still_supply_named_continue_targets() {
+    let src =
+        "@label(outer, (while true\n    continue outer\n    inner_dead()\nend))\nafter_dead()\n";
+    assert!(unreachable(src, "inner_dead()"));
+    assert!(unreachable(src, "after_dead()"));
+}
+
+#[test]
+fn default_jumps_respect_labeled_scope_barriers() {
+    for keyword in ["break", "break _"] {
+        let src = format!(
+            "while true\n    @label named begin\n        {keyword}\n        alive()\n    end\nend\n"
+        );
+        assert!(!unreachable(&src, "alive()"), "{keyword}");
+    }
+    for keyword in ["continue", "continue _"] {
+        let src = format!(
+            "while true\n    @label begin\n        {keyword}\n        alive()\n    end\nend\n"
+        );
+        assert!(!unreachable(&src, "alive()"), "{keyword}");
+    }
+    let src =
+        "while true\n    @label named begin\n        continue\n        dead()\n    end\nend\n";
+    assert!(unreachable(src, "dead()"));
+}
+
+#[test]
+fn opaque_macros_can_hide_exits_from_labeled_blocks() {
+    let src = "function f()\n    @label done begin\n        @maybe_exit\n        return\n    end\n    alive()\nend\n";
+    assert!(!unreachable(src, "alive()"));
+    let src = "function f()\n    @label done begin\n        return\n    end\n    dead()\nend\n";
+    assert!(unreachable(src, "dead()"));
+}
+
+#[test]
+fn break_values_evaluate_before_exiting_and_keep_parenthesized_dead_tails() {
+    let src =
+        "@label outer begin\n    break outer (return value; dead_value())\nend\ndead_tail()\n";
+    assert!(unreachable(src, "dead_value()"));
+    assert!(unreachable(src, "dead_tail()"));
+    let src = "@label outer begin\n    ready && (break outer value)\n    middle()\nend\nalive()\n";
+    assert!(!unreachable(src, "middle()"));
+    assert!(!unreachable(src, "alive()"));
+}
+
+#[test]
+fn exits_in_evaluated_operands_reach_their_labeled_target() {
+    for body in [
+        "return (break outer value)",
+        "error(break outer value)",
+        "x = (break outer value; dead_operand())",
+        "if (break outer value; true)\n    dead_body()\nend",
+        "let x = (break outer value)\n    dead_body()\nend",
+        "while (break outer value; true)\n    dead_body()\nend",
+        "for x in (break outer value; xs)\n    dead_body()\nend",
+    ] {
+        let src = format!("@label outer begin\n    {body}\n    dead_tail()\nend\nalive()\n");
+        assert!(!unreachable(&src, "alive()"), "{body}");
+        assert!(unreachable(&src, "dead_tail()"), "{body}");
+        if body.contains("dead_body()") {
+            assert!(unreachable(&src, "dead_body()"), "{body}");
+        }
+    }
+}
+
+#[test]
+fn elseif_conditions_and_short_circuit_left_operands_keep_labeled_exits() {
+    let src = "@label done begin\n    if ready\n        return\n    elseif (break done value; false)\n        dead_arm()\n    else\n        return\n    end\n    dead_tail()\nend\nalive()\n";
+    assert!(unreachable(src, "dead_arm()"));
+    assert!(unreachable(src, "dead_tail()"));
+    assert!(!unreachable(src, "alive()"));
+
+    for operator in ["&&", "||"] {
+        let src = format!(
+            "@label done begin\n    (@label begin\n        break done value\n    end) {operator} return\n    dead_tail()\nend\nalive()\n"
+        );
+        assert!(unreachable(&src, "dead_tail()"), "{operator}");
+        assert!(!unreachable(&src, "alive()"), "{operator}");
+    }
+}
 
 #[test]
 fn goto_jumps_backward_to_its_label() {

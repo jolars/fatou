@@ -479,6 +479,16 @@ fn unused_binding_flags_dead_local() {
 }
 
 #[test]
+fn unused_binding_distinguishes_control_labels_from_break_values() {
+    let src = "function f()\n    target = 1\n    value = 2\n    @label target begin\n        break target value\n    end\nend\n";
+    let messages = findings("unused-binding", src);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("target"), "{messages:?}");
+    let src = "function f()\n    target = 1\n    @goto target\n    @label target\nend\n";
+    assert_eq!(count("unused-binding", src), 1);
+}
+
+#[test]
 fn unused_binding_flags_let_var() {
     assert_eq!(count("unused-binding", "let a = 1\n    2\nend\n"), 1);
 }
@@ -4252,6 +4262,17 @@ fn unreachable_code_flags_tail_after_return() {
         ),
         1
     );
+}
+
+#[test]
+fn unreachable_code_uses_named_and_anonymous_block_exits() {
+    for src in [
+        "function f(value)\n    @label done begin\n        break done value\n        println(\"dead\")\n    end\n    println(\"alive\")\nend\n",
+        "function f(value)\n    result = @label begin\n        break _ value\n        println(\"dead\")\n    end\n    result\nend\n",
+        "function f()\n    @label outer while true\n        while true\n            continue outer\n        end\n    end\n    println(\"dead\")\nend\n",
+    ] {
+        assert_eq!(count("unreachable-code", src), 1, "{src}");
+    }
 }
 
 #[test]
