@@ -872,6 +872,44 @@ fn lsp_invalid_env_config_warns_and_uses_client_settings() {
 
 // --- lint configuration --------------------------------------------------
 
+#[test]
+fn version_compat_runtime_target_is_independent_of_syntax_edition() {
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.path().join("input.jl"), "x +%= 1\n").unwrap();
+    std::fs::write(
+        sandbox.path().join("fatou.toml"),
+        "[lint]\nselect = ['julia-version-compat']\n",
+    )
+    .unwrap();
+
+    for (compat, edition, expected) in [
+        (Some("1.13"), "1.14", 1),
+        (Some("1.14"), "1.13", 0),
+        (None, "1.14", 0),
+    ] {
+        let mut project = format!("[syntax]\njulia_version = '{edition}'\n");
+        if let Some(compat) = compat {
+            project.push_str(&format!("[compat]\njulia = '{compat}'\n"));
+        }
+        std::fs::write(sandbox.path().join("Project.toml"), project).unwrap();
+        let output = sandbox.run(
+            sandbox.path(),
+            &[],
+            &["lint", "--output", "json", "input.jl"],
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(if expected == 0 { 0 } else { 1 }),
+            "{output:?}"
+        );
+        let diagnostics: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(diagnostics.len(), expected, "{diagnostics:?}");
+        if expected != 0 {
+            assert_eq!(diagnostics[0]["rule"], "julia-version-compat");
+        }
+    }
+}
+
 /// Write `fatou.toml` and a Julia file at the sandbox root, then
 /// `fatou lint` that file.
 fn lint_with_config(sandbox: &Sandbox, config: &str, source: &str) -> Output {

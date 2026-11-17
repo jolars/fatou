@@ -423,9 +423,9 @@ warning: duplicate-method
 
 ## `julia-version-compat`
 
-Report syntax unavailable in a Julia version the project supports. For example, `public` requires Julia 1.11, and `import ... as` requires 1.6.
+Report syntax unavailable in a Julia version the project supports. `public` requires Julia 1.11, and `import ... as` requires 1.6. Julia 1.14 adds `typegroup`, wrapping arithmetic and assignment operators (including broadcasts), labeled `break` and `continue`, primitive types with non-byte-multiple literal widths, parenthesized multiline macro arguments, and `return` forms that inherit index markers or a ternary branch's closing colon. Width expressions are not evaluated.
 
-The target comes from `--julia-version`, `[julia] version`, or the project's `Project.toml` or `Manifest.toml`. The rule does nothing when no target is known.
+The runtime target comes from `--julia-version`, `[julia] version`, or the project's `Project.toml` or `Manifest.toml`. The rule checks the oldest supported runtime, independently of the selected syntax edition, and does nothing when no target is known.
 
 Targeting Julia 1.0, but `public` needs 1.11 and `as` needs 1.6:
 
@@ -447,6 +447,61 @@ error: julia-version-compat
   |
 3 | import A as B
   |        ^^^^^^ renaming with `as` in `import`/`using` requires Julia 1.6.0, but the project supports 1.0.0 and up
+```
+
+These constructs require a Julia 1.14 runtime:
+
+```julia
+typegroup
+struct A end
+end
+x +%= 1
+@label outer for i in xs
+    continue outer
+end
+primitive type Bits 7 end
+(@info "message"
+    x=1)
+a[return end]
+x ? return : y
+```
+
+```text
+error: julia-version-compat
+ --> example.jl:1:1
+  |
+1 | typegroup
+  | ^^^^^^^^^ `typegroup` requires Julia 1.14.0, but the project supports 1.0.0 and up
+error: julia-version-compat
+ --> example.jl:4:3
+  |
+4 | x +%= 1
+  |   ^^^ wrapping arithmetic syntax requires Julia 1.14.0, but the project supports 1.0.0 and up
+error: julia-version-compat
+ --> example.jl:6:5
+  |
+6 |     continue outer
+  |     ^^^^^^^^^^^^^^ labeled `continue` requires Julia 1.14.0, but the project supports 1.0.0 and up
+error: julia-version-compat
+ --> example.jl:8:21
+  |
+8 | primitive type Bits 7 end
+  |                     ^ a primitive type with a non-byte-multiple width requires Julia 1.14.0, but the project supports 1.0.0 and up
+error: julia-version-compat
+ --> example.jl:9:2
+  |
+9 | (@info "message"
+  |  ^^^^^ parenthesized multiline macro argument syntax requires Julia 1.14.0, but the project supports 1.0.0 and up
+error: julia-version-compat
+  --> example.jl:11:3
+   |
+11 | a[return end]
+   |   ^^^^^^ `return` with inherited index or ternary context requires Julia 1.14.0, but the project supports 1.0.0 and up
+error: julia-version-compat
+  --> example.jl:12:5
+   |
+12 | x ? return : y
+   |     ^^^^^^ `return` with inherited index or ternary context requires Julia 1.14.0, but the project supports 1.0.0 and up
 ```
 
 ## `call-arity`

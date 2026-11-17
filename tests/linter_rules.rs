@@ -3020,6 +3020,19 @@ use fatou::julia_version::{Version, parse_compat};
 /// Lint `src` for `julia-version-compat` under a given target floor (a Julia
 /// compat spec), returning the messages produced.
 fn version_findings(target: &str, src: &str) -> Vec<String> {
+    version_diagnostics(target, src)
+        .into_iter()
+        .map(|d| d.message.body)
+        .collect()
+}
+
+fn version_diagnostics(target: &str, src: &str) -> Vec<fatou::linter::Diagnostic> {
+    let parsed = fatou::parser::parse(src);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "{src:?}: {:?}",
+        parsed.diagnostics
+    );
     let config = LintConfig {
         select: Some(vec!["julia-version-compat".to_string()]),
         ..Default::default()
@@ -3034,7 +3047,6 @@ fn version_findings(target: &str, src: &str) -> Vec<String> {
         .diagnostics
         .into_iter()
         .filter(|d| d.rule == "julia-version-compat")
-        .map(|d| d.message.body)
         .collect()
 }
 
@@ -3098,6 +3110,250 @@ fn version_compat_uses_range_floor_not_ceiling() {
     assert_eq!(range.min, Version::new(1, 6, 0));
     let msgs = version_findings("1.6 - 1.11", "module M\npublic foo\nend\n");
     assert_eq!(msgs.len(), 1);
+}
+
+/// Every new form must be rejected at the old runtime floor, accepted at its
+/// introduction, and ignored without a target, independently of line endings.
+fn assert_julia_1_14_feature(src: &str, expected: usize) {
+    for src in [src.to_string(), src.replace('\n', "\r\n")] {
+        for target in ["1.13", "1.13 - 1.14", "1.14, 1.13"] {
+            let diagnostics = version_diagnostics(target, &src);
+            assert_eq!(diagnostics.len(), expected, "{target}: {src:?}");
+            for diagnostic in diagnostics {
+                assert!(diagnostic.message.body.contains("requires Julia 1.14.0"));
+                assert_eq!(diagnostic.severity, Severity::Error);
+                assert!(diagnostic.fixes.is_empty());
+            }
+        }
+        for target in ["1.14", "1.15"] {
+            assert!(
+                version_findings(target, &src).is_empty(),
+                "{target}: {src:?}"
+            );
+        }
+        assert_eq!(count("julia-version-compat", &src), 0, "{src:?}");
+    }
+}
+
+#[test]
+fn version_compat_flags_typegroup_below_1_14() {
+    assert_julia_1_14_feature("typegroup\nstruct A end\nstruct B end\nend\n", 1);
+    assert!(version_findings("1.13", "typegroup = 1\nf(typegroup)\n").is_empty());
+}
+
+#[test]
+fn version_compat_flags_wrapping_operators_and_their_broadcasts() {
+    for op in [
+        "+%", "-%", "*%", ".+%", ".-%", ".*%", "+%=", "-%=", "*%=", ".+%=", ".-%=", ".*%=",
+    ] {
+        let src = format!("a {op} b\n");
+        assert_julia_1_14_feature(&src, 1);
+        let diagnostic = &version_diagnostics("1.13", &src)[0];
+        assert_eq!(&src[std::ops::Range::<usize>::from(diagnostic.range)], op);
+    }
+    for src in [
+        "+%x\n",
+        "-%x\n",
+        ".+%x\n",
+        ".-%x\n",
+        "(+%)(a, b)\n",
+        "f(+%)\n",
+        ":(+%)\n",
+        "a +%₁ b\n",
+    ] {
+        assert_julia_1_14_feature(src, 1);
+    }
+    assert!(
+        version_findings(
+            "1.13",
+            "a + b - c * d % e\na .+= b\ns = \"+%\"\nvar\"+%\"\n# +%=\n"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn version_compat_flags_labeled_break_and_continue() {
+    for src in [
+        "break outer\n",
+        "continue outer\n",
+        "break _\n",
+        "continue _\n",
+        "break outer value\n",
+        "break var\"a b\" value\n",
+        "continue var\"a b\"\n",
+        "quote\nbreak $label value\nend\n",
+        "@label outer for i in xs\ncontinue outer\nend\n",
+        "@label outer begin\nbreak outer value\nend\n",
+    ] {
+        assert_julia_1_14_feature(src, 1);
+    }
+    assert_julia_1_14_feature("break outer a +% b\n", 2);
+    assert!(
+        version_findings(
+            "1.13",
+            "while true\nbreak\nend\nfor x in xs\ncontinue\nend\n@label foo\n@goto foo\n"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn version_compat_flags_non_byte_multiple_primitive_widths() {
+    for width in [
+        "1", "7", "9", "1_5", "0x0f", "0o17", "0b1111", "(15)", "+15",
+    ] {
+        assert_julia_1_14_feature(&format!("primitive type P {width} end\n"), 1);
+    }
+    for width in [
+        "0",
+        "8",
+        "24",
+        "1_024",
+        "0x10",
+        "0o20",
+        "0b10000",
+        "(16)",
+        "+16",
+        "N",
+        "sizeof(Int) * 8",
+    ] {
+        let src = format!("primitive type P <: Any\n{width}\nend\n");
+        assert!(version_findings("1.13", &src).is_empty(), "{src:?}");
+    }
+}
+
+#[test]
+fn version_compat_flags_only_new_macro_argument_separators() {
+    for src in [
+        "(@info \"message\"\nx=1)\n",
+        "(@m\nx)\n",
+        "(\n# leading\nBase.@info \"message\" # comment\nx=1\n)\n",
+        "(@A.B.m x\ny)\n",
+        "(@var\"#\" x\ny)\n",
+        "(@m @n x\ny)\n",
+        "(@m x\ny, z)\n",
+        "(@m begin\nx\nend\ny)\n",
+        "((@m x\ny), z)\n",
+        "(@doc x\n\ny)\n",
+        "(@doc x\n# comment\ny)\n",
+        "(@doc x\ny z)\n",
+        "(@doc x\ny\nz)\n",
+        "(@doc\nx y)\n",
+        "(@var\"doc\" x\ny)\n",
+    ] {
+        assert_julia_1_14_feature(src, 1);
+    }
+    assert_julia_1_14_feature("(@m (@n x\ny)\nz)\n", 2);
+    for src in [
+        "(@m x y)\n",
+        "(@m x\n)\n",
+        "(@m(x,\ny))\n",
+        "(@m begin\nx\ny\nend)\n",
+        "(@m f(\nx,\ny))\n",
+        "(@m \"\"\"x\ny\"\"\")\n",
+        "(@m x #= a\n b =# y)\n",
+        "(@m x,\ny)\n",
+        "(@m x\n, y)\n",
+        "(@m x +\ny)\n",
+        "(@m x\n- y)\n",
+        "@m x\ny\n",
+        "(@m\n)\n",
+        "@doc x\ny\n",
+        "(@doc x\ny)\n",
+        "(@doc x # comment\ny)\n",
+        "(@doc x #= comment =#\ny)\n",
+        "(@doc \"doc\"\nf())\n",
+        "(Base.@doc x\ny)\n",
+        "(@Base.doc x\ny)\n",
+        "(@doc x\ny + z)\n",
+        "(@doc x\ny, z)\n",
+        "(@doc x\n+y)\n",
+    ] {
+        for src in [src.to_string(), src.replace('\n', "\r\n")] {
+            assert!(version_findings("1.13", &src).is_empty(), "{src:?}");
+        }
+    }
+}
+
+#[test]
+fn version_compat_flags_return_index_markers_and_ternary_branches() {
+    for src in [
+        "a[return end]\n",
+        "a[return begin]\n",
+        "a[return begin + 1:end - 1]\n",
+        "a[return (end)]\n",
+        "a[return return end]\n",
+        "a[return x ? begin : end]\n",
+        "a[return f(begin, end)]\n",
+        "a[return [end]]\n",
+        "a[return end for i in xs]\n",
+        "x ? return : y\n",
+        "x ? return a : y\n",
+        "x ? return a, b : y\n",
+        "x ? return f(a:b) : y\n",
+        "x ? return (a:b) : y\n",
+        "x ? true && return : y\n",
+        "x ? return return a : y\n",
+        "x ? y ? z : return a : b\n",
+        "x ? y -> return a : z\n",
+        "x ? return f(\na) : y\n",
+        "(x ? return #= comment\ncontinued =# : y)\n",
+    ] {
+        assert_julia_1_14_feature(src, 1);
+    }
+    for src in [
+        "a[return 1]\n",
+        "a[return b[end]]\n",
+        "a[return b[end for i in xs]]\n",
+        "a[return b[end x]]\n",
+        "return a[end]\n",
+        "x ? (return a) : y\n",
+        "x ? (return) : y\n",
+        "x ? (true && return) : y\n",
+        "x ? begin return a end : y\n",
+        "x ? f(return a) : y\n",
+        "x ? [return a] : y\n",
+        "x ? (a; return b) : y\n",
+        "x ? (return a for i in xs) : y\n",
+        "x ? [return a for i in xs] : y\n",
+        "x ? [return a; b] : y\n",
+        "(x ? return # comment\n: y)\n",
+        "(x ? return a # comment\n: y)\n",
+        "(x ? return\n: y)\n",
+        "(x ? return a\n: y)\n",
+        "(x ? true && return\n: y)\n",
+        "x ? y : return a:b\n",
+        "return x ? a : b\n",
+        "return a:b\n",
+        "return\n",
+    ] {
+        for src in [src.to_string(), src.replace('\n', "\r\n")] {
+            assert!(version_findings("1.13", &src).is_empty(), "{src:?}");
+        }
+    }
+}
+
+#[test]
+fn version_compat_1_14_diagnostic_ranges_and_suppression() {
+    for (src, highlighted) in [
+        ("typegroup\nstruct A end\nend\n", "typegroup"),
+        ("break outer result\n", "break outer"),
+        ("continue outer\n", "continue outer"),
+        ("primitive type Bits 7 end\n", "7"),
+        ("(Base.@info x\ny)\n", "Base.@info"),
+        ("a[return end]\n", "return"),
+        ("x ? return : y\n", "return"),
+    ] {
+        let diagnostics = version_diagnostics("1.13", src);
+        assert_eq!(diagnostics.len(), 1, "{src:?}");
+        assert_eq!(
+            &src[std::ops::Range::<usize>::from(diagnostics[0].range)],
+            highlighted
+        );
+        let suppressed = format!("# fatou-ignore julia-version-compat\n{src}");
+        assert!(version_findings("1.13", &suppressed).is_empty(), "{src:?}");
+    }
 }
 
 // --- type-piracy -------------------------------------------------------------

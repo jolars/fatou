@@ -61,13 +61,13 @@
 
 ### Rules
 
-- [ ] Extend `julia-version-compat` to Julia 1.14 additions: `typegroup`,
+- [x] Extend `julia-version-compat` to Julia 1.14 additions: `typegroup`,
   wrapping arithmetic and assignment operators (including broadcasts),
   labeled `break`/`continue`, and primitive types with non-byte-multiple
-  widths and parenthesized multiline macro arguments. Check the new `return`
-  forms in index and ternary contexts. These constructs currently produce no
-  compatibility finding when targeting Julia 1.13. Keep runtime
-  compatibility separate from the selected syntax edition.
+  widths and parenthesized multiline macro arguments. Cover the new `return`
+  forms in index and ternary contexts. Report compatibility errors when the
+  runtime support floor predates Julia 1.14, independently of the selected
+  syntax edition. No fixes; coverage includes LF/CRLF, spans, and suppression.
 
 - [ ] Detect dead assignments with control-flow-aware liveness analysis,
   separately from `unused-binding` and `loop-variable-shadow`. Report only
