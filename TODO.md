@@ -15,10 +15,11 @@
   the macro call with parentheses. Regression coverage includes comments,
   CRLF, incremental edits, and released and development Julia oracles.
 
-- [ ] Support Julia 1.14's multiline macro arguments when a macro call is the
+- [x] Support Julia 1.14's multiline macro arguments when a macro call is the
   immediate child of parentheses, such as `(@info "message"\n x=1)`. Cover
   qualified and nested macros, comments, CRLF, blocks, tuple and generator
-  boundaries, and following operator lines. See
+  boundaries, and following operator lines. All 58 harvested macro cases
+  pass. See
   [JuliaLang/julia#60181](https://github.com/JuliaLang/julia/pull/60181).
 
 - [ ] Preserve the enclosing index and ternary context when parsing `return`.
@@ -61,10 +62,10 @@
 - [ ] Extend `julia-version-compat` to Julia 1.14 additions: `typegroup`,
   wrapping arithmetic and assignment operators (including broadcasts),
   labeled `break`/`continue`, and primitive types with non-byte-multiple
-  widths. Add checks for the new macro and `return` forms as parser support
-  lands. These constructs currently produce no compatibility finding when
-  targeting Julia 1.13. Keep runtime compatibility separate from the
-  selected syntax edition.
+  widths and parenthesized multiline macro arguments. Add checks for the new
+  `return` forms as parser support lands. These constructs currently produce
+  no compatibility finding when targeting Julia 1.13. Keep runtime
+  compatibility separate from the selected syntax edition.
 
 - [ ] Detect dead assignments with control-flow-aware liveness analysis,
   separately from `unused-binding` and `loop-variable-shadow`. Report only

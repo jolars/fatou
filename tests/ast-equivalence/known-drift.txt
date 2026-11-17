@@ -37,6 +37,7 @@ js-e0aa726d
 macro_newline_operator
 parametric_types
 parenthesized_anonymous_function_parameters
+parenthesized_multiline_macro
 unicode_operator_call
 where_as_identifier
 where_precedence

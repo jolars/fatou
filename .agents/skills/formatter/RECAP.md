@@ -21,9 +21,9 @@ Detail lives in `git log`, not here.
   operator spelling / numeric form. Author `expected.jl` to the canonical
   fully-reflowed form.
 - **Reflow must protect macro argument scope.** Before an operator or a
-  parenthesized generator's `for`, fence an operand whose tail is an
-  undelimited macro. Decide from the parsed expression,
-  not a source newline: `(@m x\n - y)` and `((@m x) - y)` must format alike.
+  parenthesized generator's `for`, or the next macro argument, fence an operand
+  whose tail is an undelimited macro. Decide from the parsed expression, not a
+  source newline: `(@m x\n - y)` and `((@m x) - y)` must format alike.
 - **Gate = file presence.** A fixture is gated iff it has `expected.jl`
   (`crates/fatou-formatter/tests/formatter.rs::formatter_fixtures_match_expected`).
   No allowlist, no blocked list. Stability
@@ -160,24 +160,28 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (2026-11-17 — macro generator and comma boundaries)
+## Latest session (2026-11-17 — multiline macro argument scope)
 
-- The expanded JuliaSyntax 2 corpus exposed `(@foo x\n for i in xs)` formatting
-  to `(@foo x for i in xs)`, which no longer parses. Parenthesized generator
-  bodies now reuse the existing macro operand fence, producing
-  `((@foo x) for i in xs)` from expression structure. Positional list items also
-  retain commas outside undelimited macros, including a singleton tuple's
-  semantic comma.
-- Regression tests compare implicit and explicit grouping for ordinary,
-  argumentless, and nested macros, CRLF, and attached vectors at widths 24/80.
-  They require program preservation, idempotence, and canonical agreement.
-  Tuple, vector, and call tests cover comma ownership. Three new corpus entries
-  join the existing `where`/numeric policy drift groups.
-- No fixture style decision changes. All formatter fixtures, program-preservation
-  checks over the enlarged parser corpora, workspace tests, clippy, rustfmt, and
-  both engine Wasm builds pass. The regression test fails before the fix.
+- Parser support for parenthesized multiline macro calls exposes semantic
+  argument boundaries: `(@m @n a\n b)` must keep `b` outside `@n`, and
+  `(@m +\n x)` must keep `+` as a value. Nonfinal space-form macro arguments
+  reuse the existing macro operand fence and parenthesize operator values.
+- A bare tuple argument fences its final item rather than the whole tuple,
+  preserving its surface syntax. Tests compare implicit and explicit grouping
+  across nested macros, binary and tuple arguments, vectors, generators,
+  LF/CRLF, and widths 24/80. They require program preservation, canonical
+  agreement, and idempotence; the new regression test fails before the fix.
+- No fixture style decision changes. The parser's new valid fixture uses the
+  existing `where T` to `where {T}` policy and joins that documented drift
+  group.
+- Formatter, parser-corpus equivalence, full workspace, clippy, rustfmt, and
+  both engine Wasm gates pass. The new valid parser fixture is idempotent for
+  LF/CRLF.
 
 ## Earlier sessions
+
+- **2026-11-17** — macro operand fences before generator clauses and list
+  commas, including singleton tuples, nested macros, and CRLF.
 
 - **2026-11-16** — macro operator boundaries: fence undelimited operand tails
   before operators, with structure-driven canonicalization and 118 oracle
@@ -194,14 +198,13 @@ Newest first. One line each; the commit is the detail.
   endings. Gate stayed 127.
 - **Verified formatting** (`feat`): added the public `format_verified` API and
   CLI `format --safe`, with projection/comment comparison and batch preflight.
-- **Unary numeric operators** (`fix`): parenthesized decimal numeric operands
-  to preserve unary-call shape and integer boundary types. `unary_operators`.
+- **Unary numeric operators** (`fix`): parenthesized decimal numeric operands to
+  preserve unary-call shape and integer boundary types. `unary_operators`.
 - **Operator-call trailing comma** (`fix`): preserved the load-bearing comma on
   singleton calls to bare operators and removed six AST-equivalence exceptions.
   `operator_call_trailing_comma`. Gate 127.
 - **Trailing bracket semicolons** (`fix`): distinguished a semantic final `;`
-  from layout-only empty rows across flat, broken, and commented matrices. Gate
-  126.
+  from layout-only empty rows across flat, broken, and commented matrices. Gate 126.
 - **Macro argument gaps** (`fix`): restricted sole-bracket gluing to a genuinely
   sole argument, preserving later bracketed arguments' arity. Gate 125.
 - **Where brace shapes** (`fix`): recognized brace concatenations and
@@ -214,8 +217,7 @@ Newest first. One line each; the commit is the detail.
 - **Left division** (`test`): gated `\` as an ordinary spaced binary operator;
   wide mixed multiplication-tier chains prove uniform breaks. 121→122.
 - **Splat after a closing bracket** (`feat`): removed the stale parser fallback
-  and made splats hug-transparent around sole bracketed operands. Gate stayed
-  121.
+  and made splats hug-transparent around sole bracketed operands. Gate stayed 121.
 - **Labeled `break`/`continue` spacing** (`test`): gated single spaces around
   labels and values, including nested binary/ternary forms. 120→121.
 - **Only a sole trailing item hugs; bracket-valued pairs absorb the arrow-tier
@@ -258,8 +260,8 @@ Newest first. One line each; the commit is the detail.
   `lower_for_binding` directly and never double-indent. 106→107.
 - **Control-flow condition continuation double-indent** (`feat`): the original
   +8 rule. `condition_break`. 105→106.
-- **Earlier reflow foundation:** method chains, interpolation, bracescat,
-  comma lists, splats, pair and collection hugging, index subjects, uniform
-  operator breaks, continuation-aware `fits`, macros, and block layout.
-  Gate → 105. Details live in `git log`; recorded decisions and standing traps
-  above retain the active policies.
+- **Earlier reflow foundation:** method chains, interpolation, bracescat, comma
+  lists, splats, pair and collection hugging, index subjects, uniform operator
+  breaks, continuation-aware `fits`, macros, and block layout. Gate → 105.
+  Details live in `git log`; recorded decisions and standing traps above retain
+  the active policies.
