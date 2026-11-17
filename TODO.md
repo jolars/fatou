@@ -25,13 +25,15 @@
 - [x] Preserve the enclosing index and ternary context when parsing `return`.
   Support Julia 1.14's `a[return end]`, `a[return begin]`, `x ? return : y`,
   and `x ? return a : y` by threading context through keyword operands.
-  Cover nested returns, tuples, ranges, comments, CRLF, and incremental edits
-  against the locked oracle while retaining newline and declaration boundaries.
+  Cover nested returns, tuples, ranges, comments, CRLF, and incremental
+  edits against the locked oracle while retaining newline and declaration
+  boundaries.
 
-- [ ] Update the lexer for Unicode 18. Regenerate the identifier tables from the
+- [x] Update the lexer for Unicode 18. Regenerate the identifier tables from the
   locked Julia binary, and add the ten missing operator suffixes: `ᵅ`, `ᵋ`,
   `ᶲ`, `˱`, `˲`, `ₔ`, `₝`, `₞`, `₟`, and U+1DFD0. Cover new identifiers and
-  suffixed operators against the matching development oracle. See
+  suffixed operators against the matching development oracle, including CRLF
+  and incremental edits. See
   [JuliaLang/julia#60285](https://github.com/JuliaLang/julia/pull/60285) and
   [JuliaLang/julia#63505](https://github.com/JuliaLang/julia/pull/63505).
 
@@ -64,8 +66,8 @@
   wrapping arithmetic and assignment operators (including broadcasts),
   labeled `break`/`continue`, and primitive types with non-byte-multiple
   widths and parenthesized multiline macro arguments. Check the new `return`
-  forms in index and ternary contexts. These constructs currently produce
-  no compatibility finding when targeting Julia 1.13. Keep runtime
+  forms in index and ternary contexts. These constructs currently produce no
+  compatibility finding when targeting Julia 1.13. Keep runtime
   compatibility separate from the selected syntax edition.
 
 - [ ] Detect dead assignments with control-flow-aware liveness analysis,

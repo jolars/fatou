@@ -13,13 +13,11 @@ formatter, linter, or other downstream follow-up, put the active task in that
 consumer's `RECAP.md` and `TODO.md` section; retain at most a historical note in
 the parser session log.
 
-Follow the remaining Parser task in `TODO.md`: update Unicode 18 identifiers and
-operator suffixes. Return operands now preserve index and ternary context. The
-parenthesized multiline macro cluster is complete, including all 58 harvested
-cases. Other JuliaSyntax 2 migration clusters remain classified in
-`tests/oracle/blocked.txt` and `tests/oracle/juliasyntax-blocked.txt`: adjacent
-assignment/comparison tokens, qualified literal macro callees, and the seven
-changed curated grammar cases.
+The Parser roadmap tasks in `TODO.md` are complete. Next targets come from the
+classified JuliaSyntax 2 migration clusters in `tests/oracle/blocked.txt` and
+`tests/oracle/juliasyntax-blocked.txt`: adjacent assignment/comparison tokens,
+qualified literal macro callees, and the seven changed curated grammar cases.
+Start with adjacent assignment/comparison token boundaries.
 
 ## Persistent traps & invariants
 
@@ -76,7 +74,7 @@ changed curated grammar cases.
 JS corpus (**907 cases**, error shapes included): **885 allowlisted**, 22
 classified divergences, 0 unsupported. All 756 original inputs remain, including
 six removed from upstream's harvested binding, and all 749 original passing
-cases remain allowlisted. Dir corpus (**278 cases**): **270 allowlisted**, 8
+cases remain allowlisted. Dir corpus (**280 cases**): **272 allowlisted**, 8
 blocked. Seven curated grammar changes moved to blocked with identical parser
 fixtures and reviewed CST snapshots; numeric display remains blocked. Both
 corpora enforce complete triage and reject stale blocked entries.
@@ -121,37 +119,40 @@ prefix `**a`/`--a` (`call-pre`, in neither corpus); trailing block-body junk
 keyword in `(@m x\n end)`. The last two remain pre-existing divergences in the
 multiline-macro probe set.
 
-## Latest session (2026-11-17 — return operand context)
+## Latest session (2026-11-17 — Unicode 18 lexer)
 
-- **Grammar**: carry index markers and the enclosing ternary's colon boundary
-  through `KwOperandContext` into `return` operands, including nested returns.
-  Preserve the existing generator boundary while resetting newline and space
-  sensitivity. Declarations retain their previous context reset.
-- **Trivia**: leave the ternary separator and its preceding trivia outside the
-  return. Ternary parsing skips block comments, plus line comments and newlines
-  inside parentheses. Remove the unused whitespace-only cursor helper. The
-  projector needs no changes.
-- **Coverage**: `return_context` adds 40 valid expressions and a reviewed CST
-  snapshot. LF/CRLF tests check clean parsing, losslessness, 12 invalid context
-  boundaries, and 11 incremental edits; the fixture also joins the seeded edit
-  sweep. The new regression fails on the unchanged parser. The locked oracle
-  confirms the four roadmap forms with syntax version 1.14 as well as 1.15.
-- **Parity**: curated **269/277 -> 270/278**, harvested **885/907 -> 885/907**,
-  with no regressions or new blocked entries. Earlier generated artifacts replay
-  unchanged. The 76-input probe improves from 25 to 65 matches, including all
-  **53 valid inputs** (previously 15). Its 11 remaining recovery divergences
-  also diverged before the change.
+- **Lexer**: regenerate `unicode_ident.rs` from the locked Julia 1.15.0-DEV.783
+  binary with matching JuliaSyntax 2.0.0-DEV. Add the ten missing explicit
+  suffixes from JuliaLang/julia#60285 and #63505. The grammar and projector need
+  no changes.
+- **Coverage**: `unicode_18_identifiers` and `unicode_18_operator_suffixes` add
+  two parser/oracle fixtures and reviewed CST snapshots. Test identifier start
+  and continuation classes, invalid leading marks and unassigned neighbors, all
+  ten suffixes with six operator forms, and operators that reject suffixes.
+  LF/CRLF tests check clean parsing, losslessness, oracle parity, and 12
+  targeted incremental edits. Both fixtures join the seeded edit sweep. The
+  lexer regressions fail before the change.
+- **Probes**: all **12,919 new identifier starts** and **12,958 new
+  continuations** match the locked oracle in 25,877 expressions. All ten
+  suffixes match across 13 forms (130 expressions). Regeneration replays the
+  identifier table byte-for-byte; the explicit suffix delta is exactly ten
+  characters, with none removed.
+- **Parity**: curated **270/278 -> 272/280**, harvested **885/907 -> 885/907**,
+  with no regressions or new blocked entries. Earlier generated oracle artifacts
+  replay unchanged.
 - **Validation**: focused parser/oracle and incremental tests, full workspace
-  tests, clippy, rustfmt, and both engine Wasm builds pass. Formatting the valid
-  fixture is program-preserving, clean, and idempotent at widths 24/80 with LF
-  and CRLF. Runtime compatibility checks remain in the existing
-  `julia-version-compat` roadmap task.
+  tests, clippy, rustfmt, and both engine Wasm builds pass. Both fixtures format
+  safely, reparse cleanly, and are idempotent at widths 24/80 with LF and CRLF.
 
-**Ranked next target:** Unicode 18 identifiers and operator suffixes in `TODO.md`.
+**Ranked next target:** adjacent assignment/comparison token boundaries in the
+harvested migration ledger.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
+
+- **2026-11-17** — return operands retain index and ternary context, trivia,
+  newline and declaration boundaries, with 76 oracle probes. 885 / 270.
 
 - **2026-11-17** — parenthesized multiline macros, 58 harvested cases, delimiter
   recovery, and formatter argument fences. 885 / 269.
