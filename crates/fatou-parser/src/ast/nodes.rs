@@ -67,7 +67,16 @@ ast_node!(Parameters, SyntaxKind::PARAMETERS);
 ast_node!(TypeAnnotation, SyntaxKind::TYPE_ANNOTATION);
 ast_node!(WhereExpr, SyntaxKind::WHERE_EXPR);
 ast_node!(SplatExpr, SyntaxKind::SPLAT_EXPR);
-ast_node!(EndMarker, SyntaxKind::END_MARKER);
+ast_node!(
+    /// The `begin` value denoting an array's first index in indexing context.
+    BeginMarker,
+    SyntaxKind::BEGIN_MARKER
+);
+ast_node!(
+    /// The `end` value denoting an array's last index in indexing context.
+    EndMarker,
+    SyntaxKind::END_MARKER
+);
 ast_node!(AssignmentExpr, SyntaxKind::ASSIGNMENT_EXPR);
 ast_node!(ArrowExpr, SyntaxKind::ARROW_EXPR);
 ast_node!(TernaryExpr, SyntaxKind::TERNARY_EXPR);
@@ -151,6 +160,8 @@ pub enum Expr {
     FunctionDef(FunctionDef),
     MacroCall(MacroCall),
     SplatExpr(SplatExpr),
+    BeginMarker(BeginMarker),
+    EndMarker(EndMarker),
     WhereExpr(WhereExpr),
     TypeAnnotation(TypeAnnotation),
     ReturnExpr(ReturnExpr),
@@ -203,6 +214,8 @@ pub fn is_expr_kind(kind: SyntaxKind) -> bool {
             | TYPE_ANNOTATION
             | WHERE_EXPR
             | SPLAT_EXPR
+            | BEGIN_MARKER
+            | END_MARKER
             | POSTFIX_EXPR
             | OPERATOR_ATOM
             | ASSIGNMENT_EXPR
@@ -275,6 +288,8 @@ impl AstNode for Expr {
             SyntaxKind::FUNCTION_DEF => Expr::FunctionDef(FunctionDef(syntax)),
             SyntaxKind::MACRO_CALL => Expr::MacroCall(MacroCall(syntax)),
             SyntaxKind::SPLAT_EXPR => Expr::SplatExpr(SplatExpr(syntax)),
+            SyntaxKind::BEGIN_MARKER => Expr::BeginMarker(BeginMarker(syntax)),
+            SyntaxKind::END_MARKER => Expr::EndMarker(EndMarker(syntax)),
             SyntaxKind::WHERE_EXPR => Expr::WhereExpr(WhereExpr(syntax)),
             SyntaxKind::TYPE_ANNOTATION => Expr::TypeAnnotation(TypeAnnotation(syntax)),
             SyntaxKind::RETURN_EXPR => Expr::ReturnExpr(ReturnExpr(syntax)),
@@ -328,6 +343,8 @@ impl AstNode for Expr {
             Expr::FunctionDef(it) => it.syntax(),
             Expr::MacroCall(it) => it.syntax(),
             Expr::SplatExpr(it) => it.syntax(),
+            Expr::BeginMarker(it) => it.syntax(),
+            Expr::EndMarker(it) => it.syntax(),
             Expr::WhereExpr(it) => it.syntax(),
             Expr::TypeAnnotation(it) => it.syntax(),
             Expr::ReturnExpr(it) => it.syntax(),
@@ -557,6 +574,25 @@ impl TernaryExpr {
     pub fn else_branch(&self) -> Option<Expr> {
         support::children(&self.0).nth(2)
     }
+
+    /// Whether a newline separates the then branch from its closing colon.
+    /// Newlines within the branch or inside block comments do not count.
+    pub fn has_newline_before_colon(&self) -> bool {
+        let Some(branch) = self.then_branch() else {
+            return false;
+        };
+        let Some(colon) = support::token(&self.0, SyntaxKind::COLON) else {
+            return false;
+        };
+        self.0
+            .children_with_tokens()
+            .filter_map(|element| element.into_token())
+            .any(|token| {
+                token.kind() == SyntaxKind::NEWLINE
+                    && token.text_range().start() >= branch.syntax().text_range().end()
+                    && token.text_range().end() <= colon.text_range().start()
+            })
+    }
 }
 
 impl UnaryExpr {
@@ -730,6 +766,34 @@ impl MacroCall {
     pub fn name(&self) -> Option<MacroName> {
         support::child(&self.0)
     }
+
+    /// Whether a space-form argument follows a newline outside the preceding
+    /// argument. Newlines inside expressions or block comments do not count,
+    /// nor does trailing trivia before the enclosing closing parenthesis.
+    pub fn has_newline_separated_args(&self) -> bool {
+        self.space_args_with_newlines()
+            .any(|(_, newlines)| newlines != 0)
+    }
+
+    /// Space-form arguments paired with the number of newline tokens between
+    /// each argument and the previous argument (or the macro name). Newlines
+    /// inside expressions and block comments are excluded. For call-form macro
+    /// arguments, use [`HasArgList::arg_list`](crate::ast::HasArgList::arg_list).
+    pub fn space_args_with_newlines(&self) -> impl Iterator<Item = (Expr, usize)> {
+        let mut newlines = 0;
+        self.0
+            .children_with_tokens()
+            .filter_map(move |element| match element {
+                rowan::NodeOrToken::Token(token) if token.kind() == SyntaxKind::NEWLINE => {
+                    newlines += 1;
+                    None
+                }
+                rowan::NodeOrToken::Node(node) => {
+                    Expr::cast(node).map(|expr| (expr, std::mem::take(&mut newlines)))
+                }
+                _ => None,
+            })
+    }
 }
 
 impl MacroName {
@@ -855,6 +919,41 @@ impl Signature {
     }
 }
 
+impl PrimitiveDef {
+    /// The bit-width expression after the type signature. Its value may depend
+    /// on runtime evaluation; this accessor only exposes the syntax.
+    pub fn bit_width(&self) -> Option<Expr> {
+        support::child(&self.0)
+    }
+}
+
+impl ReturnExpr {
+    /// The returned expression, absent for a bare `return`.
+    pub fn value(&self) -> Option<Expr> {
+        support::child(&self.0)
+    }
+}
+
+impl BreakExpr {
+    /// The target label, including `_`, quoted names, or interpolated names.
+    /// Absent for an unlabeled `break`.
+    pub fn label(&self) -> Option<Expr> {
+        support::child(&self.0)
+    }
+
+    /// The optional value following the target label.
+    pub fn value(&self) -> Option<Expr> {
+        support::children(&self.0).nth(1)
+    }
+}
+
+impl ContinueExpr {
+    /// The target label, absent for an unlabeled `continue`.
+    pub fn label(&self) -> Option<Expr> {
+        support::child(&self.0)
+    }
+}
+
 impl ModuleDef {
     /// The module's name, e.g. `M` in `module M ... end`. (The body is
     /// [`HasBody::body`](crate::ast::traits::HasBody::body).)
@@ -919,6 +1018,110 @@ mod tests {
             .syntax()
             .text()
             .to_string()
+    }
+
+    #[test]
+    fn primitive_bit_width_excludes_the_signature() {
+        let primitive: PrimitiveDef = find("primitive type P{T} <: S\n7\nend\n");
+        assert_eq!(expr_text(primitive.bit_width()), "7");
+        let incomplete: PrimitiveDef = find("primitive type P end\n");
+        assert!(incomplete.bit_width().is_none());
+    }
+
+    #[test]
+    fn exit_labels_and_values_are_distinct() {
+        let bare: BreakExpr = find("break\n");
+        assert!(bare.label().is_none());
+        assert!(bare.value().is_none());
+        let labeled: BreakExpr = find("break outer result\n");
+        assert_eq!(expr_text(labeled.label()), "outer");
+        assert_eq!(expr_text(labeled.value()), "result");
+        let quoted: BreakExpr = find("break var\"a b\"\n");
+        assert!(matches!(
+            quoted.label(),
+            Some(Expr::NonstandardIdentifier(_))
+        ));
+        assert!(quoted.value().is_none());
+        let interpolated: BreakExpr = find("break $label\n");
+        assert!(matches!(interpolated.label(), Some(Expr::Interpolation(_))));
+        let bare: ContinueExpr = find("continue\n");
+        assert!(bare.label().is_none());
+        let labeled: ContinueExpr = find("continue _\n");
+        assert_eq!(expr_text(labeled.label()), "_");
+    }
+
+    #[test]
+    fn return_values_include_index_markers() {
+        let bare: ReturnExpr = find("return\n");
+        assert!(bare.value().is_none());
+        let ret: ReturnExpr = find("return result\n");
+        assert_eq!(expr_text(ret.value()), "result");
+        let begin: ReturnExpr = find("a[return begin]\n");
+        assert!(matches!(begin.value(), Some(Expr::BeginMarker(_))));
+        let end: ReturnExpr = find("a[return end]\n");
+        assert!(matches!(end.value(), Some(Expr::EndMarker(_))));
+        let index: IndexExpr = find("a[begin, end]\n");
+        let args: Vec<_> = index
+            .arg_list()
+            .unwrap()
+            .args()
+            .filter_map(|arg| arg.expr())
+            .collect();
+        assert!(matches!(args[0], Expr::BeginMarker(_)));
+        assert!(matches!(args[1], Expr::EndMarker(_)));
+    }
+
+    #[test]
+    fn macro_newline_separators_exclude_nested_and_trailing_newlines() {
+        assert_eq!(
+            find::<MacroCall>("(@doc x\n\ny z)\n")
+                .space_args_with_newlines()
+                .map(|(_, newlines)| newlines)
+                .collect::<Vec<_>>(),
+            [0, 2, 0],
+        );
+        for src in ["(@m x\ny)\n", "(@m\nx)\n", "(@m x # comment\ny)\n"] {
+            for src in [src.to_string(), src.replace('\n', "\r\n")] {
+                assert!(
+                    find::<MacroCall>(&src).has_newline_separated_args(),
+                    "{src:?}"
+                );
+            }
+        }
+        for src in [
+            "(@m x\n)\n",
+            "(@m(x,\ny))\n",
+            "(@m f(\nx))\n",
+            "(@m begin\nx\nend)\n",
+            "(@m x #= a\nb =# y)\n",
+        ] {
+            assert!(
+                !find::<MacroCall>(src).has_newline_separated_args(),
+                "{src:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ternary_colon_newline_excludes_expression_and_comment_contents() {
+        for src in ["(x ? return\n: y)\n", "(x ? return a # comment\n: y)\n"] {
+            for src in [src.to_string(), src.replace('\n', "\r\n")] {
+                assert!(
+                    find::<TernaryExpr>(&src).has_newline_before_colon(),
+                    "{src:?}"
+                );
+            }
+        }
+        for src in [
+            "x ? return : y\n",
+            "x ? return #= a\nb =# : y\n",
+            "x ? return f(\na) : y\n",
+        ] {
+            assert!(
+                !find::<TernaryExpr>(src).has_newline_before_colon(),
+                "{src:?}"
+            );
+        }
     }
 
     #[test]
