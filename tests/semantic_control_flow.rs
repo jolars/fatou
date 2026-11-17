@@ -99,6 +99,55 @@ fn unrelated_macros_and_label_interpolations_keep_their_reads() {
 }
 
 #[test]
+fn shadowed_control_macros_keep_ordinary_keyword_argument_semantics() {
+    for src in [
+        "macro label(x)\n    x\nend\n@label(x = value)\nuse(x)\n",
+        "@label(x = value)\nmacro label(x)\n    x\nend\nuse(x)\n",
+        "@label(x = value)\nimport Custom: @label\nuse(x)\n",
+        "@wrapper import Custom: @label\n@label(x = value)\nuse(x)\n",
+        "@label(x = value)\n@wrapper import Custom: @label\nuse(x)\n",
+    ] {
+        let m = model(src);
+        assert!(m.free_reads().any(|read| read.name == "x"), "{src}");
+        assert!(
+            !m.bindings().iter().any(|binding| binding.name == "x"
+                && binding.kind != fatou::semantic::BindingKind::Param),
+            "a keyword argument must not declare x: {src}"
+        );
+    }
+}
+
+#[test]
+fn qualified_control_macros_respect_value_namespace_masking() {
+    for called in ["Base.@label", "@Base.goto"] {
+        let src = format!("function f(Base)\n    x = 1\n    {called} x\nend\n");
+        let m = model(&src);
+        assert!(
+            m.bindings()
+                .iter()
+                .any(|binding| binding.name == "x" && binding.read),
+            "{src}"
+        );
+    }
+    // A same-named macro does not mask an explicit Base qualification.
+    let m = model("macro label(x)\n    x\nend\nfunction f()\n    x = 1\n    Base.@label x\nend\n");
+    assert!(m.bindings().iter().any(|binding| binding.name == "x"
+        && !binding.read
+        && binding.kind != fatou::semantic::BindingKind::Param));
+}
+
+#[test]
+fn labeled_bodies_hoist_imports_before_recognizing_other_macro_contracts() {
+    let m = model("@label begin\n    using Test\nend\n@testset begin\n    x = 1\nend\n");
+    let x = m
+        .bindings()
+        .iter()
+        .find(|binding| binding.name == "x")
+        .unwrap();
+    assert_eq!(x.kind, fatou::semantic::BindingKind::Local);
+}
+
+#[test]
 fn parenthesized_break_values_assign_without_changing_named_tuple_fields() {
     let m = model(
         "function f(value)\n    @label done begin\n        break done (x = value; y = x; (; field = y))\n    end\nend\n",

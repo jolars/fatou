@@ -30,7 +30,7 @@ use rowan::ast::AstNode as _;
 use crate::ast::{AstToken as _, CallExpr, body_of};
 use crate::linter::diagnostic::Diagnostic;
 use crate::linter::rules::{Example, Rule, RuleContext};
-use crate::semantic::ControlFlowGraph;
+use crate::semantic::{ControlFlowGraph, cfg::flow_children};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
 pub struct UnreachableCode;
@@ -54,10 +54,7 @@ fn region_body(owner: &SyntaxNode) -> Option<SyntaxNode> {
 fn terminators_confirmed(ctx: &RuleContext<'_>, body: &SyntaxNode) -> bool {
     let mut stack = vec![body.clone()];
     while let Some(node) = stack.pop() {
-        for child in node.children() {
-            if is_region_owner(child.kind()) {
-                continue;
-            }
+        for child in flow_children(&node) {
             if child.kind() == SyntaxKind::CALL_EXPR
                 && let Some(call) = CallExpr::cast(child.clone())
                 && call
@@ -71,18 +68,6 @@ fn terminators_confirmed(ctx: &RuleContext<'_>, body: &SyntaxNode) -> bool {
         }
     }
     true
-}
-
-/// Whether a node of this kind owns a flow region of its own (mirrors the
-/// control-flow graph's own region boundaries).
-fn is_region_owner(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::FUNCTION_DEF
-            | SyntaxKind::MACRO_DEF
-            | SyntaxKind::DO_EXPR
-            | SyntaxKind::MODULE_DEF
-    )
 }
 
 /// The head statement of each of this graph's unreachable blocks.

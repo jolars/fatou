@@ -489,6 +489,41 @@ fn unused_binding_distinguishes_control_labels_from_break_values() {
 }
 
 #[test]
+fn unused_binding_reads_arguments_of_shadowed_control_macros() {
+    for name in ["label", "goto"] {
+        for declaration in [
+            format!("macro {name}(x)\n    esc(x)\nend"),
+            format!("import Custom: @{name}"),
+            format!("using Custom: @{name}"),
+            format!("import Custom.@{name}"),
+            format!("import Custom: @other as @{name}"),
+        ] {
+            for src in [
+                format!("{declaration}\nfunction f()\n    x = 1\n    @{name} x\nend\n"),
+                format!("function f()\n    x = 1\n    @{name} x\nend\n{declaration}\n"),
+            ] {
+                assert_eq!(count("unused-binding", &src), 0, "{src}");
+            }
+        }
+    }
+}
+
+#[test]
+fn unused_binding_keeps_explicit_base_control_macro_contracts() {
+    for load in [
+        "import Base: @label",
+        "using Base: @label",
+        "import Base.@label",
+    ] {
+        let src = format!("{load}\nfunction f()\n    x = 1\n    @label x\nend\n");
+        assert_eq!(count("unused-binding", &src), 1, "{src}");
+    }
+    // The value and macro namespaces mask independently.
+    let src = "function f(label)\n    x = 1\n    @label x\nend\n";
+    assert_eq!(count("unused-binding", src), 1);
+}
+
+#[test]
 fn unused_binding_flags_let_var() {
     assert_eq!(count("unused-binding", "let a = 1\n    2\nend\n"), 1);
 }
@@ -4532,6 +4567,35 @@ fn unreachable_code_uses_named_and_anonymous_block_exits() {
 }
 
 #[test]
+fn unreachable_code_preserves_conditional_operands_and_function_boundaries() {
+    for src in [
+        "function f()\n    if a < b < (return 0; c)\n        work()\n    end\n    alive()\nend\n",
+        "function f()\n    for i in xs, j in (return 0; ys)\n    end\n    alive()\nend\n",
+        "function f()\n    @label done begin\n        [x for x in (break done; xs)]\n        return\n    end\n    alive()\nend\n",
+        "function f()\n    @label done begin\n        map((break done; xs)) do x\n            x\n        end\n        return\n    end\n    alive()\nend\n",
+        "function f()\n    @label done begin\n        ready && (break done) && return\n        return\n    end\n    alive()\nend\n",
+        "function f()\n    @label done (x + y = (return 1))\n    alive()\nend\n",
+    ] {
+        let config = LintConfig {
+            select: Some(vec!["unreachable-code".to_string()]),
+            ..Default::default()
+        };
+        let report = check_source(None, src, &config);
+        for diagnostic in &report.diagnostics {
+            if diagnostic.rule == "unreachable-code" {
+                // Expressions after a return/break in the same operand really
+                // are dead, as is the return after an unconditional block exit.
+                let text = &src[diagnostic.range];
+                assert!(
+                    matches!(text, "c" | "ys" | "xs" | "return"),
+                    "{text}: {src}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn unreachable_code_reports_a_dead_run_once() {
     // Three dead statements are one dead block, so one finding at its head.
     assert_eq!(
@@ -4589,6 +4653,8 @@ fn unreachable_code_ignores_a_shadowed_terminator_name() {
     for src in [
         "function f(throw)\n    throw(1)\n    tail()\nend\n",
         "function f()\n    error = identity\n    error(\"x\")\n    tail()\nend\n",
+        "function f(error)\n    @label done begin\n        map(error()) do x\n            x\n        end\n    end\n    alive()\nend\n",
+        "function f(error)\n    @label done (map(error()) do x\n        x\n    end)\n    alive()\nend\n",
     ] {
         assert_eq!(
             count("unreachable-code", src),

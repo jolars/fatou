@@ -408,6 +408,100 @@ fn elseif_conditions_and_short_circuit_left_operands_keep_labeled_exits() {
 }
 
 #[test]
+fn chained_comparisons_skip_later_operands() {
+    for condition in ["a < b < (return 0; c)", "a < b < c < (return 0; d)"] {
+        let src = format!(
+            "function f()\n    if {condition}\n        work()\n    end\n    alive()\nend\n"
+        );
+        assert!(!unreachable(&src, "alive()"), "{condition}");
+    }
+    // The first two operands execute even when the comparison is false.
+    for condition in ["(return 0; a) < b < c", "a < (return 0; b) < c"] {
+        let src =
+            format!("function f()\n    if {condition}\n        work()\n    end\n    dead()\nend\n");
+        assert!(unreachable(&src, "dead()"), "{condition}");
+    }
+}
+
+#[test]
+fn later_for_iterators_only_execute_after_an_outer_iteration() {
+    for bindings in [
+        "i in xs, j in (return 0; ys)",
+        "i in xs, j in ys, k in (return 0; zs)",
+    ] {
+        let src = format!(
+            "function f()\n    for {bindings}\n        work()\n    end\n    alive()\nend\n"
+        );
+        assert!(!unreachable(&src, "alive()"), "{bindings}");
+        assert!(unreachable(&src, "work()"), "{bindings}");
+    }
+    let src = "function f()\n    for i in (return 0; xs), j in ys\n        work()\n    end\n    dead()\nend\n";
+    assert!(unreachable(src, "dead()"));
+}
+
+#[test]
+fn eager_closure_operands_keep_enclosing_block_exits() {
+    for operand in [
+        "[x for x in (break done; xs)]",
+        "T[x for x in (break done; xs)]",
+        "(x for x in (break done; xs))",
+        "(break done; T)[x for x in xs]",
+        "map((break done; xs)) do x\n        return x\n    end",
+    ] {
+        let src = format!(
+            "function f()\n    @label done begin\n        {operand}\n        return\n    end\n    alive()\nend\n"
+        );
+        assert!(!unreachable(&src, "alive()"), "{operand}");
+    }
+}
+
+#[test]
+fn closure_bodies_do_not_exit_enclosing_labeled_blocks() {
+    for operand in [
+        "[(break done; x) for x in xs]",
+        "[x for x in xs, y in (break done; ys)]",
+        "[x for x in xs if (break done; true)]",
+        "map(xs) do x\n        break done\n    end",
+    ] {
+        let src = format!(
+            "function f()\n    @label done begin\n        {operand}\n        return\n    end\n    dead()\nend\n"
+        );
+        assert!(unreachable(&src, "dead()"), "{operand}");
+    }
+}
+
+#[test]
+fn intermediate_short_circuit_operands_keep_their_exits() {
+    for operator in ["&&", "||"] {
+        for chain in [
+            format!("ready {operator} (break done) {operator} return"),
+            format!("ready {operator} more {operator} (break done) {operator} return"),
+        ] {
+            let src = format!(
+                "function f()\n    @label done begin\n        {chain}\n        return\n    end\n    alive()\nend\n"
+            );
+            assert!(!unreachable(&src, "alive()"), "{chain}");
+        }
+    }
+}
+
+#[test]
+fn infix_method_bodies_do_not_execute_when_defined() {
+    for definition in [
+        "x + y = (return 1)",
+        "x == y = (return 1)",
+        "x::T + y::T = (return 1)",
+        "g(x) = (return 1)",
+    ] {
+        let src = format!("function f()\n    @label done ({definition})\n    alive()\nend\n");
+        assert!(!unreachable(&src, "alive()"), "{definition}");
+    }
+    // Field assignment still evaluates its value.
+    let src = "function f()\n    @label done (x.y = (return 1))\n    dead()\nend\n";
+    assert!(unreachable(src, "dead()"));
+}
+
+#[test]
 fn goto_jumps_backward_to_its_label() {
     assert_snapshot!(cfg_dump(
         "function f()\n    @label top\n    step()\n    @goto top\nend\n"

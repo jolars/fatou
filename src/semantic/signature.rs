@@ -5,7 +5,21 @@
 //! package [`index`](crate::index) harvester, which extracts the same shapes
 //! without building a full scope model.
 
-use crate::syntax::{SyntaxKind, SyntaxNode};
+use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
+
+/// The operator named by an infix method signature (`x + y = body`). Field
+/// assignments and chained comparisons are not method definitions.
+pub(crate) fn infix_def_operator(lhs: &SyntaxNode) -> Option<SyntaxToken> {
+    let core = peel_signature(lhs.clone()).0?;
+    if core.kind() != SyntaxKind::BINARY_EXPR {
+        return None;
+    }
+    let op = core
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| token.kind().is_operator())?;
+    (op.kind() != SyntaxKind::DOT).then_some(op)
+}
 
 /// Split a `TYPE_ANNOTATION` into the annotated pattern (absent for the
 /// unnamed-argument form `::Int`, where `::` precedes the only child) and

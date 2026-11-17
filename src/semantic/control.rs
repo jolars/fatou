@@ -6,6 +6,8 @@ use smol_str::SmolStr;
 use crate::ast::{Arg, AstNode, AstToken, Expr, HasArgList, KeywordArg, MacroCall};
 use crate::syntax::SyntaxNode;
 
+use super::{BindingKind, ScopeId, SemanticModel};
+
 #[derive(Clone)]
 pub(super) enum ControlBody {
     Expr(Expr),
@@ -46,8 +48,58 @@ pub(super) enum ControlMacro {
     },
 }
 
+impl SemanticModel {
+    /// Apply the built-in contract only after checking file-local masking in
+    /// the appropriate namespace. Unknown macros keep ordinary argument reads.
+    pub(super) fn control_macro(&self, call: &MacroCall, scope: ScopeId) -> Option<ControlMacro> {
+        let control = control_macro(call)?;
+        let name = call.name()?;
+        let parts: Vec<_> = name.ident_tokens().collect();
+        let (lookup, simple, qualified) = match parts.as_slice() {
+            [simple] => (simple.text(), simple.text(), false),
+            [owner, simple] => (owner.text(), simple.text(), true),
+            _ => return None,
+        };
+        let Some(id) = self.resolve_name(lookup, scope, !qualified) else {
+            return Some(control);
+        };
+        let binding = self.binding(id);
+        if binding.kind != BindingKind::Import {
+            return None;
+        }
+        // An explicit import masks the implicit Base macro unless it imports
+        // that same macro (or, for a qualified call, the Base module itself).
+        self.module_loads
+            .iter()
+            .any(|load| {
+                if load.scope != binding.scope
+                    || !load.range.contains_range(binding.def_range)
+                    || load.path.leading_dots != 0
+                {
+                    return false;
+                }
+                if qualified {
+                    return load.items.is_none() && load.path.components.as_slice() == ["Base"];
+                }
+                if let Some(items) = &load.items {
+                    load.path.components.as_slice() == ["Base"]
+                        && items.iter().any(|item| {
+                            item.name.strip_prefix('@') == Some(simple)
+                                && item.range.contains_range(binding.def_range)
+                        })
+                } else {
+                    load.path.components.len() == 2
+                        && load.path.components[0] == "Base"
+                        && load.path.components[1].strip_prefix('@') == Some(simple)
+                }
+            })
+            .then_some(control)
+    }
+}
+
 /// Recognize the built-in spellings, including parenthesized arguments and
-/// `Base.@label` / `@Base.label`. Unrelated qualified macros stay opaque.
+/// `Base.@label` / `@Base.label`. This is syntactic recognition for the CFG;
+/// binding analysis uses [`SemanticModel::control_macro`] to check masking.
 pub(super) fn control_macro(call: &MacroCall) -> Option<ControlMacro> {
     let name = call.name()?;
     let parts: Vec<_> = name.ident_tokens().collect();

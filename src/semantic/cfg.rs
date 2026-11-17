@@ -49,7 +49,9 @@ use rowan::TextRange;
 use rowan::ast::AstNode as _;
 use smol_str::SmolStr;
 
-use crate::ast::{Arg, AstToken as _, CallExpr, Expr, MacroCall, body_of, condition_of};
+use crate::ast::{
+    Arg, AstToken as _, CallExpr, Expr, ForBinding, MacroCall, body_of, condition_of,
+};
 use crate::syntax::{NodePtr, SyntaxElement, SyntaxKind, SyntaxNode};
 
 use super::control::{ControlMacro, control_macro, label_name};
@@ -580,14 +582,7 @@ impl Builder {
             SyntaxKind::BINARY_EXPR => {
                 self.push_stmt(cur, node.text_range());
                 match short_circuit_jump(node) {
-                    Some((jump_node, jump))
-                        if !node
-                            .children()
-                            .next()
-                            .is_some_and(|lhs| contains_labeled_flow(&lhs)) =>
-                    {
-                        self.lower_conditional_jump(cur, &jump_node, &jump)
-                    }
+                    Some((jump_node, jump)) => self.lower_conditional_jump(cur, &jump_node, &jump),
                     _ => self.lower_embedded_flow(node, cur),
                 }
             }
@@ -700,8 +695,34 @@ impl Builder {
                     .map_or(Some(else_blk), |arm| self.lower_value(&arm, else_blk));
                 self.join(&[then_exit, else_exit])
             }
+            SyntaxKind::COMPARISON_EXPR => {
+                let mut skipped = Vec::new();
+                for (index, operand) in node.children().enumerate() {
+                    // Only the first pair is eager. Each later operand runs
+                    // if all preceding comparisons succeeded.
+                    if index >= 2 {
+                        let taken = self.new_block();
+                        let fallthrough = self.new_block();
+                        self.set_term(
+                            cur,
+                            Terminator::Branch {
+                                then_blk: taken,
+                                else_blk: fallthrough,
+                            },
+                        );
+                        skipped.push(Some(fallthrough));
+                        cur = taken;
+                    }
+                    match self.lower_value(&operand, cur) {
+                        Some(exit) => cur = exit,
+                        None => return self.join(&skipped),
+                    }
+                }
+                skipped.push(Some(cur));
+                self.join(&skipped)
+            }
             _ => {
-                for child in node.children() {
+                for child in flow_children(node) {
                     cur = self.lower_value(&child, cur)?;
                 }
                 if matches!(jump_of(node), Some(Jump::Diverge)) {
@@ -815,8 +836,9 @@ impl Builder {
         let header = self.new_block();
         let after = self.new_block();
         let body_blk = self.new_block();
-        let loop_ctx = LoopCtx { header, after };
+        let mut loop_ctx = LoopCtx { header, after };
         self.exit_scopes.push(ExitScope::Loop(loop_ctx));
+        let mut empty_target = after;
         let header_exit = if node.kind() == SyntaxKind::WHILE_EXPR {
             self.set_term(cur, Terminator::Goto(header));
             match condition_of(node) {
@@ -824,18 +846,39 @@ impl Builder {
                 None => Some(header),
             }
         } else {
-            // A for iterator is evaluated once, before entering its header.
-            let mut exit = Some(cur);
-            for binding in node
+            let mut iterables = node
                 .children()
                 .filter(|child| child.kind() == SyntaxKind::FOR_BINDING)
-            {
-                exit = exit.and_then(|cur| self.lower_value(&binding, cur));
-            }
-            if let Some(exit) = exit {
+                .flat_map(|binding| binding.children().skip(1).step_by(2));
+            // The first iterator executes even for an empty loop. Later ones
+            // initialize only after the preceding iterator yields an element.
+            let first_exit = iterables
+                .next()
+                .map_or(Some(cur), |iterable| self.lower_value(&iterable, cur));
+            if let Some(exit) = first_exit {
                 self.set_term(exit, Terminator::Goto(header));
             }
-            exit.map(|_| header)
+            let mut test_exit = first_exit.map(|_| header);
+            for iterable in iterables {
+                let Some(test) = test_exit else { break };
+                let init = self.new_block();
+                self.set_term(
+                    test,
+                    Terminator::Branch {
+                        then_blk: init,
+                        else_blk: empty_target,
+                    },
+                );
+                empty_target = test;
+                let exit = self.lower_value(&iterable, init);
+                let inner_header = self.new_block();
+                if let Some(exit) = exit {
+                    self.set_term(exit, Terminator::Goto(inner_header));
+                }
+                loop_ctx.header = inner_header;
+                test_exit = exit.map(|_| inner_header);
+            }
+            test_exit
         };
         if let Some(exit) = header_exit {
             let term = if never_exits {
@@ -843,21 +886,22 @@ impl Builder {
             } else {
                 Terminator::Branch {
                     then_blk: body_blk,
-                    else_blk: after,
+                    else_blk: empty_target,
                 }
             };
             self.set_term(exit, term);
         }
+        *self.exit_scopes.last_mut().expect("loop scope") = ExitScope::Loop(loop_ctx);
         // Named continue applies to the syntactic loop's body, rather than
         // the iterator or condition expression.
         if labeled {
             let outer = self.exit_scopes.len() - 2;
             if let ExitScope::Block { continue_to, .. } = &mut self.exit_scopes[outer] {
-                *continue_to = Some(header);
+                *continue_to = Some(loop_ctx.header);
             }
         }
         if let Some(exit) = self.lower_seq(&stmts, body_blk) {
-            self.set_term(exit, Terminator::Goto(header)); // back-edge
+            self.set_term(exit, Terminator::Goto(loop_ctx.header)); // back-edge
         }
         self.exit_scopes.pop();
 
@@ -1111,22 +1155,49 @@ fn is_opaque_macro(node: &SyntaxNode) -> bool {
 
 /// Closures and quoted code do not execute as part of the enclosing flow.
 fn is_flow_boundary(node: &SyntaxNode) -> bool {
-    is_region_owner(node.kind())
+    (is_region_owner(node.kind()) && node.kind() != SyntaxKind::DO_EXPR)
         || matches!(
             node.kind(),
-            SyntaxKind::ARROW_EXPR
-                | SyntaxKind::QUOTE_EXPR
-                | SyntaxKind::QUOTE_SYM
-                | SyntaxKind::GENERATOR
-                | SyntaxKind::COMPREHENSION
-                | SyntaxKind::TYPED_COMPREHENSION
-                | SyntaxKind::BRACES_COMPREHENSION
+            SyntaxKind::ARROW_EXPR | SyntaxKind::QUOTE_EXPR | SyntaxKind::QUOTE_SYM
         )
         || (node.kind() == SyntaxKind::ASSIGNMENT_EXPR
-            && node
-                .children()
-                .next()
-                .is_some_and(|lhs| super::signature::has_call_core(&lhs)))
+            && node.children().next().is_some_and(|lhs| {
+                super::signature::has_call_core(&lhs)
+                    || super::signature::infix_def_operator(&lhs).is_some()
+            }))
+}
+
+/// Children evaluated in the enclosing flow. Closure bodies, filters, and
+/// later comprehension iterators belong to the closure's own flow instead.
+/// Shared with the linter's namespace confirmation so it checks the same calls
+/// that can produce CFG divergences.
+pub(crate) fn flow_children(node: &SyntaxNode) -> impl Iterator<Item = SyntaxNode> {
+    let kind = node.kind();
+    let mut seen_binding = false;
+    let children = (!is_flow_boundary(node)).then(|| node.children());
+    children.into_iter().flatten().filter_map(move |child| {
+        match kind {
+            SyntaxKind::DO_EXPR => {
+                (!matches!(child.kind(), SyntaxKind::DO_PARAMS | SyntaxKind::BLOCK))
+                    .then_some(child)
+            }
+            SyntaxKind::GENERATOR
+            | SyntaxKind::COMPREHENSION
+            | SyntaxKind::BRACES_COMPREHENSION => {
+                if child.kind() == SyntaxKind::FOR_BINDING && !seen_binding {
+                    seen_binding = true;
+                    ForBinding::cast(child)?
+                        .iterable()
+                        .map(|expr| expr.syntax().clone())
+                } else {
+                    None
+                }
+            }
+            // A typed comprehension contains the eager type expression and a
+            // generator, whose own traversal selects its outer iterator.
+            _ => Some(child),
+        }
+    })
 }
 
 fn contains_labeled_flow(node: &SyntaxNode) -> bool {
@@ -1141,14 +1212,14 @@ fn contains_labeled_flow(node: &SyntaxNode) -> bool {
             MacroCall::cast(node.clone()).and_then(|call| control_macro(&call)),
             Some(ControlMacro::Block { .. })
         )
-        || node.children().any(|child| contains_labeled_flow(&child))
+        || flow_children(node).any(|child| contains_labeled_flow(&child))
 }
 
 /// Whether `body` contains a macro call other than `@goto`/`@label`, excluding
 /// nested regions. Such a call expands to statements this graph cannot see, so
 /// it may hide a jump — see [`reachable_from`] and [`Builder::lower_loop`].
 fn contains_opaque_macro(body: &SyntaxNode) -> bool {
-    body.children().any(|child| {
+    flow_children(body).any(|child| {
         if is_flow_boundary(&child) {
             return false;
         }
@@ -1159,7 +1230,7 @@ fn contains_opaque_macro(body: &SyntaxNode) -> bool {
 /// The labels `@label` defines inside `body`, excluding those in nested regions
 /// — Julia requires a `@goto` and its `@label` to share a function.
 fn collect_labels(body: &SyntaxNode, out: &mut HashSet<SmolStr>) {
-    for child in body.children() {
+    for child in flow_children(body) {
         if is_flow_boundary(&child) {
             continue;
         }
@@ -1177,6 +1248,15 @@ fn collect_labels(body: &SyntaxNode, out: &mut HashSet<SmolStr>) {
 /// right side.
 fn short_circuit_jump(node: &SyntaxNode) -> Option<(SyntaxNode, Jump)> {
     if !is_short_circuit(node) {
+        return None;
+    }
+    // Every preceding operand matters, including intermediate left operands
+    // in a right-associated chain. Lower the expression when one has an exit.
+    if node
+        .children()
+        .next()
+        .is_some_and(|lhs| contains_labeled_flow(&lhs))
+    {
         return None;
     }
     let rhs = node.children().nth(1)?;

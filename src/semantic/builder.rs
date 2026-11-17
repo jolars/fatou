@@ -25,7 +25,9 @@ use super::import::{
     ExportEntry, ImportItem, LoadKind, ModuleLoad, ModulePath, QualifiedRead, Visibility,
 };
 use super::scope::{Scope, ScopeId, ScopeKind};
-use super::signature::{annotation_parts, has_call_core, peel_signature, type_name_of};
+use super::signature::{
+    annotation_parts, has_call_core, infix_def_operator, peel_signature, type_name_of,
+};
 use super::{Access, IdentRef, SemanticDoc, SemanticModel};
 
 pub(crate) fn build(root: &SyntaxNode) -> SemanticModel {
@@ -242,22 +244,6 @@ fn is_field_access(node: &SyntaxNode) -> bool {
             .children_with_tokens()
             .filter_map(|e| e.into_token())
             .any(|t| t.kind() == SyntaxKind::DOT)
-}
-
-/// The operator token of an infix operator method definition's left-hand side:
-/// `a OP b = body` (`a::T + b = ...`, `a == b = ...`), where `OP` names the
-/// function the definition introduces or extends. `where` and return-type
-/// layers are peeled first. Field access (`a.b = v`) is a setproperty target,
-/// not a definition, so it is excluded. Chained comparisons (`a < b < c`, a
-/// `COMPARISON_EXPR`) are not valid signatures and are excluded too.
-fn infix_def_operator(lhs: &SyntaxNode) -> Option<SyntaxToken> {
-    let core = peel_signature(lhs.clone()).0?;
-    if core.kind() != SyntaxKind::BINARY_EXPR || is_field_access(&core) {
-        return None;
-    }
-    core.children_with_tokens()
-        .filter_map(|e| e.into_token())
-        .find(|t| t.kind().is_operator())
 }
 
 /// The identifier token of a `NAME` node, via the shared [`Name::ident`] typed
@@ -575,8 +561,8 @@ struct Builder {
     /// Names declared `global` per scope (builder-transient, parallel to
     /// `model.scopes`).
     global_decls: Vec<Vec<SmolStr>>,
-    /// Potential Test scope contracts wait until ordinary declarations have
-    /// been hoisted, so a later local can mask a qualified Test call.
+    /// Potential macro contracts wait until ordinary declarations have been
+    /// hoisted, so later bindings can mask built-in or Test macros.
     pending_macros: Vec<(MacroCall, ScopeId)>,
     /// Keep declaration and read traversal on the same scope contract.
     testsets: HashSet<TextRange>,
@@ -901,11 +887,18 @@ impl Builder {
                 let call = MacroCall::cast(node.clone()).unwrap();
                 if let Some(control) = control_macro(&call) {
                     if let ControlMacro::Block { body, .. } = control {
-                        match body {
-                            ControlBody::Expr(_) => self.declare_node(body.syntax(), scope),
-                            ControlBody::Assignment(_) => {
-                                self.declare_assignment(body.syntax(), scope)
-                            }
+                        if matches!(
+                            body.syntax().kind(),
+                            SyntaxKind::ASSIGNMENT_EXPR | SyntaxKind::KEYWORD_ARG
+                        ) {
+                            // An assignment may instead be an ordinary macro's
+                            // keyword argument. Wait for all masking bindings.
+                            self.pending_macros.push((call, scope));
+                        } else {
+                            // Other bodies have the same declarations under
+                            // either interpretation. Hoist them now so imports
+                            // are available to subsequent macro contracts.
+                            self.declare_node(body.syntax(), scope);
                         }
                     }
                 } else if self.model.is_test_macro(&call, scope, "testset")
@@ -1102,9 +1095,12 @@ impl Builder {
     fn finish_macro_declarations(&mut self) {
         while !self.pending_macros.is_empty() {
             let mut testsets = Vec::new();
+            let mut controls = Vec::new();
             let mut declared_ordinary = false;
             for (call, scope) in std::mem::take(&mut self.pending_macros) {
-                if self.model.is_test_macro(&call, scope, "testset")
+                if self.model.control_macro(&call, scope).is_some() {
+                    controls.push((call, scope));
+                } else if self.model.is_test_macro(&call, scope, "testset")
                     && testset_arguments(&call).is_some()
                 {
                     testsets.push((call, scope));
@@ -1113,11 +1109,22 @@ impl Builder {
                     declared_ordinary = true;
                 }
             }
-            // Ordinary macro arguments can contain a declaration that masks
-            // Test, so settle those before accepting any scope contracts.
+            // Ordinary macro arguments can contain declarations that mask
+            // known macros, so settle those before accepting contracts.
             if declared_ordinary || !self.pending_macros.is_empty() {
                 self.pending_macros.extend(testsets);
+                self.pending_macros.extend(controls);
                 continue;
+            }
+            for (call, scope) in controls {
+                if let Some(ControlMacro::Block { body, .. }) =
+                    self.model.control_macro(&call, scope)
+                {
+                    match body {
+                        ControlBody::Expr(_) => self.declare_node(body.syntax(), scope),
+                        ControlBody::Assignment(_) => self.declare_assignment(body.syntax(), scope),
+                    }
+                }
             }
             for (call, scope) in testsets {
                 self.testsets.insert(call.syntax().text_range());
@@ -2341,7 +2348,7 @@ impl Builder {
     /// resolve to a local macro of the same name.
     fn walk_macro_call(&mut self, node: &SyntaxNode, scope: ScopeId) {
         let call = MacroCall::cast(node.clone()).unwrap();
-        if let Some(control) = control_macro(&call) {
+        if let Some(control) = self.model.control_macro(&call, scope) {
             if let Some(name) = call.name() {
                 self.walk_macro_name(name.syntax(), scope);
             }
