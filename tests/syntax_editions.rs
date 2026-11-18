@@ -398,6 +398,39 @@ fn cli_with_project(
     child.wait_with_output().unwrap()
 }
 
+#[cfg(unix)]
+#[test]
+fn cli_matches_an_explicit_project_through_a_directory_symlink() {
+    let dir = tempfile::tempdir().unwrap();
+    let package = dir.path().join("Foo");
+    let alias = dir.path().join("alias");
+    std::fs::create_dir_all(package.join("src")).unwrap();
+    std::os::unix::fs::symlink(&package, &alias).unwrap();
+    std::fs::write(
+        package.join("Project.toml"),
+        "name = 'Foo'\n[syntax]\njulia_version = '1.13'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        package.join("JuliaProject.toml"),
+        "name = 'Foo'\n[syntax]\njulia_version = '1.14'\n",
+    )
+    .unwrap();
+    std::fs::write(package.join("src/Foo.jl"), "typegroup() = 1\n").unwrap();
+
+    let output = cli_with_project(
+        &alias,
+        &["format", "--check", "src/Foo.jl"],
+        None,
+        Some(&alias.join("Project.toml")),
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn cli_uses_only_the_selected_project_in_the_package_directory() {
     let dir = tempfile::tempdir().unwrap();
