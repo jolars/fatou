@@ -434,22 +434,10 @@ fn from_julia_project(value: &str, ctx: &EnvContext, depots: &[PathBuf]) -> Opti
             .find_map(|depot| project_file_in(&depot.join("environments").join(name)));
     }
     let path = PathBuf::from(value);
-    let project = if path.is_file() {
-        path
-    } else {
-        project_file_in(&path)?
-    };
-    // Unix getcwd resolves directory aliases (such as macOS's /var).
-    // Match that spelling for absolute selections while keeping the selected
-    // filename, which may differ from the directory's default project file.
-    #[cfg(unix)]
-    if project.is_absolute()
-        && let (Some(directory), Some(name)) = (project.parent(), project.file_name())
-        && let Ok(directory) = directory.canonicalize()
-    {
-        return Some(directory.join(name));
+    if path.is_file() {
+        return Some(path);
     }
-    Some(project)
+    project_file_in(&path)
 }
 
 /// Walk up from `anchor` looking for a project file, à la `config::discover`.

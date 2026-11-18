@@ -602,12 +602,27 @@ fn discover_with_roots<'a>(
     )
 }
 
+fn disk_project_path(path: &Path) -> PathBuf {
+    // On Unix, relative CLI targets resolve against getcwd's physical path.
+    // Resolve an absolute project directory the same way, keeping the selected
+    // filename. Live workspace paths retain the spelling supplied by the client.
+    #[cfg(unix)]
+    if path.is_absolute()
+        && let (Some(directory), Some(name)) = (path.parent(), path.file_name())
+        && let Ok(directory) = directory.canonicalize()
+    {
+        return directory.join(name);
+    }
+    normalize_path(path)
+}
+
 /// Discover manifest loading roots statically. Local path pins can include
 /// files outside their package, so examine their closures. For installed
 /// packages, only load roots that enclose a target.
 pub(crate) fn manifest_contexts(
     paths: &[PathBuf],
     active_project: Option<&Path>,
+    explicitly_selected: bool,
     mut ctx: EnvContext,
 ) -> (Vec<SourceContext>, BTreeMap<PathBuf, EditionIssue>) {
     use environment::PackageKind;
@@ -620,12 +635,14 @@ pub(crate) fn manifest_contexts(
     if let Some(project) = active_project {
         projects.insert(project.to_path_buf(), paths.iter().collect());
     }
-    for path in paths {
-        ctx.workspace_root.clone_from(path);
-        if let Some(project) = environment::discover_project(&ctx) {
-            let project = normalize_path(&project);
-            if Some(project.as_path()) != active_project {
-                projects.entry(project).or_default().push(path);
+    if !explicitly_selected {
+        for path in paths {
+            ctx.workspace_root.clone_from(path);
+            if let Some(project) = environment::discover_project(&ctx) {
+                let project = normalize_path(&project);
+                if Some(project.as_path()) != active_project {
+                    projects.entry(project).or_default().push(path);
+                }
             }
         }
     }
@@ -810,14 +827,15 @@ impl ContextCatalog {
         let selected = (!paths.is_empty())
             .then(|| environment::explicitly_selected_project(&cwd))
             .flatten()
-            .map(|path| normalize_path(&path));
+            .map(|path| disk_project_path(&path));
         let active = selected.clone().or_else(|| {
             (!paths.is_empty())
                 .then(|| environment::discover_project(&cwd))
                 .flatten()
                 .map(|path| normalize_path(&path))
         });
-        let (manifest_roots, manifest_issues) = manifest_contexts(&paths, active.as_deref(), cwd);
+        let (manifest_roots, manifest_issues) =
+            manifest_contexts(&paths, active.as_deref(), selected.is_some(), cwd);
         let manifest_entries: BTreeSet<_> = manifest_roots
             .iter()
             .map(|root| root.entry.clone())

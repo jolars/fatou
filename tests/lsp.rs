@@ -5479,17 +5479,25 @@ fn a_watched_project_file_change_clears_unresolved_import() {
     let _env = ENV_LOCK.lock().unwrap();
 
     let pkg = TempDir::new("fatou-lsp-watcheddeps");
-    let project = pkg.path.join("Project.toml");
+    let pkg_path = pkg.path.join("workspace");
+    fs::create_dir(&pkg_path).unwrap();
+    #[cfg(unix)]
+    let pkg_path = {
+        let alias = pkg.path.join("alias");
+        std::os::unix::fs::symlink(&pkg_path, &alias).unwrap();
+        alias
+    };
+    let project = pkg_path.join("Project.toml");
     let on_disk = "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n\n[compat]\njulia = \"1.10\"\n";
     write_file(&project, on_disk);
     write_file(
-        &pkg.path.join("src/MyPkg.jl"),
+        &pkg_path.join("src/MyPkg.jl"),
         "module MyPkg\nusing Foo\nend\n",
     );
 
     let depot = TempDir::new("fatou-lsp-watcheddeps-depot");
     let _guard = EnvGuard::set(&[
-        ("JULIA_PROJECT", pkg.path.to_str().unwrap()),
+        ("JULIA_PROJECT", pkg_path.to_str().unwrap()),
         ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
         ("JULIA_BINDIR", ""),
         ("PATH", ""),
@@ -5500,9 +5508,9 @@ fn a_watched_project_file_change_clears_unresolved_import() {
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
     });
-    initialize_with_root(&client, &file_uri(&pkg.path));
+    initialize_with_root(&client, &file_uri(&pkg_path));
 
-    let source_uri = file_uri(&pkg.path.join("src/MyPkg.jl"));
+    let source_uri = file_uri(&pkg_path.join("src/MyPkg.jl"));
     client
         .sender
         .send(Message::Notification(Notification {

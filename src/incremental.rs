@@ -1830,8 +1830,12 @@ impl IncrementalDatabase {
         buffers: &BTreeMap<PathBuf, Arc<str>>,
     ) -> (PathBuf, Vec<SourceContext>, bool) {
         let env = crate::environment::EnvContext::from_process(path.to_path_buf());
-        let (roots, _) =
-            crate::parse_context::manifest_contexts(&[path.to_path_buf()], None, env.clone());
+        let (roots, _) = crate::parse_context::manifest_contexts(
+            &[path.to_path_buf()],
+            None,
+            false,
+            env.clone(),
+        );
         let catalog = crate::parse_context::ContextCatalog::load(&roots, buffers, None);
         let mut contexts: Vec<_> = catalog
             .selections(path)
