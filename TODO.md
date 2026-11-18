@@ -99,7 +99,7 @@
 
 ## Language server
 
-- [ ] Regenerate LaTeX and emoji completions from the locked development Julia's
+- [x] Regenerate LaTeX and emoji completions from the locked development Julia's
   REPL tables. Include the new Unicode 18 subscript sequences `\_w`, `\_y`,
   `\_z`, and `\_pgamma`, and review changed expansions as well as new
   entries. Do not hand-edit `src/lsp/latex_symbols.rs`.

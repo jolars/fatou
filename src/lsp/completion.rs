@@ -478,7 +478,7 @@ fn is_ident_char(c: char) -> bool {
 /// The longest key in either table, capping the backward scan so a stray
 /// backslash far up the line cannot pull in an unbounded run. Pinned by
 /// [`tables_fit_the_scanner`](tests::tables_fit_the_scanner).
-const MAX_SEQUENCE_LEN: usize = 43;
+const MAX_SEQUENCE_LEN: usize = 57;
 
 /// The byte offset of the backslash opening the input sequence `prefix` ends
 /// in, or `None` when it does not end in one.
