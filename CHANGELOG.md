@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.27.0](https://github.com/jolars/fatou/compare/v0.26.1...v0.27.0) (2026-11-18)
+
+### Features
+
+- **lsp:** refresh Julia LaTeX and emoji completions ([`4dad7bd`](https://github.com/jolars/fatou/commit/4dad7bdc2420f75960e7b1f36fdd52aa2c4cc96c))
+- support Julia syntax editions ([`ab70875`](https://github.com/jolars/fatou/commit/ab708758b22519dd6ab7f3d940132cb277c27f6b))
+- **lint:** check Julia 1.14 syntax compatibility ([`532ba18`](https://github.com/jolars/fatou/commit/532ba185b53e776c036a93547dd8f71a0da27401))
+- **semantic:** model labeled control flow ([`95735a8`](https://github.com/jolars/fatou/commit/95735a8a888977a6468f7fd54c1555f96877151f))
+- **docs:** add formatter playground ([`1127125`](https://github.com/jolars/fatou/commit/1127125fdd8144d8c38a84a8ded1b0da85b1de0c))
+
+### Bug Fixes
+
+- classify wrapping broadcasts as mutations ([`bdb639a`](https://github.com/jolars/fatou/commit/bdb639ac0660fd1531e07fbb9795cfc3f58f7800))
+
+### Dependencies
+
+- updated crates/fatou-formatter to v0.9.0
+- updated crates/fatou-parser to v0.10.0
+
 ## [0.26.1](https://github.com/jolars/fatou/compare/v0.26.0...v0.26.1) (2026-11-08)
 
 ### Bug Fixes
