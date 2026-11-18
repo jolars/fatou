@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.10.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.9.0...fatou-parser-v0.10.0) (2026-11-18)
+
+### Breaking changes
+
+- **parser:** expose Julia 1.14 syntax through typed AST ([`054e4ea`](https://github.com/jolars/fatou/commit/054e4ea277c3632b97e5622469691ad96154ca96))
+- **parser:** project JuliaSyntax 2 oracle encodings ([`5792f7d`](https://github.com/jolars/fatou/commit/5792f7d5cae2efa6b30fffb5a64e5d4d7c0e5e75))
+
+### Features
+
+- support Julia syntax editions ([`ab70875`](https://github.com/jolars/fatou/commit/ab708758b22519dd6ab7f3d940132cb277c27f6b))
+- **parser:** expose Julia 1.14 syntax through typed AST ([`054e4ea`](https://github.com/jolars/fatou/commit/054e4ea277c3632b97e5622469691ad96154ca96))
+- **parser:** support Unicode 18 identifiers and suffixes ([`54b8857`](https://github.com/jolars/fatou/commit/54b8857b0f461d61bace26a5c2a282606cca1467))
+- **parser:** preserve `return` operand context ([`c13116f`](https://github.com/jolars/fatou/commit/c13116fa62822da1692b131d0ff56ef0dc917194))
+- **parser:** support parenthesized multiline macros ([`be529cb`](https://github.com/jolars/fatou/commit/be529cb4cf43406652ddfd1ecf958aea9e4f2dda))
+- **parser:** project JuliaSyntax 2 oracle encodings ([`5792f7d`](https://github.com/jolars/fatou/commit/5792f7d5cae2efa6b30fffb5a64e5d4d7c0e5e75))
+- **parser:** parse dotted wrapping operators ([`7e1a38a`](https://github.com/jolars/fatou/commit/7e1a38a0cdcd82f6264ae746e1cc51ac8f63bafe))
+
+### Bug Fixes
+
+- **parser:** stop macro arguments at newlines ([`9630fe8`](https://github.com/jolars/fatou/commit/9630fe8971a06b46c2110657832fa49e65d70f34))
+- **parser:** recover labeled keyword tails ([`4902dde`](https://github.com/jolars/fatou/commit/4902dde862a9ec188e402f67a461e60524e080a1))
+
 ## [0.9.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.8.2...fatou-parser-v0.9.0) (2026-10-29)
 
 ### Features

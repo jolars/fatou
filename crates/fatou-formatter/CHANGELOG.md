@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.8.0...fatou-formatter-v0.9.0) (2026-11-18)
+
+### Features
+
+- support Julia syntax editions ([`ab70875`](https://github.com/jolars/fatou/commit/ab708758b22519dd6ab7f3d940132cb277c27f6b))
+
+### Bug Fixes
+
+- **formatter:** preserve nested macro argument scope ([`eb895de`](https://github.com/jolars/fatou/commit/eb895dea44df771c07b7ebb1bd7509911755c2c2))
+- **formatter:** fence macros before clauses and commas ([`dc5f516`](https://github.com/jolars/fatou/commit/dc5f516a96acda8f7aa96dd3ec6dc458454ae813))
+- **formatter:** fence macros before operators ([`7863274`](https://github.com/jolars/fatou/commit/78632748aa8919915656cc32d6c2d6605303f809))
+
+### Dependencies
+
+- updated crates/fatou-parser to v0.10.0
+
 ## [0.8.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.7.5...fatou-formatter-v0.8.0) (2026-11-07)
 
 ### Features
