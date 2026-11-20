@@ -209,13 +209,13 @@ fn is_broadcast_assign(kind: SyntaxKind) -> bool {
 
 /// The assignment operator of an `ASSIGNMENT_EXPR`, classified.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum AssignOp {
+pub(super) enum AssignOp {
     Plain,
     Augmented,
     Broadcast,
 }
 
-fn assign_op(node: &SyntaxNode) -> AssignOp {
+pub(super) fn assign_op(node: &SyntaxNode) -> AssignOp {
     for element in node.children_with_tokens() {
         if let Some(token) = element.into_token() {
             let kind = token.kind();
@@ -248,7 +248,7 @@ fn is_field_access(node: &SyntaxNode) -> bool {
 
 /// The identifier token of a `NAME` node, via the shared [`Name::ident`] typed
 /// accessor.
-fn name_ident(node: &SyntaxNode) -> Option<SyntaxToken> {
+pub(super) fn name_ident(node: &SyntaxNode) -> Option<SyntaxToken> {
     Name::cast(node.clone())?
         .ident()
         .map(|ident| ident.syntax().clone())
@@ -1235,12 +1235,7 @@ impl Builder {
                     self.declare_name(&token, scope, None);
                 }
             }
-            SyntaxKind::TUPLE_EXPR
-            | SyntaxKind::BARE_TUPLE_EXPR
-            | SyntaxKind::PARAMETERS
-            | SyntaxKind::ARG
-            | SyntaxKind::SPLAT_EXPR
-            | SyntaxKind::PAREN_EXPR => {
+            kind if is_target_group(kind) => {
                 for child in node.children() {
                     self.declare_target(&child, scope);
                 }
@@ -1499,29 +1494,35 @@ impl Builder {
                     self.write_name(&token, scope, access);
                 }
             }
-            SyntaxKind::TUPLE_EXPR
-            | SyntaxKind::BARE_TUPLE_EXPR
-            | SyntaxKind::PARAMETERS
-            | SyntaxKind::ARG
-            | SyntaxKind::SPLAT_EXPR
-            | SyntaxKind::PAREN_EXPR => {
+            kind if is_target_group(kind) => {
                 for child in node.children() {
                     self.walk_target(&child, scope, access);
                 }
             }
             SyntaxKind::TYPE_ANNOTATION => {
-                let mut children = node.children();
-                if let Some(first) = children.next() {
-                    self.walk_target(&first, scope, access);
+                let (pattern, types) = annotation_parts(node);
+                if let Some(pattern) = pattern {
+                    self.walk_target(&pattern, scope, access);
                 }
-                for annotation in children {
-                    self.walk_node(&annotation, scope);
+                for ty in types {
+                    self.walk_local_type(&ty, scope);
                 }
             }
-            // `x[i] = v`, `x.f = v`, and anything else that mutates through
-            // a value: plain reads.
+            // Index and field writes read the mutated value.
             _ => self.walk_node(node, scope),
         }
+    }
+
+    fn walk_local_type(&mut self, ty: &SyntaxNode, scope: ScopeId) {
+        let first = self.model.idents.len();
+        self.walk_node(ty, scope);
+        // A later store can evaluate the annotation again for conversion.
+        self.model.local_type_dependencies.extend(
+            self.model.idents[first..]
+                .iter()
+                .filter(|ident| ident.access != Access::Write)
+                .filter_map(|ident| ident.binding),
+        );
     }
 
     fn write_name(&mut self, token: &SyntaxToken, scope: ScopeId, access: Access) {
@@ -1931,7 +1932,24 @@ impl Builder {
             }
             let range = TextRange::new(target.text_range().start(), end);
             current = self.push_scope(kind, Some(current), range);
-            self.bind_param_pattern(target, current, BindingKind::ForVar);
+            if target.kind() == SyntaxKind::OUTER_BINDING {
+                if let Some(token) = target.children().next().and_then(|name| name_ident(&name)) {
+                    if let Some(binding) = self.resolve_read(token.text(), current) {
+                        self.push_ident(
+                            token.text(),
+                            token.text_range(),
+                            current,
+                            Access::Write,
+                            false,
+                            Some(binding),
+                        );
+                    } else {
+                        self.record_token_read(&token, current);
+                    }
+                }
+            } else {
+                self.bind_param_pattern(target, current, BindingKind::ForVar);
+            }
             i += 2;
         }
         current
@@ -2265,7 +2283,11 @@ impl Builder {
                     self.bind_param_pattern(&pattern, scope, kind);
                 }
                 for ty in types {
-                    self.walk_node(&ty, scope);
+                    if kind == BindingKind::LetVar {
+                        self.walk_local_type(&ty, scope);
+                    } else {
+                        self.walk_node(&ty, scope);
+                    }
                 }
             }
             SyntaxKind::SPLAT_EXPR
@@ -2525,5 +2547,17 @@ fn is_binding_target(kind: SyntaxKind) -> bool {
             | SyntaxKind::SPLAT_EXPR
             | SyntaxKind::PAREN_EXPR
             | SyntaxKind::TYPE_ANNOTATION
+    )
+}
+
+pub(super) fn is_target_group(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::TUPLE_EXPR
+            | SyntaxKind::BARE_TUPLE_EXPR
+            | SyntaxKind::PARAMETERS
+            | SyntaxKind::ARG
+            | SyntaxKind::SPLAT_EXPR
+            | SyntaxKind::PAREN_EXPR
     )
 }

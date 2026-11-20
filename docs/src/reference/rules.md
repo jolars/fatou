@@ -924,6 +924,28 @@ warning: constant-condition
   |      ^^^^^ `&&` has a constant `false` operand
 ```
 
+## `dead-assignment`
+
+Report a local assignment whose stored value cannot be read before it is replaced or leaves scope. A new iteration replaces the loop variable, so an update is only useful if something reads it within that iteration. The analysis is conservative around closures, macros, and exception handlers. For a never-read local covered by `unused-binding`, this rule skips the first assignment.
+
+The second assignment replaces the first value of `x`:
+
+```julia
+function f()
+    x = first_value()
+    x = second_value()
+    return x
+end
+```
+
+```text
+warning: dead-assignment
+ --> example.jl:2:5
+  |
+2 |     x = first_value()
+  |     ^ value assigned to `x` is never read
+```
+
 ## `module-shadows-parent`
 
 Report a nested module with the same name as its parent. The child hides the parent's reference to itself, so qualified names such as `A.x` may resolve against the wrong module. This often happens when a file is included inside the module it already defines.

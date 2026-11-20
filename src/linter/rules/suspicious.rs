@@ -2,6 +2,7 @@
 
 mod assignment_in_condition;
 mod constant_condition;
+mod dead_assignment;
 mod discouraged_function;
 mod index_from_length;
 mod loop_variable_shadow;
@@ -15,6 +16,7 @@ mod typeof_comparison;
 
 pub use assignment_in_condition::AssignmentInCondition;
 pub use constant_condition::ConstantCondition;
+pub use dead_assignment::DeadAssignment;
 pub use discouraged_function::DiscouragedFunction;
 pub use index_from_length::IndexFromLength;
 pub use loop_variable_shadow::LoopVariableShadow;

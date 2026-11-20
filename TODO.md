@@ -83,12 +83,12 @@
   runtime support floor predates Julia 1.14, independently of the selected
   syntax edition. No fixes; coverage includes LF/CRLF, spans, and suppression.
 
-- [ ] Detect dead assignments with control-flow-aware liveness analysis,
+- [x] Detect dead assignments with control-flow-aware liveness analysis,
   separately from `unused-binding` and `loop-variable-shadow`. Report only
   when an assigned value cannot be read before it is overwritten or leaves
   scope, including when the next loop iteration rebinds it. Keep valid
   within-iteration normalization quiet, and handle closures and macros
-  conservatively. Any fix must preserve right-hand-side side effects.
+  conservatively. Default warning with no autofix.
 
 - [ ] Add an opt-in rule for functions that read known nonconstant, untyped
   globals (#109). Use the shared resolver to distinguish global bindings

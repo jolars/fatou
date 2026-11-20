@@ -37,9 +37,12 @@ pub mod cfg;
 mod control;
 mod eval;
 pub mod import;
+pub(crate) mod liveness;
 pub mod scope;
 pub mod signature;
 mod test_macros;
+
+use std::collections::HashSet;
 
 use rowan::{TextRange, TextSize};
 use smol_str::SmolStr;
@@ -113,6 +116,8 @@ pub struct SemanticModel {
     scopes: Vec<Scope>,
     bindings: Vec<Binding>,
     idents: Vec<IdentRef>,
+    // Bindings read by type annotations that can be evaluated during conversion.
+    local_type_dependencies: HashSet<BindingId>,
     module_loads: Vec<ModuleLoad>,
     exports: Vec<ExportEntry>,
     qualified_reads: Vec<QualifiedRead>,

@@ -18,13 +18,10 @@
 //! `Base.throw` (and not a local shadow) applies that confirmation itself —
 //! see [`RuleContext::resolves_to_base`](crate::linter::rules::RuleContext::resolves_to_base).
 //!
-//! Only *statement-level* control flow is modeled. Julia's `if`/`try` are
-//! expressions, but one used as an operand (`x = if c ... end`) is left opaque,
-//! as are the bodies that are single expressions rather than blocks (short-form
-//! `f(x) = ...`, `x -> ...`). An opaque statement is conservative: it never
-//! makes anything look unreachable.
-//! Labeled blocks, break values, and operands containing loop exits are evaluated
-//! explicitly, including in value positions such as `x = @label ...`.
+//! Statements, assignment values, and operands with embedded control flow
+//! contribute to the graph. Other expressions can be opaque. Single-expression
+//! bodies such as short-form methods and arrows do not have their own graph.
+//! Labeled blocks and loop exits are also modeled in value positions.
 //!
 //! Reachability is computed from the entry block once the graph is built, so
 //! [`FileControlFlow::is_unreachable`] answers for the tail after an
@@ -54,7 +51,9 @@ use crate::ast::{
 };
 use crate::syntax::{NodePtr, SyntaxElement, SyntaxKind, SyntaxNode};
 
+use super::builder::{AssignOp, assign_op, is_target_group, name_ident};
 use super::control::{ControlMacro, control_macro, label_name};
+use super::signature::annotation_parts;
 
 /// Index of a [`BasicBlock`] within a [`ControlFlowGraph`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -75,6 +74,23 @@ impl BlockId {
 pub struct BasicBlock {
     pub stmts: Vec<TextRange>,
     pub terminator: Terminator,
+}
+
+/// Ordered source sites for the semantic liveness analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FlowEffect {
+    Observe(TextRange),
+    Store(TextRange),
+    Rebind(TextRange),
+    /// Read the iterator binding before preserving its value for inner iterations.
+    Save(TextRange),
+}
+
+#[derive(Clone, Copy)]
+enum PatternEffect {
+    Store { observe_target: bool },
+    Rebind,
+    Save,
 }
 
 /// How control leaves a [`BasicBlock`].
@@ -102,7 +118,7 @@ pub enum Terminator {
 
 impl Terminator {
     /// The blocks control can reach from here, in edge order.
-    fn successors(self) -> impl Iterator<Item = BlockId> {
+    pub(crate) fn successors(self) -> impl Iterator<Item = BlockId> {
         let (a, b) = match self {
             Terminator::Goto(target) => (Some(target), None),
             Terminator::Branch { then_blk, else_blk } => (Some(then_blk), Some(else_blk)),
@@ -120,6 +136,8 @@ pub struct ControlFlowGraph {
     /// Whether each block is reachable from [`Self::entry`]; computed once at
     /// build time. A pure function of `blocks`, so it does not affect `Eq`.
     reachable: Vec<bool>,
+    effects: Vec<Vec<FlowEffect>>,
+    supports_liveness: bool,
 }
 
 impl Default for ControlFlowGraph {
@@ -131,6 +149,8 @@ impl Default for ControlFlowGraph {
             }],
             entry: BlockId(0),
             reachable: vec![true],
+            effects: vec![Vec::new()],
+            supports_liveness: true,
         }
     }
 }
@@ -166,6 +186,14 @@ impl ControlFlowGraph {
         self.reachable[id.index()]
     }
 
+    pub(crate) fn effects(&self, id: BlockId) -> &[FlowEffect] {
+        &self.effects[id.index()]
+    }
+
+    pub(crate) fn supports_liveness(&self) -> bool {
+        self.supports_liveness
+    }
+
     /// Build the CFG for a region given its ordered statement elements.
     /// `opaque_macros` says the region contains a macro call, whose expansion
     /// may hide a `@goto` — see [`reachable_from`].
@@ -179,6 +207,8 @@ impl ControlFlowGraph {
             labels,
             label_blocks: HashMap::new(),
             exit_scopes: Vec::new(),
+            effects: Vec::new(),
+            supports_liveness: true,
         };
         let entry = builder.new_block();
         if let Some(exit) = builder.lower_seq(stmts, entry) {
@@ -193,6 +223,8 @@ impl ControlFlowGraph {
             blocks: builder.blocks,
             entry,
             reachable,
+            supports_liveness: builder.supports_liveness,
+            effects: builder.effects,
         }
     }
 }
@@ -334,6 +366,8 @@ struct Builder {
     /// Lexically enclosing loops and labeled blocks, innermost last. These
     /// targets are unrelated to the region-wide standalone `@goto` labels.
     exit_scopes: Vec<ExitScope>,
+    effects: Vec<Vec<FlowEffect>>,
+    supports_liveness: bool,
 }
 
 /// The default exit and iteration targets of an enclosing loop.
@@ -375,6 +409,7 @@ impl Builder {
             stmts: Vec::new(),
             terminator: Terminator::Return,
         });
+        self.effects.push(Vec::new());
         id
     }
 
@@ -384,6 +419,104 @@ impl Builder {
 
     fn push_stmt(&mut self, block: BlockId, range: TextRange) {
         self.blocks[block.index()].stmts.push(range);
+    }
+
+    fn effect(&mut self, block: BlockId, effect: FlowEffect) {
+        self.effects[block.index()].push(effect);
+    }
+
+    fn observe(&mut self, block: BlockId, range: TextRange) {
+        if !range.is_empty() {
+            self.effect(block, FlowEffect::Observe(range));
+        }
+    }
+
+    fn pattern_effect(&mut self, block: BlockId, node: &SyntaxNode, action: PatternEffect) {
+        match node.kind() {
+            SyntaxKind::NAME => {
+                if let Some(name) = name_ident(node) {
+                    let range = name.text_range();
+                    let effect = match action {
+                        PatternEffect::Store { .. } => FlowEffect::Store(range),
+                        PatternEffect::Rebind => FlowEffect::Rebind(range),
+                        PatternEffect::Save => FlowEffect::Save(range),
+                    };
+                    self.effect(block, effect);
+                }
+            }
+            SyntaxKind::TYPE_ANNOTATION => {
+                let (pattern, types) = annotation_parts(node);
+                if matches!(
+                    action,
+                    PatternEffect::Store {
+                        observe_target: true
+                    }
+                ) {
+                    for ty in types {
+                        self.observe(block, ty.text_range());
+                    }
+                }
+                if let Some(pattern) = pattern {
+                    self.pattern_effect(block, &pattern, action);
+                }
+            }
+            kind if is_target_group(kind) || kind == SyntaxKind::OUTER_BINDING => {
+                for child in node.children() {
+                    self.pattern_effect(block, &child, action);
+                }
+            }
+            _ => {
+                if matches!(
+                    action,
+                    PatternEffect::Store {
+                        observe_target: true
+                    }
+                ) {
+                    self.observe(block, node.text_range());
+                }
+            }
+        }
+    }
+
+    fn lower_assignment(&mut self, node: &SyntaxNode, mut cur: BlockId) -> Option<BlockId> {
+        let mut children = node.children();
+        let Some(target) = children.next() else {
+            return Some(cur);
+        };
+        let Some(value) = children.next() else {
+            self.observe(cur, target.text_range());
+            return Some(cur);
+        };
+        let op = assign_op(node);
+        self.supports_liveness &= !contains_unmodeled_exit(&target, None);
+        if op != AssignOp::Plain {
+            self.observe(cur, target.text_range());
+        }
+        cur = self.lower_value(&value, cur)?;
+        if op != AssignOp::Broadcast {
+            self.pattern_effect(
+                cur,
+                &target,
+                PatternEffect::Store {
+                    observe_target: op == AssignOp::Plain,
+                },
+            );
+        }
+        Some(cur)
+    }
+
+    fn rebind_iterators(&mut self, block: BlockId, targets: &[SyntaxNode]) {
+        if let Some((current, earlier)) = targets.split_last() {
+            // Fresh variables are restored on entry to each nested
+            // iteration. An outer binding changes only on its own iteration.
+            for target in earlier {
+                if target.kind() != SyntaxKind::OUTER_BINDING {
+                    self.pattern_effect(block, target, PatternEffect::Rebind);
+                }
+            }
+            self.observe(block, current.text_range());
+            self.pattern_effect(block, current, PatternEffect::Rebind);
+        }
     }
 
     fn has_predecessor(&self, target: BlockId) -> bool {
@@ -501,6 +634,7 @@ impl Builder {
     fn lower_stmt(&mut self, stmt: &SyntaxElement, cur: BlockId) -> Option<BlockId> {
         let Some(node) = stmt.as_node() else {
             self.push_stmt(cur, stmt.text_range());
+            self.observe(cur, stmt.text_range());
             return Some(cur);
         };
 
@@ -582,9 +716,23 @@ impl Builder {
             SyntaxKind::BINARY_EXPR => {
                 self.push_stmt(cur, node.text_range());
                 match short_circuit_jump(node) {
-                    Some((jump_node, jump)) => self.lower_conditional_jump(cur, &jump_node, &jump),
+                    Some((jump_node, _)) if node.children().nth(1).as_ref() != Some(&jump_node) => {
+                        self.lower_value(node, cur)
+                    }
+                    Some((jump_node, jump)) => {
+                        self.supports_liveness &= !contains_unmodeled_exit(node, Some(&jump_node));
+                        let cur = node
+                            .children()
+                            .next()
+                            .map_or(Some(cur), |lhs| self.lower_embedded_flow(&lhs, cur))?;
+                        self.lower_conditional_jump(cur, &jump_node, &jump)
+                    }
                     _ => self.lower_embedded_flow(node, cur),
                 }
+            }
+            SyntaxKind::ASSIGNMENT_EXPR | SyntaxKind::LOCAL_STMT => {
+                self.push_stmt(cur, node.text_range());
+                self.lower_value(node, cur)
             }
             _ => {
                 let cur = self.lower_embedded_flow(node, cur)?;
@@ -639,15 +787,28 @@ impl Builder {
         }
     }
 
-    /// Evaluate an expression used as a labeled block's body or a break's
-    /// value. Other operands remain opaque unless they contain a labeled
-    /// block or loop exit, preserving the statement-level contract elsewhere.
+    /// Evaluate an expression, recording its control flow and effects.
     fn lower_value(&mut self, node: &SyntaxNode, mut cur: BlockId) -> Option<BlockId> {
         if is_flow_boundary(node) || is_opaque_macro(node) {
+            // Quoted interpolations and parts of signatures may still read
+            // enclosing locals even though the body has no in-region flow.
+            self.observe(cur, node.text_range());
+            self.supports_liveness &= !contains_unmodeled_exit(node, None);
             return Some(cur);
         }
         match node.kind() {
             SyntaxKind::PAREN_BLOCK => self.lower_seq(&paren_statements(node), cur),
+            SyntaxKind::ASSIGNMENT_EXPR => self.lower_assignment(node, cur),
+            SyntaxKind::LET_BINDINGS | SyntaxKind::LOCAL_STMT => {
+                for item in node.children() {
+                    if item.kind() == SyntaxKind::ASSIGNMENT_EXPR {
+                        cur = self.lower_value(&item, cur)?;
+                    } else {
+                        self.observe(cur, item.text_range());
+                    }
+                }
+                Some(cur)
+            }
             SyntaxKind::BLOCK
             | SyntaxKind::BEGIN_EXPR
             | SyntaxKind::LET_EXPR
@@ -722,9 +883,16 @@ impl Builder {
                 self.join(&skipped)
             }
             _ => {
+                // Child ranges have their own effects. Observe only the
+                // gaps, which can contain unwrapped names or opaque operands.
+                let mut start = node.text_range().start();
                 for child in flow_children(node) {
+                    let range = child.text_range();
+                    self.observe(cur, TextRange::new(start, range.start()));
                     cur = self.lower_value(&child, cur)?;
+                    start = range.end();
                 }
+                self.observe(cur, TextRange::new(start, node.text_range().end()));
                 if matches!(jump_of(node), Some(Jump::Diverge)) {
                     self.push_stmt(cur, node.text_range());
                     self.set_term(cur, Terminator::Diverge);
@@ -737,9 +905,11 @@ impl Builder {
     }
 
     fn lower_embedded_flow(&mut self, node: &SyntaxNode, cur: BlockId) -> Option<BlockId> {
-        if contains_labeled_flow(node) {
+        if contains_embedded_flow(node, true) {
             self.lower_value(node, cur)
         } else {
+            self.supports_liveness &= !contains_unmodeled_exit(node, None);
+            self.observe(cur, node.text_range());
             Some(cur)
         }
     }
@@ -846,20 +1016,25 @@ impl Builder {
                 None => Some(header),
             }
         } else {
-            let mut iterables = node
+            let mut clauses = node
                 .children()
                 .filter(|child| child.kind() == SyntaxKind::FOR_BINDING)
-                .flat_map(|binding| binding.children().skip(1).step_by(2));
+                .flat_map(|binding| {
+                    let mut parts = binding.children();
+                    std::iter::from_fn(move || Some((parts.next()?, parts.next()?)))
+                });
+            let first = clauses.next();
             // The first iterator executes even for an empty loop. Later ones
             // initialize only after the preceding iterator yields an element.
-            let first_exit = iterables
-                .next()
-                .map_or(Some(cur), |iterable| self.lower_value(&iterable, cur));
+            let first_exit = first
+                .as_ref()
+                .map_or(Some(cur), |(_, iterable)| self.lower_value(iterable, cur));
+            let mut targets: Vec<_> = first.into_iter().map(|(target, _)| target).collect();
             if let Some(exit) = first_exit {
                 self.set_term(exit, Terminator::Goto(header));
             }
             let mut test_exit = first_exit.map(|_| header);
-            for iterable in iterables {
+            for (next_target, iterable) in clauses {
                 let Some(test) = test_exit else { break };
                 let init = self.new_block();
                 self.set_term(
@@ -869,15 +1044,25 @@ impl Builder {
                         else_blk: empty_target,
                     },
                 );
+                self.rebind_iterators(init, &targets);
                 empty_target = test;
                 let exit = self.lower_value(&iterable, init);
                 let inner_header = self.new_block();
                 if let Some(exit) = exit {
+                    // Later iterables can update earlier locals. The values
+                    // restored on the inner back edge come from this point.
+                    for target in &targets {
+                        if target.kind() != SyntaxKind::OUTER_BINDING {
+                            self.pattern_effect(exit, target, PatternEffect::Save);
+                        }
+                    }
                     self.set_term(exit, Terminator::Goto(inner_header));
                 }
+                targets.push(next_target);
                 loop_ctx.header = inner_header;
                 test_exit = exit.map(|_| inner_header);
             }
+            self.rebind_iterators(body_blk, &targets);
             test_exit
         };
         if let Some(exit) = header_exit {
@@ -1200,19 +1385,37 @@ pub(crate) fn flow_children(node: &SyntaxNode) -> impl Iterator<Item = SyntaxNod
     })
 }
 
-fn contains_labeled_flow(node: &SyntaxNode) -> bool {
+// A statement lowered opaquely must not hide an exit that bypasses a kill.
+fn contains_unmodeled_exit(node: &SyntaxNode, modeled: Option<&SyntaxNode>) -> bool {
+    if matches!(node.kind(), SyntaxKind::QUOTE_EXPR | SyntaxKind::QUOTE_SYM) {
+        return node
+            .descendants()
+            .filter(|child| child.kind() == SyntaxKind::INTERPOLATION)
+            .any(|interpolation| contains_unmodeled_exit(&interpolation, None));
+    }
+    if modeled == Some(node) {
+        return flow_children(node).any(|child| contains_unmodeled_exit(&child, None));
+    }
+    matches!(
+        node.kind(),
+        SyntaxKind::RETURN_EXPR | SyntaxKind::BREAK_EXPR | SyntaxKind::CONTINUE_EXPR
+    ) || flow_children(node).any(|child| contains_unmodeled_exit(&child, modeled))
+}
+
+fn contains_embedded_flow(node: &SyntaxNode, include_assignments: bool) -> bool {
     if is_flow_boundary(node) || is_opaque_macro(node) {
         return false;
     }
-    (matches!(
-        node.kind(),
-        SyntaxKind::BREAK_EXPR | SyntaxKind::CONTINUE_EXPR
-    ) && jump_of(node).is_some())
+    (include_assignments && node.kind() == SyntaxKind::ASSIGNMENT_EXPR)
+        || (matches!(
+            node.kind(),
+            SyntaxKind::BREAK_EXPR | SyntaxKind::CONTINUE_EXPR
+        ) && jump_of(node).is_some())
         || matches!(
             MacroCall::cast(node.clone()).and_then(|call| control_macro(&call)),
             Some(ControlMacro::Block { .. })
         )
-        || flow_children(node).any(|child| contains_labeled_flow(&child))
+        || flow_children(node).any(|child| contains_embedded_flow(&child, include_assignments))
 }
 
 /// Whether `body` contains a macro call other than `@goto`/`@label`, excluding
@@ -1255,7 +1458,7 @@ fn short_circuit_jump(node: &SyntaxNode) -> Option<(SyntaxNode, Jump)> {
     if node
         .children()
         .next()
-        .is_some_and(|lhs| contains_labeled_flow(&lhs))
+        .is_some_and(|lhs| contains_embedded_flow(&lhs, false))
     {
         return None;
     }
@@ -1305,5 +1508,35 @@ fn snippet(src: &str, range: TextRange) -> String {
     match flat.char_indices().nth(40) {
         Some((cut, _)) => format!("{}…", &flat[..cut]),
         None => flat,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FileControlFlow, FlowEffect};
+    use crate::parser::parse;
+
+    #[test]
+    fn observes_each_operand_once_in_a_left_associative_expression() {
+        let source = format!("function f(x)\n    return {}x\nend\n", "x - ".repeat(127));
+        let parsed = parse(&source);
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        let cfg = FileControlFlow::build(&parsed.cst);
+        let [(_, graph)] = cfg.regions() else {
+            panic!("expected one function region")
+        };
+        let reads: usize = graph
+            .iter()
+            .flat_map(|(id, _)| graph.effects(id))
+            .filter_map(|effect| match *effect {
+                FlowEffect::Observe(range) => Some(
+                    source[std::ops::Range::<usize>::from(range)]
+                        .matches('x')
+                        .count(),
+                ),
+                _ => None,
+            })
+            .sum();
+        assert_eq!(reads, 128);
     }
 }

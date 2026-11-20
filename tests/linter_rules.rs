@@ -7934,3 +7934,208 @@ fn outdated_suppression_keeps_the_code_on_a_trailing_comment_line() {
         "  # fatou-ignore unused-binding: stale"
     );
 }
+
+// --- dead-assignment -------------------------------------------------------
+
+#[test]
+fn dead_assignment_tracks_overwrites_and_branch_reads() {
+    for newline in ["\n", "\r\n"] {
+        let source = "function f(c)\n    x = 1\n    if c\n        x = 2\n    else\n        x = 3\n    end\n    return x\nend\n".replace('\n', newline);
+        assert_eq!(count("dead-assignment", &source), 1);
+        let source =
+            "function f(c)\n    x = 1\n    if c\n        x = 2\n    end\n    return x\nend\n"
+                .replace('\n', newline);
+        assert_eq!(count("dead-assignment", &source), 0);
+    }
+}
+
+#[test]
+fn dead_assignment_tracks_iteration_rebinding() {
+    assert_eq!(
+        count(
+            "dead-assignment",
+            "for i in xs\n    use(i)\n    i = normalize(i)\nend\n"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            "dead-assignment",
+            "for i in xs\n    i = normalize(i)\n    use(i)\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn dead_assignment_handles_loop_edges_and_chained_iterators() {
+    for (source, expected) in [
+        (
+            "for (i, j) in xs\n    use(i)\n    i = normalize(i)\n    continue\nend\n",
+            1,
+        ),
+        (
+            "for i in xs, j in ys\n    use(i)\n    i = normalize(i)\nend\n",
+            1,
+        ),
+        (
+            "for i in xs, j in ys\n    use(j)\n    j = normalize(j)\nend\n",
+            1,
+        ),
+        ("for i in xs, j in (i = 5; ys)\n    use(i, j)\nend\n", 0),
+        (
+            "function f(i)\n    for outer i in xs, j in ys\n        use(i, j)\n        i = 0\n    end\nend\n",
+            0,
+        ),
+        (
+            "function f(x, ready)\n    while ready()\n        use(x)\n        x = update(x)\n    end\nend\n",
+            0,
+        ),
+        (
+            "function f(x, ready)\n    while ready()\n        x = update(x)\n        break\n    end\n    return x\nend\n",
+            0,
+        ),
+        (
+            "function f(x, c)\n    x = first(x)\n    c && return x\n    x = other()\n    return x\nend\n",
+            0,
+        ),
+    ] {
+        assert_eq!(count("dead-assignment", source), expected, "{source}");
+    }
+}
+
+#[test]
+fn dead_assignment_stays_quiet_when_execution_is_opaque() {
+    for source in [
+        "function f(x)\n    get = () -> x\n    x = update(x)\n    return get\nend\n",
+        "function f(x)\n    function inner()\n        @opaque\n    end\n    x = update(x)\n    return inner\nend\n",
+        "function f(x)\n    x = update(x)\n    @opaque\nend\n",
+        "function f(x)\n    x = update(x)\n    try\n        run()\n    finally\n        use(x)\n    end\nend\n",
+        "function f(error, x)\n    x = update(x)\n    error()\n    use(x)\nend\n",
+        "function f(x)\n    return x\n    x = update(x)\nend\n",
+        "function f(x)\n    x = update(x)\n    return :($x)\nend\n",
+    ] {
+        assert_eq!(count("dead-assignment", source), 0, "{source}");
+    }
+}
+
+#[test]
+fn dead_assignment_reports_later_writes_to_never_read_locals() {
+    let source = "function f()\n    local x\n    x = first()\n    x = second()\n    nothing\nend\n";
+    let finding = only_finding("dead-assignment", &[], source);
+    let offset = source.find("x = second").unwrap();
+    assert_eq!(usize::from(finding.range.start()), offset);
+    assert_eq!(usize::from(finding.range.end()), offset + 1);
+    assert!(finding.fixes.is_empty());
+    assert_eq!(count("unused-binding", source), 1);
+    let suppressed = source.replace(
+        "    x = second()",
+        "    # fatou-ignore dead-assignment\n    x = second()",
+    );
+    assert_eq!(count("dead-assignment", &suppressed), 0);
+}
+
+#[test]
+fn dead_assignment_distinguishes_a_compound_read_from_its_store() {
+    let source = "function f()\n    x = first()\n    x += second()\n    nothing\nend\n";
+    let finding = only_finding("dead-assignment", &[], source);
+    assert_eq!(
+        usize::from(finding.range.start()),
+        source.find("x +=").unwrap()
+    );
+    let source = "let x = first()\n    x = second()\n    use(x)\nend\n";
+    let finding = only_finding("dead-assignment", &[], source);
+    assert_eq!(
+        usize::from(finding.range.start()),
+        source.find("x = first").unwrap()
+    );
+}
+
+#[test]
+fn dead_assignment_orders_let_initializers_before_later_initializers() {
+    let source = "let x = first(), y = begin x = second(); 3 end\n    use(x, y)\nend\n";
+    let finding = only_finding("dead-assignment", &[], source);
+    assert_eq!(
+        usize::from(finding.range.start()),
+        source.find("x = first").unwrap()
+    );
+}
+
+#[test]
+fn dead_assignment_preserves_type_annotation_dependencies() {
+    for (declaration, use_initial_value) in [
+        ("local x::T", ""),
+        ("x::T = 1", "use(x)"),
+        ("local x::T = 1", "use(x)"),
+    ] {
+        let source = format!(
+            "function f()
+    T = Int
+    {declaration}
+    {use_initial_value}
+    T = Float64
+    x = 2
+    return x
+end
+"
+        );
+        assert_eq!(count("dead-assignment", &source), 0, "{source}");
+    }
+}
+
+#[test]
+fn dead_assignment_respects_reads_after_a_for_outer_loop() {
+    for (tail, expected) in [("nothing", 1), ("return i", 0)] {
+        let source = format!(
+            "function f(i)
+    for outer i in 1:2
+        use(i)
+        i = 0
+    end
+    {tail}
+end
+"
+        );
+        assert_eq!(count("dead-assignment", &source), expected, "{source}");
+    }
+}
+
+#[test]
+fn dead_assignment_tracks_nested_and_destructured_stores() {
+    for body in [
+        "x, y = (1, 2)\n    return x + y",
+        "y = if c\n        x = 1\n    else\n        x = 2\n    end\n    return x + y",
+        "use((x = 1))\n    return x",
+        "(x, others...) = (1, 2, 3)\n    return (x, others)",
+    ] {
+        let source = format!("function f(c)\n    x = 0\n    {body}\nend\n");
+        let finding = only_finding("dead-assignment", &[], &source);
+        assert_eq!(
+            usize::from(finding.range.start()),
+            source.find("x = 0").unwrap()
+        );
+    }
+
+    let source = "function f()\n    x, y = (1, 2)\n    x = 3\n    return x + y\nend\n";
+    let finding = only_finding("dead-assignment", &[], source);
+    assert_eq!(
+        usize::from(finding.range.start()),
+        source.find("x, y").unwrap()
+    );
+}
+
+#[test]
+fn dead_assignment_preserves_reads_during_nested_expression_evaluation() {
+    let source = "function f(c)\n    x = 0\n    c && use(x) && return nothing\n    x = 2\n    return x\nend\n";
+    assert_eq!(count("dead-assignment", source), 0);
+
+    let source = "function f()\n    x = 0\n    x += (x = 2)\n    return x\nend\n";
+    let finding = only_finding("dead-assignment", &[], source);
+    assert_eq!(
+        usize::from(finding.range.start()),
+        source.find("x = 2").unwrap()
+    );
+
+    let source = "function f(x, a)\n    x, a[x] = (2, 3)\n    return a\nend\n";
+    assert_eq!(count("dead-assignment", source), 0);
+}

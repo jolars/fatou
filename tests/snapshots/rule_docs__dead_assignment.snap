@@ -1,0 +1,25 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `dead-assignment`
+
+Report a local assignment whose stored value cannot be read before it is replaced or leaves scope. A new iteration replaces the loop variable, so an update is only useful if something reads it within that iteration. The analysis is conservative around closures, macros, and exception handlers. For a never-read local covered by `unused-binding`, this rule skips the first assignment.
+
+The second assignment replaces the first value of `x`:
+
+```julia
+function f()
+    x = first_value()
+    x = second_value()
+    return x
+end
+```
+
+```text
+warning: dead-assignment
+ --> example.jl:2:5
+  |
+2 |     x = first_value()
+  |     ^ value assigned to `x` is never read
+```
