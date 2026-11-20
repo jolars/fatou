@@ -1,0 +1,1 @@
+(toplevel (using (: (importpath A) (importpath b) (importpath a))) (import (: (importpath B) (as (importpath c) d) (importpath e))) (import (importpath D) (importpath E)) (using (: (importpath F) (importpath f))) (tuple g h))

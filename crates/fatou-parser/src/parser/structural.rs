@@ -1102,9 +1102,12 @@ pub(crate) fn parse_import_stmt(
     let mut valid_colon_consumed = false;
     let mut first_sep = true;
     loop {
-        let sep = ctx.skip_ws(i);
+        let sep = ctx.skip_ws_and_block_comments(i);
         match ctx.token(sep).map(|t| t.kind) {
-            Some(kind @ (TokKind::Comma | TokKind::Colon)) => {
+            // Only horizontal whitespace may precede an import colon.
+            Some(kind @ (TokKind::Comma | TokKind::Colon))
+                if kind == TokKind::Comma || ctx.skip_ws(i) == sep =>
+            {
                 push_range(&mut events, i, sep);
                 events.push(Event::Tok(sep));
                 let is_valid_colon = kind == TokKind::Colon && first_sep && valid_colon;
@@ -1170,7 +1173,8 @@ fn parse_import_clause(
     // statement-terminating newline, so the next clause may begin on a later line
     // (`import A:\n b,\n c`). Skip newlines and comments — not just horizontal
     // whitespace — to reach the path. A newline *before* the next separator still
-    // terminates (the caller's separator probe uses `skip_ws`, not this).
+    // terminates. The caller skips horizontal whitespace before separators
+    // and block comments before commas.
     let path_start = ctx.skip_trivia(after_sep);
 
     let mut path_events = Vec::new();
