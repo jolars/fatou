@@ -13,7 +13,14 @@ formatter, linter, or other downstream follow-up, put the active task in that
 consumer's `RECAP.md` and `TODO.md` section; retain at most a historical note in
 the parser session log.
 
-The Parser roadmap tasks in `TODO.md` are complete. Next targets come from the
+- **Import selector comments before commas.** For
+  `using A: b #= note =#, a`, JuliaSyntax projects
+  `(toplevel (using (: (importpath A) (importpath b) (importpath a))))`.
+  Fatou projects only `b` and leaves the comma and `a` as raw tokens in
+  `USING_STMT`. The separator probe in `parse_import_stmt` stops at the
+  block comment. Preserve the comment and parse the following clause.
+
+Other targets come from the
 classified JuliaSyntax 2 migration clusters in `tests/oracle/blocked.txt` and
 `tests/oracle/juliasyntax-blocked.txt`: adjacent assignment/comparison tokens,
 qualified literal macro callees, and the seven changed curated grammar cases.

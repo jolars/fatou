@@ -10,6 +10,9 @@
 
 ## Parser
 
+- [ ] Parse import selectors when a block comment precedes a comma, as in
+  `using A: b #= note =#, a`. Keep the comment and parse both selectors.
+
 - [x] Parse a bare `return` as a statement-level tuple element and apply
   edition rules to docstrings glued to `typegroup`. Pin both against JuliaSyntax.
 
@@ -64,7 +67,7 @@
 
 ## Formatter
 
-- [ ] Sort explicit names after `:` in `using` and `import` statements. Keep
+- [x] Sort explicit names after `:` in `using` and `import` statements. Keep
   statement order, move comments with their entries, sort within groups marked
   by comments, and preserve the relative order of entries that bind the same
   local name.

@@ -160,22 +160,22 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (2026-11-17 — explicit syntax editions)
+## Latest session (2026-11-20, explicit import names)
 
-- Added `FormatOptions` and option-aware full, verified, CST, and range
-  formatting APIs. Parsing, semantic verification, and output reparsing use the
-  same edition. Existing convenience APIs retain the latest supported edition.
-- Fixtures accept optional `edition.txt` metadata. Split the old `typegroup`
-  identifier cases into a 1.13 fixture; typegroup blocks use 1.14 or later.
-  Hand-authored expected output and the existing macro argument policy remain
-  unchanged.
-- Added checks across editions, widths, LF/CRLF, verification, and idempotence.
-  The gate is **132/161** fixtures. Workspace, clippy, and both engine Wasm
-  gates pass.
-- CLI and LSP adapters check every loading context and withhold conflicting or
-  uncertain edits. No formatter behavior follow-up is queued.
+- Sort each group of names after `:` in `using` and `import` by local binding
+  name. Keep aliases, comments, and same-name order. Statement order stays
+  fixed. Quote and macro input, dotted selectors, and alias dependencies retain
+  their order.
+- Whole-file and range formatting share comment ownership for the final
+  selector. Verified formatting compares sorted clauses, original comment
+  text, and comment attachment.
+- The fixture gate grew from 132 to 133. Block comments before selector commas
+  exposed a parser gap recorded in the Parser roadmap and parser-parity recap.
 
 ## Earlier sessions
+
+- **Explicit syntax editions** (2026-11-17): option-aware formatting and
+  verification, with a shared parse edition through CLI, LSP, and Wasm.
 
 - **Multiline macro argument scope** (2026-11-17): keep whitespace-form macro arguments together across canonical reflow; width-driven continuation still protects argument boundaries.
 
