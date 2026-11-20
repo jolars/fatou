@@ -62,6 +62,13 @@
   regenerating the operator table. Never hand-edit generated expectations or
   tables.
 
+## Formatter
+
+- [ ] Sort explicit names after `:` in `using` and `import` statements. Keep
+  statement order, move comments with their entries, sort within groups marked
+  by comments, and preserve the relative order of entries that bind the same
+  local name.
+
 ## Semantic analysis
 
 - [x] Model labeled `@label` blocks and loop exits. Keep label names out
@@ -104,8 +111,7 @@
   `\_z`, and `\_pgamma`, and review changed expansions as well as new
   entries. Do not hand-edit `src/lsp/latex_symbols.rs`.
 
-- [ ] Code actions beyond quick fixes: organize/sort `using` statements, qualify
-  a bare name.
+- [ ] Add a code action to qualify a bare name.
 
 - [ ] `workspace/willCreateFiles` and `workspace/willDeleteFiles`, the siblings
   of the rename handlers. The `RenameMap` machinery in
