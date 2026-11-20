@@ -24,6 +24,8 @@ pub enum LoadKind {
 pub struct ModulePath {
     /// Leading relative dots: `.A` is 1, `..A` is 2, `...A` is 3.
     pub leading_dots: u32,
+    /// Whether interpolation prevents reconstructing the path from its components.
+    pub(crate) interpolated: bool,
     /// The dotted components in order. Macro components keep the `@` sigil
     /// (`Base.Threads.@spawn` → `["Base", "Threads", "@spawn"]`), operator
     /// components are their text (`==`, `+`), and interpolated components

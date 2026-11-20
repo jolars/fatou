@@ -425,14 +425,15 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
-        if !super::code_action::allows_kind(
-            params.context.only.as_deref(),
-            lsp_types::CodeActionKind::QUICKFIX,
-        ) {
+        let only = params.context.only.as_deref();
+        let quickfix = super::code_action::allows_kind(only, lsp_types::CodeActionKind::QUICKFIX);
+        let qualify =
+            super::code_action::allows_kind(only, lsp_types::CodeActionKind::REFACTOR_REWRITE);
+        if !quickfix && !qualify {
             self.respond_ok(id, serde_json::json!([]));
             return;
         }
-        let rules = Arc::clone(&self.config_for(&uri).rules);
+        let rules = quickfix.then(|| Arc::clone(&self.config_for(&uri).rules));
         let reply = self.rewrite_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::CodeAction {
             id,
@@ -440,6 +441,7 @@ impl GlobalState {
             text,
             range: params.range,
             rules,
+            qualify,
             uri,
             sender: reply,
         });

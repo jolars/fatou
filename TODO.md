@@ -114,7 +114,7 @@
   `\_z`, and `\_pgamma`, and review changed expansions as well as new
   entries. Do not hand-edit `src/lsp/latex_symbols.rs`.
 
-- [ ] Add a code action to qualify a bare name.
+- [x] Add a code action to qualify a bare name.
 
 - [ ] `workspace/willCreateFiles` and `workspace/willDeleteFiles`, the siblings
   of the rename handlers. The `RenameMap` machinery in

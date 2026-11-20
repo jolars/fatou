@@ -6611,8 +6611,9 @@ fn publishes_lint_findings_as_diagnostics() {
 /// whose edit resolves it: the `nothing-comparison` on the cursor line offers
 /// `===`, carrying the diagnostic it fixes and a single-document edit.
 #[test]
-fn serves_quick_fix_code_actions() {
+fn serves_quick_fixes_and_name_qualification() {
     let _env = ENV_LOCK.lock().unwrap();
+    let dir = TempDir::new("fatou-lsp-qualify");
     let (server, client) = Connection::memory();
     let server_thread = std::thread::spawn(move || {
         fatou::lsp::serve(&server).expect("server loop");
@@ -6641,8 +6642,8 @@ fn serves_quick_fix_code_actions() {
         }))
         .unwrap();
 
-    let text = "check(x) = x == nothing\n";
-    let uri = Uri::from_str("file:///work/fixme.jl").unwrap();
+    let text = "check(x) = x == nothing\nprintln(1)\n";
+    let uri = file_uri(&dir.path.join("fixme.jl"));
     client
         .sender
         .send(Message::Notification(Notification {
@@ -6730,16 +6731,48 @@ fn serves_quick_fix_code_actions() {
         serde_json::from_value(response.result().unwrap()).unwrap();
     assert_eq!(actions, Vec::new());
 
+    // The same selection offers a refactoring, filtered by the requested kind.
+    for (id, kind, expected) in [(4, "refactor", true), (5, "quickfix", false)] {
+        client
+            .sender
+            .send(Message::Request(Request {
+                id: RequestId::from(id),
+                method: "textDocument/codeAction".to_string(),
+                params: serde_json::json!({
+                    "textDocument": {"uri": uri},
+                    "range": Range::new(Position::new(1, 2), Position::new(1, 2)),
+                    "context": {"diagnostics": [], "only": [kind]}
+                }),
+            }))
+            .unwrap();
+        let response = recv_response(&client, RequestId::from(id));
+        let actions = response.result().unwrap();
+        if expected {
+            assert_eq!(actions[0]["title"], "Qualify as `Base.println`");
+            assert_eq!(actions[0]["kind"], "refactor.rewrite");
+            assert_eq!(
+                actions[0]["edit"]["changes"][uri.as_str()],
+                serde_json::json!([{
+                    "range": Range::new(Position::new(1, 0), Position::new(1, 7)),
+                    "newText": "Base.println"
+                }])
+            );
+            assert_eq!(actions.as_array().unwrap().len(), 1);
+        } else {
+            assert_eq!(actions, serde_json::json!([]));
+        }
+    }
+
     // --- shutdown / exit ---
     client
         .sender
         .send(Message::Request(Request {
-            id: RequestId::from(4),
+            id: RequestId::from(6),
             method: "shutdown".to_string(),
             params: serde_json::Value::Null,
         }))
         .unwrap();
-    let _ = recv_response(&client, RequestId::from(4));
+    let _ = recv_response(&client, RequestId::from(6));
     client
         .sender
         .send(Message::Notification(Notification {

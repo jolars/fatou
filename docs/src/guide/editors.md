@@ -353,6 +353,11 @@ Open a `.jl` file containing `x=1` and format the buffer. It should become
 Diagnostics appear as you edit. When a finding has a suggested fix, open the
 quick-fix menu to apply it.
 
+To qualify a bare name, put the cursor on a reference such as `println` and open
+the code action menu. Choose **Qualify as `Base.println`**. Fatou offers this
+refactoring when it can identify the name's source module and find a qualifier
+that is in scope.
+
 <span id="notes"></span>
 
 ## Troubleshooting

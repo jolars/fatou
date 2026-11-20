@@ -28,7 +28,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use rowan::TextSize;
 use smol_str::SmolStr;
@@ -77,14 +77,19 @@ pub struct OccurrenceKey {
 /// (`undefined-name`, `call-arity`).
 pub fn has_unresolvable_using(
     model: &SemanticModel,
-    packages: &dyn PackageSource,
+    packages: &(impl PackageSource + ?Sized),
     workspace: Option<&(Arc<PackageIndex>, ModulePath)>,
 ) -> bool {
     // This file's own whole-module `using`s.
     if model.module_loads().iter().any(|load| {
         load.kind == LoadKind::Using
             && load.items.is_none()
-            && module_path_unresolvable(load.path.leading_dots, &load.path.components, packages)
+            && (load.path.interpolated
+                || module_path_unresolvable(
+                    load.path.leading_dots,
+                    &load.path.components,
+                    packages,
+                ))
     }) {
         return true;
     }
@@ -115,7 +120,7 @@ pub fn has_unresolvable_using(
 pub(crate) fn module_path_unresolvable<S: AsRef<str>>(
     leading_dots: u32,
     components: &[S],
-    packages: &dyn PackageSource,
+    packages: &(impl PackageSource + ?Sized),
 ) -> bool {
     if leading_dots != 0 || components.is_empty() {
         return true;
@@ -483,6 +488,152 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
             };
         }
         Resolution::Unresolved
+    }
+
+    /// A visible module spelling and member name that can replace a bare read.
+    pub(crate) fn qualification(
+        &self,
+        name: &str,
+        offset: TextSize,
+        namespace: Namespace,
+        implicit_base: Option<bool>,
+    ) -> Option<(SmolStr, SmolStr)> {
+        let workspace_module = self.workspace.as_ref().and_then(|workspace| {
+            let path = self.full_module_path(workspace, self.model.scope_at(offset));
+            module_at(&workspace.pkg.root, &path)
+        });
+        let implicit_base =
+            implicit_base.unwrap_or_else(|| workspace_module.is_none_or(|module| !module.bare));
+        let (path, member) = match self.resolve(name, offset, namespace) {
+            Resolution::Using { module, name } => {
+                (module.split('.').map(SmolStr::new).collect(), name)
+            }
+            Resolution::System { module, name } if implicit_base || module == "Core" => {
+                (vec![module], name)
+            }
+            Resolution::Unresolved
+                if !has_unresolvable_using(
+                    self.model,
+                    self.packages,
+                    self.workspace
+                        .as_ref()
+                        .map(|workspace| (Arc::clone(&workspace.pkg), workspace.host.clone()))
+                        .as_ref(),
+                ) =>
+            {
+                // Loose files have no library harvest. Use the bundled exports
+                // for the system modules that have no harvested index.
+                static SYSTEM: LazyLock<BTreeMap<String, Arc<PackageIndex>>> =
+                    LazyLock::new(|| crate::index::build_system_index(None));
+                let wanted = wanted_name(name, namespace);
+                let (module, _) = system_export_from(&wanted, |module| {
+                    (self.packages.package(module).is_none() && (implicit_base || module == "Core"))
+                        .then(|| SYSTEM.package(module))
+                        .flatten()
+                })?;
+                (vec![module], wanted)
+            }
+            Resolution::Binding(id) => {
+                let binding = self.model.binding(id);
+                if binding.kind != BindingKind::Import {
+                    return None;
+                }
+                let load = self.model.module_loads().iter().find(|load| {
+                    load.scope == binding.scope && load.range.contains_range(binding.def_range)
+                })?;
+                if load.path.leading_dots != 0 || load.path.interpolated {
+                    return None;
+                }
+                if let Some(items) = &load.items {
+                    let item = items
+                        .iter()
+                        .find(|item| item.range.contains_range(binding.def_range))?;
+                    (load.path.components.clone(), item.name.clone())
+                } else {
+                    let (member, path) = load.path.components.split_last()?;
+                    (path.to_vec(), member.clone())
+                }
+            }
+            _ => return None,
+        };
+        if member.starts_with('@') != (namespace == Namespace::Macro) {
+            return None;
+        }
+        let qualifier = self
+            .visible_qualifier(&path, offset, implicit_base)
+            .or_else(|| {
+                // Sibling files' whole-module usings record their source path.
+                // A duplicate import name leaves its origin uncertain.
+                let module = workspace_module?;
+                let last = path.last()?;
+                if !matches!(
+                    self.resolve(last, offset, Namespace::Value),
+                    Resolution::WorkspaceImport { .. }
+                ) || module
+                    .imported_names
+                    .iter()
+                    .filter(|name| *name == last.as_str())
+                    .count()
+                    != 1
+                {
+                    return None;
+                }
+                module
+                    .usings
+                    .iter()
+                    .any(|load| {
+                        load.leading_dots == 0
+                            && load
+                                .components
+                                .iter()
+                                .map(String::as_str)
+                                .eq(path.iter().map(SmolStr::as_str))
+                    })
+                    .then(|| last.clone())
+            })?;
+        Some((qualifier, member))
+    }
+
+    fn visible_qualifier(
+        &self,
+        path: &[SmolStr],
+        offset: TextSize,
+        implicit_base: bool,
+    ) -> Option<SmolStr> {
+        for load in self.model.module_loads() {
+            if load.items.is_some() || load.path.leading_dots != 0 || load.path.interpolated {
+                continue;
+            }
+            let Some(rest) = path.strip_prefix(load.path.components.as_slice()) else {
+                continue;
+            };
+            let qualifier = load
+                .alias
+                .as_ref()
+                .or_else(|| load.path.components.last())?;
+            if let Resolution::Binding(id) = self.resolve(qualifier, offset, Namespace::Value) {
+                let binding = self.model.binding(id);
+                if binding.kind == BindingKind::Import
+                    && binding.scope == load.scope
+                    && load.range.contains_range(binding.def_range)
+                {
+                    return Some(join_qualifier(qualifier, rest));
+                }
+            }
+        }
+        let (head, rest) = path.split_first()?;
+        // The system module names are available even when no explicit import
+        // records their binding. A local or project binding can mask them.
+        if (head == "Core" || (head == "Base" && implicit_base))
+            && match self.resolve(head, offset, Namespace::Value) {
+                Resolution::Unresolved => true,
+                Resolution::System { module, name } => module == *head && name == *head,
+                _ => false,
+            }
+        {
+            return Some(join_qualifier(head, rest));
+        }
+        None
     }
 
     /// Whether a fully qualified package path names a harvested symbol.
@@ -983,13 +1134,7 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
 
     /// Tier 4: `wanted` if Base or Core exports it (Base first).
     fn system_export(&self, wanted: &SmolStr) -> Option<(SmolStr, Arc<PackageIndex>)> {
-        for module in ["Base", "Core"] {
-            let pkg = self.packages.package(module)?;
-            if module_exports(&pkg.root, wanted) {
-                return Some((SmolStr::new(module), pkg));
-            }
-        }
-        None
+        system_export_from(wanted, |module| self.packages.package(module))
     }
 
     /// The [`ModuleIndex`] a whole-module `using` clause brings into scope at
@@ -1005,7 +1150,8 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         if load.kind != LoadKind::Using || load.items.is_some() {
             return None;
         }
-        if load.path.leading_dots != 0 || load.path.components.is_empty() {
+        if load.path.leading_dots != 0 || load.path.interpolated || load.path.components.is_empty()
+        {
             return None;
         }
         if !self.scope_visible(load.scope, at) {
@@ -1037,6 +1183,31 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         }
         false
     }
+}
+
+fn system_export_from(
+    wanted: &SmolStr,
+    mut package: impl FnMut(&str) -> Option<Arc<PackageIndex>>,
+) -> Option<(SmolStr, Arc<PackageIndex>)> {
+    for module in ["Base", "Core"] {
+        if let Some(pkg) = package(module)
+            && module_exports(&pkg.root, wanted)
+        {
+            return Some((SmolStr::new(module), pkg));
+        }
+    }
+    None
+}
+
+fn join_qualifier(head: &SmolStr, rest: &[SmolStr]) -> SmolStr {
+    if rest.is_empty() {
+        return head.clone();
+    }
+    std::iter::once(head.as_str())
+        .chain(rest.iter().map(SmolStr::as_str))
+        .collect::<Vec<_>>()
+        .join(".")
+        .into()
 }
 
 /// Resolve a full module path returned by [`Resolution::Using`] without

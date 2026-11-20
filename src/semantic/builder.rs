@@ -319,6 +319,7 @@ pub(crate) struct ImportClause {
     /// The clause ends in an interpolation (`import $A`, `import A.$B`), so
     /// the name it binds is unknowable.
     unbindable: bool,
+    interpolated: bool,
 }
 
 impl ImportClause {
@@ -344,6 +345,7 @@ impl ImportClause {
     pub(crate) fn path(&self) -> ModulePath {
         ModulePath {
             leading_dots: self.leading_dots,
+            interpolated: self.interpolated,
             components: self
                 .components
                 .iter()
@@ -424,6 +426,7 @@ fn import_path_parts(path: &SyntaxNode, clause: &mut ImportClause) {
                 }
                 SyntaxKind::INTERPOLATION => {
                     clause.unbindable = true;
+                    clause.interpolated = true;
                     seen_name = true;
                 }
                 _ => {}
@@ -468,6 +471,7 @@ pub(crate) fn collect_import_clauses(
                 SyntaxKind::DOLLAR => {
                     if let Some(clause) = after.as_mut().unwrap_or(&mut before).last_mut() {
                         clause.unbindable = true;
+                        clause.interpolated = true;
                     }
                 }
                 _ => {}
@@ -481,6 +485,7 @@ pub(crate) fn collect_import_clauses(
                     alias: None,
                     range: n.text_range(),
                     unbindable: false,
+                    interpolated: false,
                 };
                 let path = if n.kind() == SyntaxKind::IMPORT_ALIAS {
                     // `IMPORT_PATH … as alias`: the alias is the last bare

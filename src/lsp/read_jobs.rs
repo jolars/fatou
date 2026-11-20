@@ -22,7 +22,7 @@ use crate::text::{PositionEncoding, TextBuffer};
 use super::call_hierarchy::{
     incoming_calls_via_db, outgoing_calls_via_db, prepare_call_hierarchy_via_db,
 };
-use super::code_action::code_actions_via_db;
+use super::code_action::{code_actions_via_db, qualify_name_via_db};
 use super::completion::{completion_via_db, resolve_completion};
 use super::definition::definition_via_db;
 use super::document_link::document_links_via_db;
@@ -105,7 +105,8 @@ pub(crate) enum ReadJob {
         path: PathBuf,
         text: Arc<TextBuffer>,
         range: Range,
-        rules: Arc<ServerRules>,
+        rules: Option<Arc<ServerRules>>,
+        qualify: bool,
         sender: ReadReply,
     },
     DocumentDiagnostic {
@@ -932,10 +933,17 @@ fn run_read_single(
             text,
             range,
             rules,
+            qualify,
             sender,
         } => {
-            let actions: Vec<CodeActionOrCommand> =
-                code_actions_via_db(&snapshot, &uri, &path, &text, range, encoding, &rules);
+            let mut actions: Vec<CodeActionOrCommand> = rules.map_or_else(Vec::new, |rules| {
+                code_actions_via_db(&snapshot, &uri, &path, &text, range, encoding, &rules)
+            });
+            if qualify {
+                actions.extend(qualify_name_via_db(
+                    &snapshot, &uri, &path, &text, range, encoding,
+                ));
+            }
             let _ = sender.send(Message::Response(Response::new_ok(id, actions)));
         }
         ReadJob::DocumentDiagnostic {
@@ -1378,7 +1386,8 @@ mod tests {
                 path,
                 text,
                 range: Range::new(Position::new(0, 0), Position::new(1, 0)),
-                rules: ServerRules::defaults(),
+                rules: Some(ServerRules::defaults()),
+                qualify: true,
                 sender: ReadReply::new(sender),
             },
             receiver,
@@ -1403,7 +1412,8 @@ mod tests {
                 path,
                 text,
                 range: Range::new(Position::new(0, 0), Position::new(1, 0)),
-                rules: ServerRules::defaults(),
+                rules: Some(ServerRules::defaults()),
+                qualify: true,
                 sender: ReadReply::new(sender),
             },
             receiver,
