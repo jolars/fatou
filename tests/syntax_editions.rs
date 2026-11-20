@@ -1544,3 +1544,43 @@ fn workspace_harvest_uses_the_explicitly_selected_project_file() {
         );
     }
 }
+
+#[test]
+fn cli_lints_package_imports_when_manifest_is_corrupt() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("src")).unwrap();
+    for (path, text) in [
+        (
+            "Project.toml",
+            "name = 'Foo'\n[deps]\nDeclared = '1520ce14-60c1-5f80-bbc7-55ef81b5835c'\n",
+        ),
+        ("Manifest.toml", "[broken"),
+        ("fatou.toml", "[lint]\nselect = ['unresolved-import']\n"),
+        (
+            "src/Foo.jl",
+            "module Foo\nusing Declared\nusing MissingDependency\nend\n",
+        ),
+    ] {
+        std::fs::write(dir.path().join(path), text).unwrap();
+    }
+    let output = cli(
+        dir.path(),
+        &["lint", "--output", "json", "src/Foo.jl"],
+        None,
+    );
+    let report = String::from_utf8_lossy(&output.stdout);
+    assert!(!output.status.success(), "{report}");
+    let diagnostics: Vec<serde_json::Value> = serde_json::from_str(&report).unwrap();
+    let imports: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["rule"] == "unresolved-import")
+        .collect();
+    assert_eq!(imports.len(), 1, "{report}");
+    assert!(
+        imports[0]["message"]["body"]
+            .as_str()
+            .unwrap()
+            .contains("MissingDependency")
+    );
+    assert!(report.contains("syntax edition is uncertain"), "{report}");
+}

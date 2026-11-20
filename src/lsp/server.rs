@@ -569,26 +569,27 @@ fn spawn_workspace_harvester(
                 let mut failed_manifests = BTreeSet::new();
                 for root in &workspace_roots {
                     let ctx = EnvContext::from_process(root.clone());
-                    let env = match crate::environment::resolve(&ctx) {
-                        Ok(Some(env)) => env,
-                        Ok(None) => continue,
-                        Err(err) => {
-                            // Best-effort is unchanged — this folder still
-                            // contributes nothing to the library. What is new is
-                            // that the user is told why, on the file at fault,
-                            // instead of the failure being swallowed. Two roots
-                            // that walk up to the same broken file name it once.
+                    let (env, manifest_error) =
+                        match crate::environment::resolve_with_manifest_error(&ctx) {
+                            Ok(Some(resolved)) => resolved,
+                            Ok(None) => continue,
+                            Err(err) => {
+                                let (path, diags) =
+                                    resolve_failure_diagnostics(&err, encoding, |p| {
+                                        std::fs::read_to_string(p).ok()
+                                    });
+                                findings.entry(path).or_insert(diags);
+                                continue;
+                            }
+                        };
+                    if projects.insert(normalize_path(&env.project_file)) {
+                        if let Some(err) = manifest_error {
                             let (path, diags) = resolve_failure_diagnostics(&err, encoding, |p| {
                                 std::fs::read_to_string(p).ok()
                             });
-                            if crate::environment::is_manifest_file(&path) {
-                                failed_manifests.insert(normalize_path(&path));
-                            }
+                            failed_manifests.insert(normalize_path(&path));
                             findings.entry(path).or_insert(diags);
-                            continue;
                         }
-                    };
-                    if projects.insert(normalize_path(&env.project_file)) {
                         findings.extend(environment_diagnostics(&env, encoding, |path| {
                             std::fs::read_to_string(path).ok()
                         }));

@@ -345,8 +345,16 @@ fn file_name(path: &Path) -> Option<&str> {
 }
 
 /// Resolve the active Julia environment for `ctx`. Returns `Ok(None)` when no
-/// project can be located by any strategy.
+/// project can be located by any strategy. If the selected manifest fails to
+/// load, the environment contains only project and installation information.
 pub fn resolve(ctx: &EnvContext) -> Result<Option<Environment>, EnvironmentError> {
+    Ok(resolve_with_manifest_error(ctx)?.map(|(env, _)| env))
+}
+
+/// Resolve the project and retain any manifest failure for diagnostics.
+pub(crate) fn resolve_with_manifest_error(
+    ctx: &EnvContext,
+) -> Result<Option<(Environment, Option<EnvironmentError>)>, EnvironmentError> {
     let depots = depot_roots(ctx);
     let Some((project_file, source)) = locate_project(ctx, &depots) else {
         return Ok(None);
@@ -357,14 +365,17 @@ pub fn resolve(ctx: &EnvContext) -> Result<Option<Environment>, EnvironmentError
         .unwrap_or_default();
 
     let meta = parse_project(&project_file)?;
-    let (manifest_file, mut packages) = load_manifest(&project_dir, &depots)?;
+    let (manifest_file, mut packages, manifest_error) = match load_manifest(&project_dir, &depots) {
+        Ok((file, packages)) => (file, packages, None),
+        Err(error) => (None, Vec::new(), Some(error)),
+    };
 
     let install = locate_install(ctx, &depots);
     if let Some(install) = &install {
         resolve_stdlib_sources(&mut packages, install);
     }
 
-    Ok(Some(Environment {
+    let env = Environment {
         project_file,
         project_dir,
         manifest_file,
@@ -376,7 +387,8 @@ pub fn resolve(ctx: &EnvContext) -> Result<Option<Environment>, EnvironmentError
         depots,
         source,
         install,
-    }))
+    };
+    Ok(Some((env, manifest_error)))
 }
 
 /// Resolve a manifest's pins without needing a valid owning project or an

@@ -23,9 +23,7 @@ use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 /// caller clears it against the set it published last time.
 pub(crate) type EnvironmentFindings = BTreeMap<PathBuf, Vec<Diagnostic>>;
 
-/// The findings for one resolved environment: its project file's semantic
-/// checks, plus a syntax check of the manifest, which resolution accepted but
-/// which may still be malformed in ways the checks care about.
+/// The semantic findings for a resolved environment's project file.
 ///
 /// `source` yields a file's text so a byte span becomes a range; a file that
 /// cannot be read contributes nothing. Injected rather than read directly so
@@ -64,9 +62,7 @@ pub(crate) fn buffer_diagnostics(
         .collect()
 }
 
-/// The findings for a resolve that failed outright. Placed on the file the
-/// error names, which is the only thing known about a project that could not be
-/// read: no [`Environment`] exists to check.
+/// Report a project or manifest load failure on the file named by the error.
 pub(crate) fn resolve_failure_diagnostics(
     error: &EnvironmentError,
     encoding: PositionEncoding,

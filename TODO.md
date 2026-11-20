@@ -141,14 +141,8 @@
   enumerates `<depot>/packages` today — it is only ever probed by exact slug
   — so even the cheap pass is new code.
 
-- [ ] **`resolve` is all-or-nothing**, found while landing stage 1: a good
-  `Project.toml` beside a corrupt `Manifest.toml` loses the *entire*
-  environment, so there is no library and no `declared_deps`, and
-  `unresolved-import` goes quiet across the whole package. Stage 1 makes
-  that pairing conspicuous — it now reports the manifest's syntax error
-  while completions and go-to-definition silently degrade. The fix is a
-  partial resolve (keep the project half, drop `packages`), which is a real
-  behavior change to `environment.rs` deserving its own commit and tests.
+- [x] Keep the workspace package and declared dependencies when the manifest
+  fails to load. Report the manifest error in the editor and skip its pins.
 
 - [ ] An *unused dependency* check (a `[deps]` entry never `using`'d anywhere in
   the package), the inverse of `unresolved-import`. A different cost class

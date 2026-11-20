@@ -568,3 +568,38 @@ fn returns_none_when_no_project_found() {
     };
     assert!(environment::resolve(&ctx).unwrap().is_none());
 }
+
+#[test]
+fn keeps_valid_project_when_manifest_fails() {
+    let dir = TempDir::new();
+    let project = dir.path().join("Project.toml");
+    let manifest = dir.path().join("Manifest.toml");
+    write(
+        &project,
+        "name = 'Foo'\n[deps]\nAbstractTrees = '1520ce14-60c1-5f80-bbc7-55ef81b5835c'\n",
+    );
+    write(&dir.path().join("src/Foo.jl"), "module Foo end\n");
+    let ctx = bare_ctx(dir.path().to_path_buf());
+
+    for broken in [&b"[broken"[..], &[0xff][..]] {
+        fs::write(&manifest, broken).unwrap();
+        let env = environment::resolve(&ctx).unwrap().unwrap();
+        assert_eq!(env.project_file, project);
+        assert_eq!(env.dev_package().unwrap().name, "Foo");
+        assert!(env.declared_deps.contains("AbstractTrees"));
+        assert!(env.direct_deps.contains_key("AbstractTrees"));
+        assert!(env.manifest_file.is_none());
+        assert!(env.packages.is_empty());
+    }
+
+    write(&manifest, ABSTRACT_TREES_MANIFEST);
+    let env = environment::resolve(&ctx).unwrap().unwrap();
+    assert_eq!(env.manifest_file, Some(manifest));
+    assert_eq!(env.packages[0].name, "AbstractTrees");
+
+    write(&project, "[broken");
+    assert!(matches!(
+        environment::resolve(&ctx),
+        Err(environment::EnvironmentError::Parse { path, .. }) if path == project
+    ));
+}

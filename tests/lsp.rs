@@ -8814,3 +8814,50 @@ fn single_file_dependency_uses_the_active_manifest_edition() {
     drop(client);
     thread.join().unwrap();
 }
+
+#[test]
+fn lints_workspace_and_reports_corrupt_manifest() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let pkg = TempDir::new("fatou-lsp-corrupt-manifest");
+    let depot = TempDir::new("fatou-lsp-corrupt-manifest-depot");
+    let _guard = isolate_env(&pkg, &depot);
+    let manifest = pkg.path.join("Manifest.toml");
+    let source = pkg.path.join("src/MyPkg.jl");
+    let code = "module MyPkg\nusing MissingDependency\nend\n";
+    write_file(&pkg.path.join("Project.toml"), "name = 'MyPkg'\n");
+    write_file(&manifest, "[broken");
+    write_file(&source, code);
+
+    let (server, client) = Connection::memory();
+    let thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_root(&client, &file_uri(&pkg.path));
+    let diagnostics = poll_publish_diagnostics(&client, "Manifest.toml", Duration::from_secs(10));
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(
+        diagnostics[0].code,
+        Some(NumberOrString::String("toml-syntax".into()))
+    );
+
+    open_document(&client, &file_uri(&source), code);
+    let diagnostics = poll_publish_where(&client, "MyPkg.jl", Duration::from_secs(10), |diags| {
+        diags.iter().any(|diag| {
+            diag.code == Some(NumberOrString::String("unresolved-import".into()))
+                && diag.message.contains("MissingDependency")
+        })
+    });
+    assert!(!diagnostics.is_empty());
+
+    write_file(&manifest, "manifest_format = '2.0'\n");
+    did_change_watched_files(
+        &client,
+        vec![FileEvent::new(file_uri(&manifest), FileChangeType::CHANGED)],
+    );
+    poll_publish_where(
+        &client,
+        "Manifest.toml",
+        Duration::from_secs(10),
+        <[_]>::is_empty,
+    );
+    drop(client);
+    thread.join().unwrap();
+}
