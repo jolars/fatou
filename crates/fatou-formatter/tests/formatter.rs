@@ -20,10 +20,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use fatou_formatter::rowan::{TextRange, TextSize};
 use fatou_formatter::verify::{
     ast_shape, ast_shape_with_options, verify_format, verify_format_with_options,
 };
-use fatou_formatter::{FormatOptions, FormatStyle, format, format_with_options, format_with_style};
+use fatou_formatter::{
+    FormatOptions, FormatStyle, VerificationError, format, format_range, format_with_options,
+    format_with_style,
+};
 use fatou_parser::parser::{ParseOptions, parse_with_options};
 
 /// Fixtures whose shape the formatter is known to move, each with the reason.
@@ -84,6 +88,136 @@ fn fixture_dirs() -> Vec<PathBuf> {
 
 fn slug(case: &Path) -> String {
     case.file_name().unwrap().to_string_lossy().to_string()
+}
+
+#[test]
+fn import_sorting_preserves_comment_ownership_and_syntax_data() {
+    let input = "\
+using Foo: zebra, #= apple note =# apple,
+    yak # yak note
+begin
+    using Foo: zebra, apple; # block note
+end
+quote
+    using Foo: zebra, apple
+end
+@eval using Foo: zebra, apple
+";
+    let expected = "\
+using Foo:
+    #= apple note =# apple,
+    yak, # yak note
+    zebra
+begin
+    using Foo:
+        apple, # block note
+        zebra
+end
+quote
+    using Foo: zebra, apple
+end
+@eval using Foo: zebra, apple
+";
+    assert_eq!(format(input).unwrap(), expected);
+    assert_eq!(format(expected).unwrap(), expected);
+    assert_eq!(verify_format(input, expected), Ok(()));
+    assert_eq!(ast_shape(input), ast_shape(expected));
+
+    let moved = expected.replace("yak, # yak note\n    zebra", "yak,\n    zebra # yak note");
+    assert_eq!(
+        verify_format(input, &moved),
+        Err(VerificationError::ChangedComments)
+    );
+    let changed_quote = expected.replace(
+        "quote\n    using Foo: zebra, apple",
+        "quote\n    using Foo: apple, zebra",
+    );
+    assert_eq!(
+        verify_format(input, &changed_quote),
+        Err(VerificationError::ChangedProgram)
+    );
+    assert_eq!(
+        verify_format(
+            "import Foo: zebra as ant, ant\n",
+            "import Foo: ant, zebra as ant\n"
+        ),
+        Err(VerificationError::ChangedProgram),
+    );
+}
+
+#[test]
+fn import_sorting_keeps_alias_dependencies_in_order() {
+    let input = "import .Foo: zebra as yak, yak as ant\n";
+    assert_eq!(format(input).unwrap(), input);
+    assert_eq!(
+        verify_format(input, "import .Foo: yak as ant, zebra as yak\n"),
+        Err(VerificationError::ChangedProgram),
+    );
+    assert_eq!(
+        verify_format(
+            "begin using Foo: zebra, apple end\n",
+            "begin\n    using Foo: apple, zebra\nend\n"
+        ),
+        Ok(()),
+    );
+}
+
+#[test]
+fn import_sorting_compares_canonical_julia_names() {
+    let input = "import Foo: @z as @µ, z, @var\"μ\", @a\n";
+    let expected = "import Foo: @a, @z as @µ, @var\"μ\", z\n";
+    assert_eq!(fatou_formatter::format_verified(input).unwrap(), expected);
+    assert_eq!(format(expected).unwrap(), expected);
+}
+
+#[test]
+fn import_sorting_protects_code_after_a_moved_line_comment() {
+    let input = "begin using Foo: zebra, # note\n    apple end\n";
+    let expected = "begin\n    using Foo:\n        apple,\n        zebra # note\nend\n";
+    assert_eq!(format(input).unwrap(), expected);
+    assert_eq!(fatou_formatter::format_verified(input).unwrap(), expected);
+
+    let parsed = parse_with_options(input, ParseOptions::default());
+    let cursor = TextSize::try_from(input.find("apple").unwrap()).unwrap();
+    assert_eq!(
+        format_range(
+            &parsed.cst,
+            TextRange::empty(cursor),
+            FormatStyle::default()
+        )
+        .unwrap(),
+        None,
+    );
+
+    for suffix in [";", "; foo()"] {
+        let input = format!("using Foo: zebra, # note\n    apple{suffix}\n");
+        assert_eq!(format(&input).unwrap(), input);
+        assert_eq!(fatou_formatter::format_verified(&input).unwrap(), input);
+    }
+}
+
+#[test]
+fn import_sorting_range_includes_the_final_comment() {
+    let input = "module Foo\r\nusing Zoo: zebra, apple # apple note\r\nend\r\n";
+    let parsed = parse_with_options(input, ParseOptions::default());
+    let cursor = TextSize::try_from(input.find("apple note").unwrap()).unwrap();
+    let edit = format_range(
+        &parsed.cst,
+        TextRange::empty(cursor),
+        FormatStyle::default(),
+    )
+    .unwrap()
+    .unwrap();
+    let mut formatted = input.to_owned();
+    formatted.replace_range(
+        usize::from(edit.range.start())..usize::from(edit.range.end()),
+        &edit.text,
+    );
+    assert_eq!(
+        formatted,
+        "module Foo\r\nusing Zoo:\r\n    apple, # apple note\r\n    zebra\r\nend\r\n",
+    );
+    assert_eq!(format(input).unwrap(), formatted);
 }
 
 #[test]

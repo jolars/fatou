@@ -19,14 +19,17 @@
 //! # Licensed changes
 //!
 //! The projection mirrors JuliaSyntax's `SyntaxNode`, which records surface
-//! facts below the level of meaning. Exactly one is erased here:
+//! facts below the level of meaning. This comparison normalizes two of them:
 //!
 //! - **The trailing-comma flag.** JuliaSyntax marks a bracket that closes after
 //!   a trailing comma by suffixing the head (`(call-, f a)`); the formatter adds
 //!   that comma whenever it explodes an argument list across lines. Julia's own
 //!   `Expr` form does not record it.
+//! - **Explicit import selector order.** Independent names after `:` in a
+//!   `using` or `import` statement are compared in local binding order.
+//!   Aliases, comment groups, and order-sensitive bindings are preserved.
 //!
-//! Nothing else is normalized, and that is deliberate. `where T` → `where {T}`,
+//! The strict projection retains the other surface facts. `where T` → `where {T}`,
 //! splitting `a; b` onto two lines, and literal canonicalization (`.5` → `0.5`)
 //! are all recorded formatter policies that *do* move the projection, but each
 //! erasure needed to hide them could also conceal a real defect. They are
@@ -38,6 +41,11 @@ use fatou_parser::parser::{
     to_juliasyntax_sexpr_with_options,
 };
 use fatou_parser::syntax::SyntaxKind;
+use rowan::TextRange;
+
+use crate::formatter::rules::import_selectors::{
+    Selectors, following_comment, has_same_line_suffix,
+};
 
 /// The projector's sentinel head for a `SyntaxKind` it cannot render.
 const UNSUPPORTED: &str = "unsupported";
@@ -126,6 +134,7 @@ pub(crate) struct VerificationBaseline {
     comparable_shape: Option<Shape>,
     opaque_leaves: Vec<OpaqueLeaf>,
     comments: Vec<Comment>,
+    selector_comments: Vec<SelectorComment>,
 }
 
 /// Verify that `formatted` denotes the same program as `input` and preserves
@@ -158,6 +167,9 @@ pub(crate) fn verification_baseline(
             diagnostics: parsed.diagnostics.clone(),
         });
     }
+    let (normalized, selector_comments) =
+        normalize_selectors(parsed, options).ok_or(VerificationError::UnsupportedInput)?;
+    let parsed = normalized.as_ref().unwrap_or(parsed);
     let (strict_shape, comparable_shape) =
         projected_shapes(parsed, options).ok_or(VerificationError::UnsupportedInput)?;
     Ok(VerificationBaseline {
@@ -166,6 +178,7 @@ pub(crate) fn verification_baseline(
         comparable_shape,
         opaque_leaves: opaque_leaves(&parsed.cst),
         comments: comments(&parsed.cst),
+        selector_comments,
     })
 }
 
@@ -179,8 +192,11 @@ pub(crate) fn verify_against(
             diagnostics: output.diagnostics,
         });
     }
+    let (normalized, selector_comments) = normalize_selectors(&output, baseline.options)
+        .ok_or(VerificationError::UnsupportedOutput)?;
+    let output = normalized.as_ref().unwrap_or(&output);
     let (strict_shape, comparable_shape) =
-        projected_shapes(&output, baseline.options).ok_or(VerificationError::UnsupportedOutput)?;
+        projected_shapes(output, baseline.options).ok_or(VerificationError::UnsupportedOutput)?;
     if baseline.opaque_leaves != opaque_leaves(&output.cst) {
         return Err(VerificationError::ChangedProgram);
     }
@@ -193,10 +209,89 @@ pub(crate) fn verify_against(
     if !same_program {
         return Err(VerificationError::ChangedProgram);
     }
-    if baseline.comments != comments(&output.cst) {
+    if baseline.comments != comments(&output.cst) || baseline.selector_comments != selector_comments
+    {
         return Err(VerificationError::ChangedComments);
     }
     Ok(())
+}
+
+#[derive(PartialEq, Eq)]
+struct SelectorComment {
+    statement: usize,
+    position: usize,
+    counts: [usize; 3],
+}
+
+/// Compare explicit selectors in canonical order. Keep comments in their
+/// owning positions and run the ordinary projection and opaque-leaf checks on
+/// the resulting source. Only selector statements and their attached comments
+/// participate in this normalization.
+fn normalize_selectors(
+    parsed: &ParseOutput,
+    options: ParseOptions,
+) -> Option<(Option<ParseOutput>, Vec<SelectorComment>)> {
+    let mut replacements = Vec::new();
+    let mut anchors = Vec::new();
+    let imports = parsed.cst.descendants().filter(|node| {
+        matches!(
+            node.kind(),
+            SyntaxKind::USING_STMT | SyntaxKind::IMPORT_STMT
+        )
+    });
+    for (statement, node) in imports.enumerate() {
+        let trailing = following_comment(&node);
+        let Some(selectors) = Selectors::read(&node, trailing.as_ref()) else {
+            continue;
+        };
+        anchors.extend(
+            selectors
+                .comment_positions()
+                .map(|(position, counts)| SelectorComment {
+                    statement,
+                    position,
+                    counts,
+                }),
+        );
+        if let Some(mut replacement) = selectors.reordered_source() {
+            let needs_line_break = selectors.ends_with_line_comment()
+                && has_same_line_suffix(&node, trailing.as_ref());
+            let end = if let Some(token) = trailing {
+                token.text_range().end()
+            } else {
+                // The parser can leave the gap before a same-line `end` or
+                // another delimiter inside the statement.
+                if let Some(gap) = node.last_child_or_token().and_then(|el| el.into_token())
+                    && gap.kind() == SyntaxKind::WHITESPACE
+                {
+                    replacement.push_str(gap.text());
+                }
+                node.text_range().end()
+            };
+            if needs_line_break {
+                replacement.push('\n');
+            }
+            replacements.push((TextRange::new(node.text_range().start(), end), replacement));
+        }
+    }
+    if replacements.is_empty() {
+        return Some((None, anchors));
+    }
+
+    let source = parsed.cst.text().to_string();
+    let mut text = String::with_capacity(source.len());
+    let mut cursor = 0;
+    for (range, replacement) in replacements {
+        text.push_str(&source[cursor..usize::from(range.start())]);
+        text.push_str(&replacement);
+        cursor = usize::from(range.end());
+    }
+    text.push_str(&source[cursor..]);
+    let normalized = parse_with_options(&text, options);
+    normalized
+        .diagnostics
+        .is_empty()
+        .then_some((Some(normalized), anchors))
 }
 
 fn projected_shapes(
@@ -526,7 +621,7 @@ fn opaque_leaves(root: &fatou_parser::syntax::SyntaxNode) -> Vec<OpaqueLeaf> {
 }
 
 /// The formatting-invariant shape of `text`, or `None` when no comparable shape
-/// exists.
+/// exists. Independent import selectors appear in canonical order.
 ///
 /// `None` means the input is outside the invariant's domain, never that the
 /// input is malformed in an interesting way:
@@ -557,6 +652,8 @@ pub fn ast_shape_with_options(text: &str, options: ParseOptions) -> Option<Strin
     if !output.diagnostics.is_empty() {
         return None;
     }
+    let (normalized, _) = normalize_selectors(&output, options)?;
+    let output = normalized.as_ref().unwrap_or(&output);
     let raw = to_juliasyntax_sexpr_with_options(&output.cst, &output.diagnostics, options);
     let mut tokens = sexpr_tokens(&raw);
     if tokens

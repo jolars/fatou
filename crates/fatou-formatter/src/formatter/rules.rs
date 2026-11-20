@@ -9,6 +9,8 @@
 //! The style is Fatou's own; hand-authored fixtures live in
 //! `tests/formatter.rs`.
 
+pub(crate) mod import_selectors;
+
 use rowan::{NodeOrToken, TextRange};
 
 use crate::formatter::ir::Ir;
@@ -1273,10 +1275,20 @@ fn lower_keyword_stmt(node: &SyntaxNode) -> Ir {
 /// broken-only trailing comma. Source line breaks carry no layout information
 /// (Tenet 1): `using A,\n B` reflows to the same form as `using A, B`.
 ///
-/// Only the clean alternating shape—item, separator, item, …—is reshaped. A
-/// comment, a leading/trailing/doubled separator, or any unexpected token bails to
-/// the lossless transparent lowering.
+/// Explicit selectors with known local names are sorted by `import_selectors`.
+/// Other forms use the original order and reflow only when their items and
+/// separators alternate cleanly.
 fn lower_import_stmt(node: &SyntaxNode) -> Ir {
+    // The body collector owns a sibling trailing comment. On a transparent
+    // path leave its final name in place so the comment keeps its attachment.
+    if import_selectors::following_comment(node).is_none()
+        && let Some(selectors) = import_selectors::Selectors::read(node, None)
+        && (!selectors.ends_with_line_comment()
+            || !import_selectors::has_same_line_suffix(node, None))
+    {
+        return selectors.lower();
+    }
+
     let mut kw: Option<SyntaxToken> = None;
     let mut rest_els: Vec<NodeOrToken<SyntaxNode, SyntaxToken>> = Vec::new();
 
@@ -5324,6 +5336,9 @@ struct BodyLine {
     /// statement. Never set inside a block body — there echo suppression has no
     /// effect, so a block-interior `;` stays a plain separator.
     trailing_semi: bool,
+    /// A newly trailing selector comment needs a line break before a token
+    /// that falls outside this line's range edit.
+    inline_selector_suffix: bool,
     /// The source span of the line's significant content — from the first
     /// statement's or comment's start to the last one's end, exclusive of the
     /// surrounding indentation and terminator. `None` for a blank line. Range
@@ -5389,7 +5404,8 @@ fn collect_body_elements(
     expect_sep: &mut bool,
     top_level: bool,
 ) -> Option<()> {
-    for el in node.children_with_tokens() {
+    let mut elements = node.children_with_tokens();
+    while let Some(el) = elements.next() {
         match el {
             NodeOrToken::Node(child) => {
                 // The `TOPLEVEL_SEMICOLON` wrapper carries no layout of its own —
@@ -5404,8 +5420,26 @@ fn collect_body_elements(
                     return None;
                 }
                 let line = lines.last_mut().unwrap();
-                line.stmts.push(lower_node(&child));
                 line.cover(child.text_range());
+                line.inline_selector_suffix = false;
+                let trailing = import_selectors::following_comment(&child);
+                if let Some(selectors) =
+                    import_selectors::Selectors::read(&child, trailing.as_ref())
+                {
+                    line.inline_selector_suffix = selectors.ends_with_line_comment()
+                        && import_selectors::has_same_line_suffix(&child, trailing.as_ref());
+                    if let Some(comment) = trailing {
+                        for element in elements.by_ref() {
+                            if element.as_token() == Some(&comment) {
+                                break;
+                            }
+                        }
+                        line.cover(comment.text_range());
+                    }
+                    line.stmts.push(selectors.lower());
+                } else {
+                    line.stmts.push(lower_node(&child));
+                }
                 // A statement follows any earlier `;` on this line, so that `;` was
                 // an internal separator, not a trailing suppressor — clear the mark.
                 line.trailing_semi = false;
@@ -5729,6 +5763,9 @@ pub(crate) fn lower_body_range(
 
     // The window's endpoints are significant lines, so both spans exist.
     let span = lines[first].range?.cover(lines[last].range?);
+    if lines[last].inline_selector_suffix {
+        return None;
+    }
     Some((Ir::concat(inner), span))
 }
 
