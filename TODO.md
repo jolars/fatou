@@ -10,7 +10,7 @@
 
 ## Parser
 
-- [ ] Parse import selectors when a block comment precedes a comma, as in
+- [x] Parse import selectors when a block comment precedes a comma, as in
   `using A: b #= note =#, a`. Keep the comment and parse both selectors.
 
 - [x] Parse a bare `return` as a statement-level tuple element and apply

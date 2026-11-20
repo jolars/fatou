@@ -13,13 +13,6 @@ formatter, linter, or other downstream follow-up, put the active task in that
 consumer's `RECAP.md` and `TODO.md` section; retain at most a historical note in
 the parser session log.
 
-- **Import selector comments before commas.** For
-  `using A: b #= note =#, a`, JuliaSyntax projects
-  `(toplevel (using (: (importpath A) (importpath b) (importpath a))))`.
-  Fatou projects only `b` and leaves the comma and `a` as raw tokens in
-  `USING_STMT`. The separator probe in `parse_import_stmt` stops at the
-  block comment. Preserve the comment and parse the following clause.
-
 Other targets come from the
 classified JuliaSyntax 2 migration clusters in `tests/oracle/blocked.txt` and
 `tests/oracle/juliasyntax-blocked.txt`: adjacent assignment/comparison tokens,
@@ -81,7 +74,7 @@ Start with adjacent assignment/comparison token boundaries.
 JS corpus (**907 cases**, error shapes included): **885 allowlisted**, 22
 classified divergences, 0 unsupported. All 756 original inputs remain, including
 six removed from upstream's harvested binding, and all 749 original passing
-cases remain allowlisted. Dir corpus (**298 cases**): **290 allowlisted**, 8
+cases remain allowlisted. Dir corpus (**299 cases**): **291 allowlisted**, 8
 blocked. Seven curated grammar changes moved to blocked with identical parser
 fixtures and reviewed CST snapshots; numeric display remains blocked. Both
 corpora enforce complete triage and reject stale blocked entries.
@@ -126,15 +119,19 @@ prefix `**a`/`--a` (`call-pre`, in neither corpus); trailing block-body junk
 keyword in `(@m x\n end)`. The last two remain pre-existing divergences in the
 multiline-macro probe set.
 
-## Latest session (2026-11-18, statement tuples and type group docstrings)
+## Latest session (2026-11-20, import commas after block comments)
 
-- A bare `return` can start a statement-level tuple and still leaves argument
-  separators to the enclosing list parser.
-- A quote glued to `typegroup` opens a docstring. Edition 1.13 recovers the
-  block and reports the 1.14 requirement.
-- Three new curated fixtures pass. The harvested corpus stays at 885 of 907.
+- Parse a clause after a comma even when a block comment precedes it. The CST
+  preserves the comment and gives the following clause its own import path.
+  The pinned fixture covers aliases, nested multiline comments, and statement
+  termination at a newline outside the comment.
+- The curated corpus gained one passing fixture. The harvested corpus stays at
+  885 of 907.
 
 ## Earlier sessions
+
+- **Statement tuples and type group docstrings** (2026-11-18): parsed bare
+  returns in statement-level tuples and gated glued docstrings. 885 / 290.
 
 - **Declaration and block recovery** (2026-11-18): recovered old-edition type
   groups, reserved declaration names, and leading return-block commas. 885 / 287.
