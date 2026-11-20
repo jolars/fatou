@@ -60,16 +60,5 @@
         }
       ]
     }
-  },
-  "commit-overrides": {
-    "6499212a448e22626f4979720e65ea3847232d46": {
-      "skip": true
-    },
-    "e403d1a153695c644687983a2f06fa656b591d69": {
-      "skip": true
-    },
-    "5f40ccd1cbba82060cc15a6bd299dda16b8ca160": {
-      "skip": true
-    }
   }
 }
