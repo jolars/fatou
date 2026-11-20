@@ -1,11 +1,11 @@
 {
   "manifest-version": 1,
-  "baseline-sha": "caaa4a44fd585fb693a79f12b44ba16ae897abb6",
+  "baseline-sha": "147bb32c33018147db39954404d5d04679542a64",
   "release-targets": [
     {
       "path": ".",
-      "version": "0.27.0",
-      "tag": "v0.27.0",
+      "version": "0.28.0",
+      "tag": "v0.28.0",
       "dependencies": [
         "crates/fatou-formatter",
         "crates/fatou-parser"
@@ -13,21 +13,21 @@
     },
     {
       "path": "crates/fatou-formatter",
-      "version": "0.9.0",
-      "tag": "fatou-formatter-v0.9.0",
+      "version": "0.10.0",
+      "tag": "fatou-formatter-v0.10.0",
       "dependencies": [
         "crates/fatou-parser"
       ]
     },
     {
       "path": "crates/fatou-parser",
-      "version": "0.10.0",
-      "tag": "fatou-parser-v0.10.0"
+      "version": "0.10.1",
+      "tag": "fatou-parser-v0.10.1"
     },
     {
       "path": "editors/code",
-      "version": "0.27.0",
-      "tag": "fatou-code-v0.27.0",
+      "version": "0.28.0",
+      "tag": "fatou-code-v0.28.0",
       "dependencies": [
         "."
       ]
@@ -41,8 +41,8 @@
   "pending-release-targets": [
     {
       "path": ".",
-      "version": "0.27.0",
-      "tag": "v0.27.0",
+      "version": "0.28.0",
+      "tag": "v0.28.0",
       "dependencies": [
         "crates/fatou-formatter",
         "crates/fatou-parser"
@@ -50,21 +50,21 @@
     },
     {
       "path": "crates/fatou-formatter",
-      "version": "0.9.0",
-      "tag": "fatou-formatter-v0.9.0",
+      "version": "0.10.0",
+      "tag": "fatou-formatter-v0.10.0",
       "dependencies": [
         "crates/fatou-parser"
       ]
     },
     {
       "path": "crates/fatou-parser",
-      "version": "0.10.0",
-      "tag": "fatou-parser-v0.10.0"
+      "version": "0.10.1",
+      "tag": "fatou-parser-v0.10.1"
     },
     {
       "path": "editors/code",
-      "version": "0.27.0",
-      "tag": "fatou-code-v0.27.0",
+      "version": "0.28.0",
+      "tag": "fatou-code-v0.28.0",
       "dependencies": [
         "."
       ]

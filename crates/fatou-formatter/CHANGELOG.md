@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.10.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.9.0...fatou-formatter-v0.10.0) (2026-11-20)
+
+### Features
+
+- **formatter:** sort explicit import names ([`a9676c9`](https://github.com/jolars/fatou/commit/a9676c972d889464763b244f971d9ec4a567794b))
+
+### Dependencies
+
+- updated crates/fatou-parser to v0.10.1
+
 ## [0.9.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.8.0...fatou-formatter-v0.9.0) (2026-11-18)
 
 ### Features

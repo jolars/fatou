@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.1](https://github.com/jolars/fatou/compare/fatou-parser-v0.10.0...fatou-parser-v0.10.1) (2026-11-20)
+
+### Bug Fixes
+
+- **parser:** parse import commas after block comments ([`2c78bc1`](https://github.com/jolars/fatou/commit/2c78bc1baf8b395e63ab06fc87c7bfff53e23e07))
+
 ## [0.10.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.9.0...fatou-parser-v0.10.0) (2026-11-18)
 
 ### Breaking changes

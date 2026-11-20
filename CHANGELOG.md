@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.28.0](https://github.com/jolars/fatou/compare/v0.27.0...v0.28.0) (2026-11-20)
+
+### Features
+
+- **lsp:** add a code action to qualify bare names ([`d0c4f53`](https://github.com/jolars/fatou/commit/d0c4f53c1fe8cf52c62013e9d76a5717ed8df15a))
+- add `dead-assignment` lint rule ([`4cd3cbb`](https://github.com/jolars/fatou/commit/4cd3cbb44fc4de1095c06a8b92dbcfeae3236863))
+
+### Bug Fixes
+
+- retain Julia projects when their manifests fail ([`147bb32`](https://github.com/jolars/fatou/commit/147bb32c33018147db39954404d5d04679542a64))
+
+### Dependencies
+
+- updated crates/fatou-formatter to v0.10.0
+- updated crates/fatou-parser to v0.10.1
+
 ## [0.27.0](https://github.com/jolars/fatou/compare/v0.26.1...v0.27.0) (2026-11-18)
 
 ### Features
