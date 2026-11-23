@@ -31,10 +31,12 @@ impl Selectors {
         }
         let mut elements = node.children_with_tokens();
         let keyword = elements.next()?.into_token()?;
-        let mut significant = elements.by_ref().filter(|el| el.kind() != WHITESPACE);
-        let head = significant.next()?.into_node()?;
+        let head = elements
+            .by_ref()
+            .find(|el| !matches!(el.kind(), WHITESPACE | NEWLINE))?
+            .into_node()?;
         if head.kind() != IMPORT_PATH
-            || significant.next()?.kind() != COLON
+            || elements.find(|el| el.kind() != WHITESPACE)?.kind() != COLON
             || node
                 .ancestors()
                 .any(|ancestor| matches!(ancestor.kind(), QUOTE_EXPR | QUOTE_SYM | MACRO_CALL))
