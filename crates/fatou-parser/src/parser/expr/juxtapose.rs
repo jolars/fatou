@@ -106,6 +106,7 @@ fn lhs_value_close(lhs: &ExprParse) -> bool {
         Some(Event::Start(
             SyntaxKind::PAREN_EXPR
                 | SyntaxKind::CALL_EXPR
+                | SyntaxKind::DOT_CALL_EXPR
                 | SyntaxKind::INDEX_EXPR
                 | SyntaxKind::CURLY_EXPR
                 | SyntaxKind::VECT_EXPR

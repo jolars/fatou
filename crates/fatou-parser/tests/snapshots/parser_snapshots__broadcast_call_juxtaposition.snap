@@ -1,0 +1,64 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..52
+  CALL_EXPR@0..42
+    NAME@0..4
+      IDENT@0..4 "plot"
+    ARG_LIST@4..42
+      LPAREN@4..5 "("
+      ARG@5..41
+        BINARY_EXPR@5..41
+          JUXTAPOSE_EXPR@5..23
+            DOT_CALL_EXPR@5..15
+              NAME@5..10
+                IDENT@5..10 "round"
+              DOT@10..11 "."
+              ARG_LIST@11..15
+                LPAREN@11..12 "("
+                ARG@12..14
+                  NAME@12..14
+                    IDENT@12..14 "xs"
+                RPAREN@14..15 ")"
+            BINARY_EXPR@15..23
+              NAME@15..17
+                IDENT@15..17 "DQ"
+              DOT@17..18 "."
+              STRING_LITERAL@18..23
+                STRING_PREFIX@18..19 "u"
+                STRING_DELIM_OPEN@19..20 "\""
+                STRING_CONTENT@20..22 "ns"
+                STRING_DELIM_CLOSE@22..23 "\""
+          WHITESPACE@23..24 " "
+          DOT_PIPE_GT@24..27 ".|>"
+          WHITESPACE@27..28 " "
+          BINARY_EXPR@28..41
+            NAME@28..30
+              IDENT@28..30 "DQ"
+            DOT@30..31 "."
+            STRING_LITERAL@31..41
+              STRING_PREFIX@31..33 "us"
+              STRING_DELIM_OPEN@33..34 "\""
+              STRING_CONTENT@34..40 "minute"
+              STRING_DELIM_CLOSE@40..41 "\""
+      RPAREN@41..42 ")"
+  NEWLINE@42..43 "\n"
+  JUXTAPOSE_EXPR@43..51
+    DOT_CALL_EXPR@43..48
+      NAME@43..44
+        IDENT@43..44 "f"
+      DOT@44..45 "."
+      ARG_LIST@45..48
+        LPAREN@45..46 "("
+        ARG@46..47
+          NAME@46..47
+            IDENT@46..47 "x"
+        RPAREN@47..48 ")"
+    BINARY_EXPR@48..51
+      NAME@48..49
+        IDENT@48..49 "y"
+      CARET@49..50 "^"
+      LITERAL@50..51
+        INTEGER@50..51 "2"
+  NEWLINE@51..52 "\n"

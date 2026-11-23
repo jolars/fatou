@@ -33,6 +33,7 @@ bracescat
 broadcast_bitshift
 broadcast_bitwise_assign
 broadcast_bitwise_operators
+broadcast_call_juxtaposition
 broadcast_identity_operators
 broadcast_not
 broadcast_type_comparison

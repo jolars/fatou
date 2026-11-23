@@ -1,0 +1,1 @@
+(toplevel (call plot (dotcall-i (juxtapose (dotcall round xs) y) |> scale)) (juxtapose (dotcall f x) (call-i y ^ 2)))
