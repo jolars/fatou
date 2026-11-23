@@ -10,6 +10,10 @@
 
 ## Parser
 
+- [x] Parse implicit multiplication after broadcast calls, as in
+  `round.(xs)DQ.u"ns"` ([#152](https://github.com/jolars/fatou/issues/152)).
+  Pin grouping and precedence against JuliaSyntax in edition 1.13.
+
 - [x] Parse import selectors when a block comment precedes a comma, as in
   `using A: b #= note =#, a`. Keep the comment and parse both selectors.
 

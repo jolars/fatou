@@ -74,7 +74,7 @@ Start with adjacent assignment/comparison token boundaries.
 JS corpus (**907 cases**, error shapes included): **885 allowlisted**, 22
 classified divergences, 0 unsupported. All 756 original inputs remain, including
 six removed from upstream's harvested binding, and all 749 original passing
-cases remain allowlisted. Dir corpus (**299 cases**): **291 allowlisted**, 8
+cases remain allowlisted. Dir corpus (**300 cases**): **292 allowlisted**, 8
 blocked. Seven curated grammar changes moved to blocked with identical parser
 fixtures and reviewed CST snapshots; numeric display remains blocked. Both
 corpora enforce complete triage and reject stale blocked entries.
@@ -119,16 +119,19 @@ prefix `**a`/`--a` (`call-pre`, in neither corpus); trailing block-body junk
 keyword in `(@m x\n end)`. The last two remain pre-existing divergences in the
 multiline-macro probe set.
 
-## Latest session (2026-11-20, import commas after block comments)
+## Latest session (2026-11-23, broadcast call juxtaposition)
 
-- Parse a clause after a comma even when a block comment precedes it. The CST
-  preserves the comment and gives the following clause its own import path.
-  The pinned fixture covers aliases, nested multiline comments, and statement
-  termination at a newline outside the comment.
+- Recognize broadcast calls as left operands of implicit multiplication.
+  The Makie regression in #152 used a qualified string macro as the right
+  operand. The CST fixture covers that shape, and the edition 1.13 oracle
+  checks precedence with plain identifiers.
 - The curated corpus gained one passing fixture. The harvested corpus stays at
   885 of 907.
 
 ## Earlier sessions
+
+- **Import commas after block comments** (2026-11-20): preserved comments and
+  parsed the following import selectors. 885 / 291.
 
 - **Statement tuples and type group docstrings** (2026-11-18): parsed bare
   returns in statement-level tuples and gated glued docstrings. 885 / 290.
