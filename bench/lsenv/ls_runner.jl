@@ -12,6 +12,5 @@ const conn_out = stdout
 redirect_stdout(stderr)
 
 workspace = length(ARGS) >= 1 ? ARGS[1] : ""
-depot = get(ENV, "JULIA_DEPOT_PATH", joinpath(homedir(), ".julia"))
-
-run(LanguageServerInstance(conn_in, conn_out, workspace, depot))
+cache = get(ENV, "BENCH_SYMBOL_CACHE", nothing)
+LanguageServer.runserver(conn_in, conn_out, workspace, nothing, cache)

@@ -27,6 +27,8 @@ const MARKERS: &[&str] = &[META_MARKER, SPEED_MARKER, SERVERS_MARKER, CLI_MARKER
 
 #[derive(Deserialize)]
 struct Memory {
+    #[serde(default)]
+    schema_version: u32,
     meta: Meta,
     session: Session,
     #[serde(default)]
@@ -143,6 +145,10 @@ struct RequestLatency {
     p95_ms: Option<f64>,
     #[serde(default)]
     failures: u64,
+    #[serde(default)]
+    samples: u64,
+    #[serde(default)]
+    statuses: BTreeMap<String, u64>,
     #[serde(default)]
     empty_results: u64,
     #[serde(default)]
@@ -400,6 +406,11 @@ fn render_speed(m: &Memory) -> String {
         return "_No servers in the benchmark artifact (run `task bench-lsp`)._".to_string();
     }
 
+    let workspace_label = if m.schema_version >= 3 {
+        "Workspace quiescence"
+    } else {
+        "Workspace ready"
+    };
     let readiness: Vec<_> = m
         .servers
         .iter()
@@ -408,14 +419,14 @@ fn render_speed(m: &Memory) -> String {
                 s,
                 &[
                     ("Initialize", s.initialize_seconds),
-                    ("Workspace ready", s.workspace_ready_seconds),
+                    (workspace_label, s.workspace_ready_seconds),
                     ("Open files ready", s.documents_ready_seconds),
                 ],
             )
         })
         .collect();
-    let mut table = String::from(
-        "| Server | Initialize | Workspace ready | Open files ready |\n\
+    let mut table = format!(
+        "| Server | Initialize | {workspace_label} | Open files ready |\n\
          | --- | ---: | ---: | ---: |\n",
     );
     for server in &m.servers {
@@ -441,8 +452,8 @@ fn render_speed(m: &Memory) -> String {
 
     let mut requests = Vec::new();
     let mut table = String::from(
-        "| Server | Request | Median | p95 | Returned work |\n\
-         | --- | --- | ---: | ---: | --- |\n",
+        "| Server | Request | Median | p95 | Valid samples | Returned work |\n\
+         | --- | --- | ---: | ---: | ---: | --- |\n",
     );
     for server in &m.servers {
         for latency in &server.request_latencies {
@@ -456,17 +467,22 @@ fn render_speed(m: &Memory) -> String {
                 });
             }
             table.push_str(&format!(
-                "| {} | {} | {} | {} | {} |\n",
+                "| {} | {} | {} | {} | {} | {} |\n",
                 server.label,
                 latency.label,
                 milliseconds(latency.median_ms),
                 milliseconds(latency.p95_ms),
+                latency.samples,
                 returned_work(latency),
             ));
         }
     }
 
-    out.push_str("#### Warm requests\n\n");
+    if m.schema_version >= 3 {
+        out.push_str("#### Requests and editing\n\n");
+    } else {
+        out.push_str("#### Warm requests\n\n");
+    }
     out.push_str(&render_chart(
         "lsp-requests",
         &requests,
@@ -509,6 +525,16 @@ fn render_speed(m: &Memory) -> String {
             server.request_latencies.iter().flat_map(move |latency| {
                 let request = latency.key.replace('_', " ");
                 let mut notes = Vec::new();
+                if !latency.statuses.is_empty() {
+                    return latency
+                        .statuses
+                        .iter()
+                        .filter(|(status, _)| status.as_str() != "ok")
+                        .map(|(status, count)| {
+                            format!("{}: {request}, {count} {status}", server.label)
+                        })
+                        .collect();
+                }
                 if latency.failures > 0 {
                     let suffix = if latency.failures == 1 { "" } else { "s" };
                     notes.push(format!(
@@ -818,23 +844,44 @@ mod tests {
         );
         assert!(
             out.contains(
-                "| Fatou | Go to definition | 0.30 ms | 0.45 ms | 1 location in 1 file, 180 B |"
+                "| Fatou | Go to definition | 0.30 ms | 0.45 ms | 20 | 1 location in 1 file, 180 B |"
             ),
             "{out}"
         );
         assert!(
             out.contains(
-                "| Fatou | Find references | 4.20 ms | 5.10 ms | 42 locations in 8 files, 16 KiB |"
+                "| Fatou | Find references | 4.20 ms | 5.10 ms | 20 | 42 locations in 8 files, 16 KiB |"
             ),
             "{out}"
         );
         assert!(
-            out.contains("| Fatou | Rename | 5.20 ms | 6.10 ms | 42 edits in 8 files, 20 KiB |"),
+            out.contains(
+                "| Fatou | Rename | 5.20 ms | 6.10 ms | 20 | 42 edits in 8 files, 20 KiB |"
+            ),
             "{out}"
         );
         assert!(out.contains("median / p95"), "{out}");
         assert!(out.contains("1 failed hover request"), "{out}");
         assert!(out.contains("2 hover requests returned no result"), "{out}");
+    }
+
+    #[test]
+    fn current_artifact_labels_quiescence_and_excludes_invalid_timings() {
+        let mut memory = artifact();
+        memory.schema_version = 3;
+        let latency = &mut memory.servers[0].request_latencies[0];
+        latency.key = "edit_completion".to_owned();
+        latency.label = "Completion after edit".to_owned();
+        latency.median_ms = None;
+        latency.p95_ms = None;
+        latency.samples = 0;
+        latency.statuses.insert("invalid".to_owned(), 2);
+        let out = render_speed(&memory);
+        assert!(out.contains("Workspace quiescence"), "{out}");
+        assert!(out.contains("#### Requests and editing"), "{out}");
+        assert!(out.contains("edit completion, 2 invalid"), "{out}");
+        let requests = chart_data(&out, "lsp-requests");
+        assert_eq!(requests.as_array().unwrap().len(), 9);
     }
 
     #[test]

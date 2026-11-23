@@ -16,8 +16,9 @@ stays self-describing, the same way scenario labels work in results.json.
 import argparse
 import json
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Server key -> display label and a one-line note on what that server is doing
 # for its memory, which is the context the numbers are meaningless without.
@@ -25,7 +26,7 @@ SERVERS = {
     "fatou": ("Fatou", "static analysis, no Julia runtime"),
     "languageserver": (
         "LanguageServer.jl",
-        "Julia runtime plus a SymbolServer pass over the environment",
+        "Julia runtime plus JuliaWorkspaces analysis",
     ),
     "jetls": ("JETLS", "Julia runtime plus type inference through JET"),
 }
@@ -33,6 +34,13 @@ SERVERS = {
 
 def load(path):
     return json.loads(Path(path).read_text())
+
+
+def request_summaries(entry):
+    return [
+        {key: value for key, value in latency.items() if key != "raw"}
+        for latency in entry.get("request_latencies", [])
+    ]
 
 
 def flatten_servers(lsp):
@@ -48,6 +56,8 @@ def flatten_servers(lsp):
         records.append(
             {
                 "key": key,
+                "command": entry["command"],
+                "session_count": entry["session_count"],
                 "label": label,
                 "doing": doing,
                 "baseline_rss_mb": baseline.get("rss_mb"),
@@ -58,7 +68,7 @@ def flatten_servers(lsp):
                 "initialize_seconds": entry.get("initialize_seconds"),
                 "workspace_ready_seconds": entry.get("workspace_ready_seconds"),
                 "documents_ready_seconds": entry.get("documents_ready_seconds"),
-                "request_latencies": entry.get("request_latencies", []),
+                "request_latencies": request_summaries(entry),
                 "settled_seconds": entry.get("settled_seconds"),
                 "diagnostics_published": entry.get("diagnostics_published"),
                 "diagnostic_requests": entry.get("diagnostic_requests"),
@@ -95,11 +105,28 @@ def main():
     args = parser.parse_args()
 
     lsp = load(args.lsp)
+    failed = {
+        name: sum(session.get("initialize_status") != "ok" for session in sessions)
+        for name, sessions in lsp["sessions"].items()
+    }
+    if any(failed.values()):
+        parser.error(f"benchmark artifact has failed initialization sessions: {failed}")
     cli = load(args.cli)
 
     payload = {
         "schema_version": SCHEMA_VERSION,
-        "meta": load(args.meta),
+        "meta": {
+            **load(args.meta),
+            "workspace_manifest_sha256": lsp["workspace_manifest_sha256"],
+        },
+        "session_order": lsp["session_order"],
+        "sessions": {
+            name: [
+                {**session, "request_latencies": request_summaries(session)}
+                for session in sessions
+            ]
+            for name, sessions in lsp["sessions"].items()
+        },
         "session": {
             "project": Path(lsp["project"]).name,
             "files": [Path(f).name for f in lsp["files"]],
@@ -116,7 +143,15 @@ def main():
         },
     }
 
-    Path(args.out).write_text(json.dumps(payload, indent=2) + "\n")
+    output = Path(args.out)
+    with NamedTemporaryFile(mode="w", dir=output.parent, delete=False) as temporary:
+        temporary_path = Path(temporary.name)
+        try:
+            temporary.write(json.dumps(payload, indent=2) + "\n")
+            temporary.close()
+            temporary_path.replace(output)
+        finally:
+            temporary_path.unlink(missing_ok=True)
     print(f"==> wrote {args.out}")
 
 

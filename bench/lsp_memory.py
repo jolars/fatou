@@ -1,46 +1,14 @@
 #!/usr/bin/env python3
-"""Speed and resident-memory harness for language servers, driven over stdio.
+"""Drive prepared language-server sessions over LSP stdio on Linux.
 
-Each server is spawned, put through the same scripted editing session against
-the same real Julia project, and sampled from `/proc` throughout. The session is
-deliberately the boring one an editor produces on open:
-
-    initialize -> initialized -> wait for the server to fall quiet
-      -> didOpen N files -> diagnostics -> documentSymbol + hover on a few
-      -> wait for it to fall quiet again -> definition + references + rename
-
-Sampling covers the **whole process tree**, not just the server process, because
-LanguageServer.jl fans its environment indexing out to a SymbolServer child and
-would otherwise get that memory for free.
-
-Two figures per sample, both summed over the tree:
-
-    rss  VmRSS, the number `top` shows. Pages shared between parent and child
-         are counted once per process.
-    pss  Pss from smaps_rollup, which divides each shared page by the number of
-         processes mapping it. This is the honest "how much of this machine's
-         RAM is this session holding" figure.
-
-Milestones recorded per server: `baseline` (handshake done, nothing opened),
-`settled` (diagnostics in, tree quiet again), and `peak` (max over every sample,
-which for a server with a short-lived indexing child is the only place that
-child shows up at all). The harness also records initialization and readiness
-times, then measures warm document-symbol, hover, definition, references, and
-rename request latency.
-
-Quiescence, not a fixed sleep, is what ends each phase: the tree is quiet once
-its aggregate CPU stays under 5% of one core for `--quiet-seconds`, capped by
-`--settle-timeout`. Servers here differ by two orders of magnitude in how long
-they take to finish thinking, and any fixed wait would be unfair to one end.
-
-Usage:
-  lsp_memory.py --project <dir> --files <f.jl>... --out <out.json> \
-      --server 'name=<command line>' [--server ...] \
-      [--settle-timeout 300] [--quiet-seconds 5] [--stderr-dir <dir>]
-      [--latency-runs 20] [--latency-warmups 2]
+Each session measures process launch and initialization, estimates workspace
+quiescence from process-tree CPU activity, and verifies diagnostics for the
+opened files. It then measures warm requests and unsaved edits. Process-tree
+RSS and PSS include child processes. Use --help for invocation options.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -48,12 +16,16 @@ import shlex
 import signal
 import statistics
 import subprocess
+import tempfile
 import threading
 import time
+from collections import Counter
 from pathlib import Path
 
+from lsp_edit import edit_workload, matching_diagnostics
+
 CLK_TCK = os.sysconf("SC_CLK_TCK")
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Fraction of one core the tree must stay under to count as quiet.
 IDLE_CPU_FRACTION = 0.05
@@ -178,6 +150,8 @@ class Sampler(threading.Thread):
         if span < seconds * 0.8:
             return None  # not enough history yet to call it
         cpu_seconds = (window[-1][3] - window[0][3]) / CLK_TCK
+        if cpu_seconds < 0:
+            return None
         return window[0][0] if cpu_seconds / span < IDLE_CPU_FRACTION else None
 
 
@@ -187,7 +161,7 @@ class Sampler(threading.Thread):
 class Client:
     """Just enough of the protocol to drive a server and keep it happy."""
 
-    def __init__(self, cmd, cwd, stderr_path=None):
+    def __init__(self, cmd, cwd, stderr_path=None, env=None):
         # Servers report their own failures on stderr, and that is the only way
         # to tell "quiet because idle" from "quiet because dead".
         # Not a context manager: the handle has to outlive this call, for as
@@ -196,6 +170,7 @@ class Client:
         self.proc = subprocess.Popen(
             cmd,
             cwd=cwd,
+            env=env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=self.stderr_file or subprocess.DEVNULL,
@@ -297,9 +272,12 @@ class Client:
 
     def kill(self):
         try:
-            os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
+            os.killpg(self.proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError):
             pass
+        self.proc.wait(timeout=5)
+        self.stdin.close()
+        self.stdout.close()
         if self.stderr_file is not None:
             self.stderr_file.close()
 
@@ -307,34 +285,35 @@ class Client:
 # Announce a broadly capable client, so no server withholds work on the grounds
 # that we could not render it.
 CAPABILITIES = {
+    "general": {"positionEncodings": ["utf-16"]},
     "workspace": {
         "workspaceFolders": True,
         "configuration": True,
-        "didChangeConfiguration": {"dynamicRegistration": True},
-        "symbol": {"dynamicRegistration": True},
+        "didChangeConfiguration": {"dynamicRegistration": False},
+        "symbol": {"dynamicRegistration": False},
         "workspaceEdit": {
             "documentChanges": True,
             "resourceOperations": ["create", "rename", "delete"],
         },
     },
     "textDocument": {
-        "synchronization": {"dynamicRegistration": True, "didSave": True},
+        "synchronization": {"dynamicRegistration": False, "didSave": True},
         "publishDiagnostics": {"relatedInformation": True, "versionSupport": True},
-        "diagnostic": {"dynamicRegistration": True, "relatedDocumentSupport": True},
+        "diagnostic": {"dynamicRegistration": False, "relatedDocumentSupport": True},
         "hover": {"contentFormat": ["markdown", "plaintext"]},
         "completion": {"completionItem": {"snippetSupport": True}},
-        "definition": {"dynamicRegistration": True, "linkSupport": True},
-        "references": {"dynamicRegistration": True},
-        "rename": {"dynamicRegistration": True, "prepareSupport": True},
+        "definition": {"dynamicRegistration": False, "linkSupport": True},
+        "references": {"dynamicRegistration": False},
+        "rename": {"dynamicRegistration": False, "prepareSupport": True},
         "documentSymbol": {"hierarchicalDocumentSymbolSupport": True},
     },
 }
 
 
-def wait_until_quiet(sampler, quiet_seconds, timeout, not_before):
+def wait_until_quiet(sampler, quiet_seconds, timeout, not_before, client):
     """Return the quiet window's start, or None after `timeout` seconds."""
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    while client.alive and client.proc.poll() is None and time.monotonic() < deadline:
         quiet_since = sampler.quiet_since(quiet_seconds, not_before)
         if quiet_since is not None:
             return quiet_since
@@ -384,6 +363,9 @@ def navigation_target(project, files):
                 "position": {"line": line_number, "character": character},
             }
         break
+    candidate = project / "src" / NAVIGATION_FILE
+    if candidate.is_file() and str(candidate) not in files:
+        return navigation_target(project, [*files, str(candidate)])
     raise RuntimeError(
         f"navigation target {NAVIGATION_SYMBOL} in {NAVIGATION_FILE} is missing"
     )
@@ -398,6 +380,11 @@ def location_summary(result):
         if isinstance(location, dict)
     }
     uris.discard(None)
+    if not uris or any(
+        not isinstance(item, dict) or not (item.get("uri") or item.get("targetUri"))
+        for item in locations
+    ):
+        return 0, None
     return len(locations), len(uris)
 
 
@@ -405,19 +392,24 @@ def document_symbol_summary(result):
     """Number of symbols, including nested DocumentSymbol children."""
 
     def count(symbol):
+        if not isinstance(symbol, dict) or not isinstance(symbol.get("name"), str):
+            return 0
         return 1 + sum(count(child) for child in symbol.get("children") or [])
 
     symbols = result if isinstance(result, list) else []
-    return sum(count(symbol) for symbol in symbols), None
+    counts = [count(symbol) for symbol in symbols]
+    return (sum(counts) if all(counts) else 0), None
 
 
 def singleton_summary(result):
     """A successful, nonempty singleton response such as hover."""
-    return 1, None
+    return int(isinstance(result, dict) and bool(result.get("contents"))), None
 
 
 def workspace_edit_summary(result):
     """Number of text edits and distinct files in a WorkspaceEdit."""
+    if not isinstance(result, dict):
+        return 0, None
     edits = 0
     uris = set()
     for uri, file_edits in (result.get("changes") or {}).items():
@@ -466,6 +458,7 @@ def benchmark_requests(
     result_counts = []
     result_files = []
     payload_bytes = []
+    raw = []
     for _ in range(runs):
         for request_params in params:
             started = time.perf_counter_ns()
@@ -473,14 +466,29 @@ def benchmark_requests(
             elapsed_ms = (time.perf_counter_ns() - started) / 1_000_000
             if response is None or "error" in response:
                 failures += 1
+                status = (
+                    ("timeout" if client.alive else "exit")
+                    if response is None
+                    else (
+                        "unsupported"
+                        if response["error"].get("code") == -32601
+                        else "error"
+                    )
+                )
+                raw.append({"status": status, "ms": None})
                 if not client.alive:
                     break
                 continue
             result = response.get("result")
             if result in (None, [], {}):
                 empty_results += 1
+                raw.append({"status": "empty", "ms": None})
+                continue
             else:
                 count, files = summarize(result)
+                if not count:
+                    raw.append({"status": "invalid", "ms": None})
+                    continue
                 result_counts.append(count)
                 if files is not None:
                     result_files.append(files)
@@ -492,6 +500,15 @@ def benchmark_requests(
                     )
                 )
             latencies.append(elapsed_ms)
+            raw.append(
+                {
+                    "status": "ok",
+                    "ms": elapsed_ms,
+                    "count": count,
+                    "files": files,
+                    "payload_bytes": payload_bytes[-1],
+                }
+            )
         if not client.alive:
             break
 
@@ -505,6 +522,8 @@ def benchmark_requests(
         "empty_results": empty_results,
         "targets": len(params),
         "result_unit": result_unit,
+        "raw": raw,
+        "statuses": dict(Counter(item["status"] for item in raw)),
     }
     add_distribution(record, "result_count", result_counts)
     add_distribution(record, "result_files", result_files)
@@ -524,15 +543,56 @@ def run_session(
     latency_warmups,
     navigation,
     stderr_dir,
+    env=None,
+    session=0,
+    prime=False,
 ):
     print(f"==> language server: {name}", flush=True)
-    stderr_path = str(Path(stderr_dir) / f"{name}.stderr.log") if stderr_dir else None
-    client = Client(cmd, cwd=str(project), stderr_path=stderr_path)
+    stderr_path = (
+        str(Path(stderr_dir) / f"{name}-{session}.stderr.log") if stderr_dir else None
+    )
+    start = time.monotonic()
+    client = Client(cmd, cwd=str(project), stderr_path=stderr_path, env=env)
     sampler = Sampler(client.proc.pid)
     sampler.start()
+    try:
+        return measure_session(
+            name,
+            cmd,
+            project,
+            files,
+            settle_timeout,
+            quiet_seconds,
+            latency_runs,
+            latency_warmups,
+            navigation,
+            client,
+            sampler,
+            start,
+            prime,
+        )
+    finally:
+        sampler.stop_flag.set()
+        sampler.join(timeout=2)
+        client.kill()
 
+
+def measure_session(
+    name,
+    cmd,
+    project,
+    files,
+    settle_timeout,
+    quiet_seconds,
+    latency_runs,
+    latency_warmups,
+    navigation,
+    client,
+    sampler,
+    start,
+    prime,
+):
     result = {"server": name, "command": cmd, "milestones": {}, "notes": []}
-    start = time.monotonic()
 
     initialized = client.request(
         "initialize",
@@ -547,23 +607,28 @@ def run_session(
         },
         timeout=settle_timeout,
     )
-    if initialized is None:
-        result["notes"].append("initialize never answered; server timed out or died")
-        sampler.stop_flag.set()
-        client.kill()
+    response = (initialized or {}).get("result")
+    if not isinstance(response, dict) or not isinstance(
+        response.get("capabilities"), dict
+    ):
+        status = (
+            ("timeout" if client.alive else "exit") if initialized is None else "error"
+        )
+        result["initialize_status"] = status
+        result["notes"].append(f"initialize {status}: {initialized!r}")
         return result
 
-    result["initialize_seconds"] = round(time.monotonic() - start, 3)
-    capabilities = (initialized.get("result") or {}).get("capabilities", {})
+    result["initialize_status"] = "ok"
+    result["initialize_seconds"] = time.monotonic() - start
+    capabilities = response["capabilities"]
+    result["server_info"] = response.get("serverInfo")
     result["pull_diagnostics"] = bool(capabilities.get("diagnosticProvider"))
-    client.notify("initialized", {})
     baseline_phase = time.monotonic() - sampler.started_at
+    client.notify("initialized", {})
 
-    # `initialized` is where servers kick off background work -- LanguageServer.jl
-    # starts SymbolServer here -- so the baseline is only meaningful once that
-    # has run its course.
+    # Servers can start background indexing after initialized.
     baseline_ready = wait_until_quiet(
-        sampler, quiet_seconds, settle_timeout, not_before=baseline_phase
+        sampler, quiet_seconds, settle_timeout, not_before=baseline_phase, client=client
     )
     if baseline_ready is None:
         result["notes"].append("still busy at the settle timeout before opening files")
@@ -584,6 +649,7 @@ def run_session(
 
     uris = []
     hover_positions = {}
+    diagnostic_cursors = {}
     documents_started = time.monotonic()
     documents_phase = documents_started - sampler.started_at
     for path in files:
@@ -591,6 +657,8 @@ def run_session(
         text = Path(path).read_text(errors="replace")
         uris.append(uri)
         hover_positions[uri] = hover_position(text)
+        with client.state:
+            diagnostic_cursors[uri] = len(client.notifications)
         client.notify(
             "textDocument/didOpen",
             {
@@ -603,42 +671,73 @@ def run_session(
             },
         )
 
+    deadline = documents_started + settle_timeout
+    observed = set()
+    result["diagnostic_requests"] = 0
     if result["pull_diagnostics"]:
         for uri in uris:
-            client.request(
-                "textDocument/diagnostic",
-                {"textDocument": {"uri": uri}},
-                timeout=settle_timeout,
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            result["diagnostic_requests"] += 1
+            reply = client.request(
+                "textDocument/diagnostic", {"textDocument": {"uri": uri}}, remaining
             )
-        result["diagnostic_requests"] = len(uris)
+            report = (reply or {}).get("result")
+            if isinstance(report, dict) and isinstance(report.get("items"), list):
+                observed.add(uri)
+            else:
+                result["notes"].append(
+                    f"diagnostic request failed for {uri}: {reply!r}"
+                )
     else:
-        # Push-model servers publish on their own schedule; the quiescence wait
-        # below is what actually bounds them.
-        result["diagnostic_requests"] = 0
 
-    # Prime the same request paths the timed phase exercises. This also ensures
-    # that the settled memory milestone describes a server that has answered
-    # editor queries, rather than one that merely swallowed some text.
-    for uri in uris[:3]:
-        client.request(
-            "textDocument/documentSymbol", {"textDocument": {"uri": uri}}, timeout=60
-        )
-        client.request(
-            "textDocument/hover",
-            {"textDocument": {"uri": uri}, "position": hover_positions[uri]},
-            timeout=60,
-        )
+        def collect_pushes():
+            for index, message in enumerate(
+                client.notifications[min(diagnostic_cursors.values()) :],
+                min(diagnostic_cursors.values()),
+            ):
+                uri = (
+                    message.get("params", {}).get("uri")
+                    if isinstance(message.get("params"), dict)
+                    else None
+                )
+                if (
+                    uri in diagnostic_cursors
+                    and index >= diagnostic_cursors[uri]
+                    and matching_diagnostics(message, uri, 1) is not None
+                ):
+                    observed.add(uri)
+            return len(observed) == len(uris) or not client.alive
 
+        with client.state:
+            client.state.wait_for(collect_pushes, max(0, deadline - time.monotonic()))
+
+    diagnostic_end = time.monotonic()
+    result["diagnostic_files"] = len(observed)
+    if len(observed) != len(uris):
+        result["notes"].append(
+            f"diagnostics observed for {len(observed)} of {len(uris)} open files"
+        )
     documents_ready = wait_until_quiet(
-        sampler, quiet_seconds, settle_timeout, not_before=documents_phase
+        sampler,
+        quiet_seconds,
+        settle_timeout,
+        not_before=documents_phase,
+        client=client,
     )
+    if documents_ready is not None and len(observed) == len(uris):
+        documents_ready = max(documents_ready, diagnostic_end - sampler.started_at)
+    else:
+        documents_ready = None
     if documents_ready is None:
-        result["notes"].append("still busy at the settle timeout after opening files")
+        result["notes"].append("open-file readiness was not established")
     if client.proc.poll() is not None:
         result["notes"].append(
             f"server exited before settling (rc={client.proc.returncode})"
         )
-    result["milestones"]["settled"] = sampler.milestone()
+    if documents_ready is not None:
+        result["milestones"]["settled"] = sampler.milestone()
     result["settled_seconds"] = round(time.monotonic() - start, 2)
     result["documents_ready_seconds"] = (
         round(documents_ready + sampler.started_at - documents_started, 3)
@@ -646,6 +745,12 @@ def run_session(
         else None
     )
     result["diagnostics_published"] = client.count_published_diagnostics()
+
+    if prime or not client.alive:
+        if client.alive:
+            client.request("shutdown", None, timeout=15)
+            client.notify("exit", None)
+        return result
 
     latency_targets = uris[:3]
     navigation_params = {
@@ -717,6 +822,36 @@ def run_session(
             summarize=workspace_edit_summary,
         ),
     ]
+    edits = edit_workload(
+        client,
+        capabilities,
+        navigation,
+        (project / navigation["file"]).read_text(),
+        latency_runs,
+        latency_warmups,
+        min(15, settle_timeout),
+    )
+    for key, label in (
+        ("edit_completion", "Completion after edit"),
+        ("edit_diagnostic", "Diagnostics after edit"),
+        ("repair_diagnostic", "Diagnostics after repair"),
+    ):
+        raw = edits[key]
+        values = [item["ms"] for item in raw if item["status"] == "ok"]
+        result["request_latencies"].append(
+            {
+                "key": key,
+                "label": label,
+                "median_ms": statistics.median(values) if values else None,
+                "p95_ms": percentile(values, 0.95) if values else None,
+                "samples": len(values),
+                "result_unit": "completion item"
+                if key == "edit_completion"
+                else "diagnostic",
+                "statuses": dict(Counter(item["status"] for item in raw)),
+                "raw": raw,
+            }
+        )
     for latency in result["request_latencies"]:
         median = latency["median_ms"]
         if median is not None:
@@ -734,7 +869,7 @@ def run_session(
     }
     result["samples"] = len(sampler.samples)
     print(
-        f"    settled  {result['milestones']['settled']['rss_mb']} MB RSS"
+        f"    settled  {result['milestones'].get('settled', {}).get('rss_mb', 'unavailable')} MB RSS"
         f"  (peak {result['milestones']['peak']['rss_mb']} MB,"
         f" {result['settled_seconds']}s)",
         flush=True,
@@ -742,9 +877,98 @@ def run_session(
 
     client.request("shutdown", None, timeout=15)
     client.notify("exit", None)
-    time.sleep(0.5)
-    client.kill()
+    try:
+        client.proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        result["notes"].append("server did not exit after shutdown")
     return result
+
+
+def session_metrics(record):
+    metrics = {
+        key: record.get(key)
+        for key in (
+            "initialize_seconds",
+            "workspace_ready_seconds",
+            "documents_ready_seconds",
+        )
+    }
+    for stage, values in record.get("milestones", {}).items():
+        metrics[f"{stage}_rss_mb"] = values.get("rss_mb")
+    for latency in record.get("request_latencies", []):
+        metrics[f"{latency['key']}_median_ms"] = latency["median_ms"]
+    return metrics
+
+
+def median_present(values):
+    valid = [value for value in values if value is not None]
+    return statistics.median(valid) if valid else None
+
+
+def aggregate_sessions(records):
+    combined = dict(records[0])
+    combined["notes"] = [
+        f"Session {i}: {note}"
+        for i, record in enumerate(records, 1)
+        for note in record["notes"]
+    ]
+    combined["session_count"] = len(records)
+    for key in (
+        "initialize_seconds",
+        "workspace_ready_seconds",
+        "documents_ready_seconds",
+    ):
+        combined[key] = median_present([record.get(key) for record in records])
+    combined["milestones"] = {}
+    for stage in ("baseline", "settled", "peak"):
+        measurements = [
+            record.get("milestones", {}).get(stage, {}) for record in records
+        ]
+        combined["milestones"][stage] = {
+            key: median_present([measurement.get(key) for measurement in measurements])
+            for key in set().union(
+                *(measurement.keys() for measurement in measurements)
+            )
+        }
+    grouped = {}
+    for record in records:
+        for latency in record.get("request_latencies", []):
+            grouped.setdefault(latency["key"], []).append(latency)
+    combined["request_latencies"] = []
+    for group in grouped.values():
+        raw = [sample for latency in group for sample in latency["raw"]]
+        valid = [sample for sample in raw if sample["status"] == "ok"]
+        values = [sample["ms"] for sample in valid]
+        latency = dict(group[0])
+        latency.update(
+            raw=raw,
+            samples=len(values),
+            median_ms=median_present(values),
+            p95_ms=percentile(values, 0.95) if values else None,
+            statuses=dict(Counter(sample["status"] for sample in raw)),
+        )
+        add_distribution(
+            latency,
+            "result_count",
+            [sample["count"] for sample in valid if sample.get("count") is not None],
+        )
+        combined["request_latencies"].append(latency)
+        add_distribution(
+            latency,
+            "result_files",
+            [sample["files"] for sample in valid if sample.get("files") is not None],
+        )
+        sizes = [
+            sample["payload_bytes"] for sample in valid if "payload_bytes" in sample
+        ]
+        if sizes:
+            latency["payload_bytes_median"] = round(statistics.median(sizes))
+    return combined
+
+
+def file_sha256(path):
+    with open(path, "rb") as source:
+        return hashlib.file_digest(source, "sha256").hexdigest()
 
 
 def main():
@@ -764,19 +988,62 @@ def main():
     parser.add_argument("--latency-runs", type=int, default=20)
     parser.add_argument("--latency-warmups", type=int, default=2)
     parser.add_argument("--stderr-dir", default=None)
+    parser.add_argument("--sessions", type=int, default=6)
+    parser.add_argument("--ab", action="store_true")
     args = parser.parse_args()
+    if args.ab and len(args.server) != 2:
+        parser.error("--ab requires exactly two servers")
+    if (
+        min(args.sessions, args.latency_runs, args.quiet_seconds, args.settle_timeout)
+        <= 0
+    ):
+        parser.error("session counts, latency runs, and timeouts must be positive")
+    if args.latency_warmups < 0:
+        parser.error("latency warmups must be nonnegative")
 
-    project = Path(args.project).absolute()
-    files = [str(Path(f).absolute()) for f in args.files]
+    project = Path(args.project).resolve()
+    files = [str(Path(f).resolve()) for f in args.files]
     navigation = navigation_target(project, files)
-
-    results = []
+    nav_path = str(project / navigation["file"])
+    if nav_path not in files:
+        files.append(nav_path)
+    servers = {}
     for spec in args.server:
-        name, _, command = spec.partition("=")
-        results.append(
-            run_session(
+        name, sep, command = spec.partition("=")
+        if (
+            not sep
+            or not re.fullmatch(r"[\w-]+", name)
+            or not command
+            or name in servers
+        ):
+            parser.error(f"invalid or duplicate server: {spec}")
+        servers[name] = shlex.split(command)
+
+    sessions = {name: [] for name in servers}
+    orders = []
+    with tempfile.TemporaryDirectory(prefix="fatou-lsp-cache-") as cache:
+        environments = {}
+        for name in servers:
+            root = Path(cache) / name
+            root.mkdir()
+            env = os.environ.copy()
+            env.update(
+                FATOU_CACHE_HOME=str(root / "fatou"),
+                XDG_CACHE_HOME=str(root / "xdg"),
+                BENCH_SYMBOL_CACHE=str(root / "symbols"),
+                JULIA_PROJECT=str(project),
+            )
+            (root / "symbols").mkdir()
+            if "JULIA_DEPOT_PATH" in env:
+                env["JULIA_DEPOT_PATH"] = (
+                    str(root / "depot") + os.pathsep + env["JULIA_DEPOT_PATH"]
+                )
+            environments[name] = env
+
+        def run(name, session, prime=False):
+            return run_session(
                 name,
-                shlex.split(command),
+                servers[name],
                 project,
                 files,
                 args.settle_timeout,
@@ -785,15 +1052,47 @@ def main():
                 args.latency_warmups,
                 navigation,
                 args.stderr_dir,
+                environments[name],
+                session,
+                prime,
             )
-        )
-        time.sleep(2)  # let the previous server's pages actually go back
 
+        for name in servers:
+            prepared = run(name, "prime", prime=True)
+            if prepared.get("workspace_ready_seconds") is None:
+                raise RuntimeError(
+                    f"cache priming failed for {name}: {prepared['notes']}"
+                )
+        names = list(servers)
+        for index in range(args.sessions):
+            offset = index % len(names)
+            order = names[offset:] + names[:offset]
+            orders.append(order)
+            for name in order:
+                sessions[name].append(run(name, index + 1))
+                time.sleep(2)
+
+    results = [aggregate_sessions(records) for records in sessions.values()]
+    comparisons = {}
+    if args.ab:
+        baseline, candidate = sessions.values()
+        for before, after in zip(baseline, candidate, strict=True):
+            for key, left in session_metrics(before).items():
+                right = session_metrics(after).get(key)
+                if left is not None and right is not None:
+                    comparisons.setdefault(key, []).append(right - left)
+
+    workspace_commit = None
+    if (project / ".git").exists():
+        workspace_commit = subprocess.check_output(
+            ["git", "-C", str(project), "rev-parse", "HEAD"], text=True
+        ).strip()
     Path(args.out).write_text(
         json.dumps(
             {
                 "schema_version": SCHEMA_VERSION,
                 "project": str(project),
+                "workspace_commit": workspace_commit,
                 "files": files,
                 "total_bytes": sum(Path(f).stat().st_size for f in files),
                 "quiet_seconds": args.quiet_seconds,
@@ -805,6 +1104,25 @@ def main():
                     key: value for key, value in navigation.items() if key != "uri"
                 },
                 "servers": results,
+                "session_order": orders,
+                "sessions": sessions,
+                "paired_changes": {
+                    key: {"samples": values, "median": statistics.median(values)}
+                    for key, values in comparisons.items()
+                },
+                "binary_sha256": {
+                    name: file_sha256(command[0]) for name, command in servers.items()
+                }
+                if args.ab
+                else {},
+                "host": os.uname().nodename,
+                "platform": list(os.uname()),
+                "cpu_affinity": sorted(os.sched_getaffinity(0)),
+                "workspace_manifest_sha256": hashlib.sha256(
+                    (project / "Manifest.toml").read_bytes()
+                ).hexdigest()
+                if (project / "Manifest.toml").is_file()
+                else None,
             },
             indent=2,
         )

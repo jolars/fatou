@@ -56,9 +56,9 @@ workspace. The benchmark opens the same files, collects diagnostics, and sends
 editor requests to each server.
 
 The servers provide different analyses: Fatou analyzes source statically,
-LanguageServer.jl indexes the Julia environment, and JETLS performs type
-inference through JET. These results show the time and memory each editor
-session uses.
+LanguageServer.jl analyzes the Julia workspace and its environment, and JETLS
+performs type inference through JET. These results show the time and memory each
+editor session uses.
 
 {{ memory-meta }}
 
@@ -68,10 +68,12 @@ The startup measurements cover three stages:
 
 - **Initialize** measures the server's response to the editor's initialization
   request.
-- **Workspace ready** measures the time from process start until background
-  indexing settles.
-- **Open files ready** measures the time from opening the files until
-  diagnostics arrive and background work settles.
+- **Workspace quiescence** estimates when background CPU activity settles.
+- **Open files ready** measures the time from opening the files until the
+  harness receives diagnostics for each file and background work settles.
+
+Artifacts from the earlier harness label CPU-based estimates as readiness,
+including the estimate after opening files.
 
 After startup, we time requests for document symbols, hover information,
 definitions, references, and renaming. The chart shows median response times.
@@ -86,7 +88,9 @@ within which 95% of requests finish. Lower is faster.
 The chart shows resident memory (**RSS**) for each server and its child
 processes. **Baseline** is after initialization, **Settled** is after the open
 files have been analyzed, and **Peak** is the highest sample during the session.
-Each server is measured in one session.
+The current harness reports the median milestone across six fresh sessions per
+server, after an untimed cache-priming session. Earlier artifacts record one
+session per server.
 
 {{ memory-servers }}
 
@@ -106,10 +110,38 @@ Run these commands from the repository root in the devenv shell:
 ```sh
 task bench-corpus  # Fetch the pinned Julia projects.
 task bench        # Measure formatter speed.
-task bench-lsenv   # Set up LanguageServer.jl and JETLS.
-task bench-lsp     # Measure language-server speed and memory.
+BENCH_JULIA=/path/to/julia-1.13.4/bin/julia task bench-lsp
 ```
 
 The commands write `bench/results.json` and `bench/memory.json`. These committed
 files supply the charts, machine details, and tool versions shown above.
 Building the documentation reads them without running the benchmarks.
+
+Set `BENCH_OUT` to write an exploratory comparison to a separate file. The
+current harness also measures completion after an unsaved edit and diagnostics
+after introducing and repairing a syntax error. Only validated responses
+contribute to the latency distributions.
+
+### Compare two Fatou builds
+
+Use release binaries and an instantiated DataFrames workspace. The comparison
+task above prepares the workspace and its Julia depot. If you only want to run
+Fatou, prepare the workspace directly:
+
+```sh
+task bench-corpus
+JULIA_DEPOT_PATH="$PWD/bench/lsenv/depot:" \
+  /path/to/julia-1.13.4/bin/julia --startup-file=no \
+  --project=bench/corpus/DataFrames -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+```
+
+```sh
+BENCH_JULIA=/path/to/julia-1.13.4/bin/julia task bench-lsp-ab -- \
+  --baseline /path/to/baseline/fatou --candidate /path/to/candidate/fatou \
+  --out bench/lsp-ab.tmp.json
+```
+
+Point both options at the same binary first to estimate measurement noise. The
+output includes raw samples, per-session results, and paired deltas (candidate
+minus baseline). Run on an idle machine so unrelated work has less effect on the
+timings.

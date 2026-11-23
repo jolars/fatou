@@ -51,6 +51,11 @@ tasks:
     cmds:
       - ./bench/memory_compare.sh
 
+  bench-lsp-ab:
+    desc: Compare two Fatou release binaries over the same editing workload
+    cmds:
+      - python3 bench/lsp_ab.py {{.CLI_ARGS}}
+
   bench-memory:
     desc: Alias for bench-lsp
     cmds:

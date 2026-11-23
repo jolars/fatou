@@ -35,7 +35,18 @@ CORPUS="$BENCH/corpus"
 WORKSPACE="$CORPUS/DataFrames"
 LSENV="$BENCH/lsenv"
 
+export BENCH_JULIA="${BENCH_JULIA:-julia}"
+export JULIA_DEPOT_PATH="$LSENV/depot:"
+LSP_SESSIONS="${LSP_SESSIONS:-6}"
 SETTLE_TIMEOUT="${SETTLE_TIMEOUT:-300}"
+BENCH_OUT="${BENCH_OUT:-$BENCH/memory.json}"
+expected_version="julia version 1.13.4"
+if [[ "$("$BENCH_JULIA" --startup-file=no --version)" != "$expected_version" ]]; then
+  echo "Set BENCH_JULIA to the Julia 1.13.4 executable" >&2
+  exit 1
+fi
+BENCH_JULIA="$(realpath "$(command -v "$BENCH_JULIA")")"
+export PATH="$(dirname "$BENCH_JULIA"):$PATH"
 QUIET_SECONDS="${QUIET_SECONDS:-5}"
 CLI_RUNS="${CLI_RUNS:-5}"
 OPEN_FILE_COUNT="${OPEN_FILE_COUNT:-5}"
@@ -49,7 +60,7 @@ trap 'rm -rf "$TMP"' EXIT
 "$CORPUS/download.sh"
 
 echo "==> instantiating the workspace ($WORKSPACE)"
-JULIA_PROJECT="" julia --startup-file=no --project="$WORKSPACE" -e '
+JULIA_PROJECT="" "$BENCH_JULIA" --startup-file=no --project="$WORKSPACE" -e '
     using Pkg
     Pkg.instantiate()
     Pkg.precompile()
@@ -91,9 +102,10 @@ fi
 JULIA_PROJECT="$WORKSPACE" python3 "$BENCH/lsp_memory.py" \
   --project "$WORKSPACE" \
   --files "${OPEN_FILES[@]}" \
-  --server "fatou=$ROOT/target/release/fatou lsp" \
-  --server "languageserver=julia --startup-file=no --project=$LSENV/languageserver $LSENV/ls_runner.jl $WORKSPACE" \
-  --server "jetls=julia --startup-file=no --threads=auto --project=$LSENV/jetls $LSENV/jetls_runner.jl" \
+  --server "fatou=\"$ROOT/target/release/fatou\" lsp" \
+  --server "languageserver=\"$BENCH_JULIA\" --startup-file=no --project=\"$LSENV/languageserver\" \"$LSENV/ls_runner.jl\" \"$WORKSPACE\"" \
+  --server "jetls=\"$BENCH_JULIA\" --startup-file=no --history-file=no --threads=auto --project=\"$LSENV/jetls\" -m JETLS serve" \
+  --sessions "$LSP_SESSIONS" \
   --settle-timeout "$SETTLE_TIMEOUT" \
   --quiet-seconds "$QUIET_SECONDS" \
   --latency-runs "$LSP_LATENCY_RUNS" \
@@ -116,7 +128,7 @@ python3 "$BENCH/cli_memory.py" \
 cpu="$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | sed 's/.*: //' || echo unknown)"
 mem_kb="$(grep -m1 MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)"
 fatou_version="$("$ROOT/target/release/fatou" --version | awk '{print $2}')"
-julia_version="$(julia --startup-file=no --version | awk '{print $3}')"
+julia_version="$("$BENCH_JULIA" --startup-file=no --version | awk '{print $3}')"
 
 cat >"$TMP/meta.json" <<EOF
 {
@@ -132,6 +144,7 @@ cat >"$TMP/meta.json" <<EOF
   "lsp_latency_files": $LSP_LATENCY_FILES,
   "corpora": $(cat "$CORPUS/manifest.json"),
   "servers": $(cat "$LSENV/manifest.json"),
+  "fatou_commit": "$(git -C "$ROOT" rev-parse HEAD)",
   "versions": {"fatou": "$fatou_version", "julia": "$julia_version"}
 }
 EOF
@@ -140,6 +153,6 @@ python3 "$BENCH/memory_merge.py" \
   --lsp "$TMP/lsp.json" \
   --cli "$TMP/cli.json" \
   --meta "$TMP/meta.json" \
-  --out "$BENCH/memory.json"
+  --out "$BENCH_OUT"
 
-echo "==> done: $BENCH/memory.json"
+echo "==> done: $BENCH_OUT"
