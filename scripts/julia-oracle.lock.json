@@ -1,7 +1,7 @@
 {
-  "version": "1.15.0-DEV.783",
-  "commit": "a11d632fa5768e9324c6e752b7a15196605f6b92",
+  "version": "1.15.0-DEV.911",
+  "commit": "a8a69df91891a11678768f5218d7c298cb9ea13e",
   "platform": "x86_64-linux-gnu",
-  "url": "https://julialangnightlies-s3.julialang.org/bin/linux/x86_64/1.15/julia-a11d632fa5-linux-x86_64.tar.gz",
-  "sha256": "c70c968914629112e04e507416a74636b94b74f85ef91416643983762f8ae7bf"
+  "url": "https://julialangnightlies-s3.julialang.org/bin/linux/x86_64/1.15/julia-a8a69df918-linux-x86_64.tar.gz",
+  "sha256": "42676803780f5a6486b1d9a452a3b3f661b4aab37cda09adf7d8aef8272838ee"
 }

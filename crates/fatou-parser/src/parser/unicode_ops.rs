@@ -1,7 +1,7 @@
 //! Single-codepoint Unicode operators and their precedence tiers.
 //!
-//! Generated from JuliaSyntax's lexer (julia_version=1.15.0-DEV.783 juliasyntax_version=2.0.0-DEV).
-//! Julia and JuliaSyntax commit: a11d632fa5768e9324c6e752b7a15196605f6b92.
+//! Generated from JuliaSyntax's lexer (julia_version=1.15.0-DEV.911 juliasyntax_version=2.0.0-DEV).
+//! Julia and JuliaSyntax commit: a8a69df91891a11678768f5218d7c298cb9ea13e.
 //! Every entry is a non-ASCII operator start character, classified by the
 //! `is_prec_*` predicates on its token. The table is sorted by code point so
 //! [`unicode_op_kind`] can binary-search it. Regenerate with
