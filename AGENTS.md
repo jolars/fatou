@@ -383,9 +383,12 @@ and `task logo` and requires Julia.
 
 Benchmarks are opt-in local measurements, never test/CI gates. Tracked JSON
 artifacts alone feed published performance pages; site builds never remeasure.
-Commit updated artifacts when making performance claims, compare formatter
-performance using ratios rather than milliseconds, and use `perf-investigation`
-for profiling and measurement procedure.
+Compare published formatter performance using ratios. When refreshing the
+published comparison is in scope, use `task bench` to update
+`bench/results.json`. See [performance measurements](bench/PERFORMANCE.md) for
+corpus and harness choices. Keep `bench/profile.sh` as the authority for
+profiling flags. Keep rowan's `NodeCache` scoped to a parse so green nodes
+cannot accumulate across language-server requests.
 
 ### Distribution and releases
 
