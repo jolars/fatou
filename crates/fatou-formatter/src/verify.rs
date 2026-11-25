@@ -153,9 +153,23 @@ pub fn verify_format_with_options(
     formatted: &str,
     options: ParseOptions,
 ) -> Result<(), VerificationError> {
-    let parsed = parse_with_options(input, options);
-    let baseline = verification_baseline(&parsed, options)?;
-    verify_against(&baseline, formatted)
+    verify_format_from_parse(
+        &parse_with_options(input, options),
+        || parse_with_options(formatted, options),
+        options,
+    )
+}
+
+/// Verify program and comment preservation using an existing input parse.
+/// `parse_output` is called only after the input passes verification. Both
+/// parses must use `options` and represent the complete document.
+pub fn verify_format_from_parse(
+    input: &ParseOutput,
+    parse_output: impl FnOnce() -> ParseOutput,
+    options: ParseOptions,
+) -> Result<(), VerificationError> {
+    let baseline = verification_baseline(input, options)?;
+    verify_parsed_against(&baseline, parse_output())
 }
 
 pub(crate) fn verification_baseline(
@@ -186,7 +200,13 @@ pub(crate) fn verify_against(
     baseline: &VerificationBaseline,
     formatted: &str,
 ) -> Result<(), VerificationError> {
-    let output = parse_with_options(formatted, baseline.options);
+    verify_parsed_against(baseline, parse_with_options(formatted, baseline.options))
+}
+
+fn verify_parsed_against(
+    baseline: &VerificationBaseline,
+    output: ParseOutput,
+) -> Result<(), VerificationError> {
     if !output.diagnostics.is_empty() {
         return Err(VerificationError::OutputSyntax {
             diagnostics: output.diagnostics,
@@ -692,6 +712,27 @@ fn drop_surface_flags(tokens: &mut [String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verification_from_parse_checks_program_and_comments() {
+        let options = ParseOptions::default();
+        let input = parse_with_options("x=1 # keep\n", options);
+        for (output, expected) in [
+            ("x = 1 # keep\n", Ok(())),
+            ("x = 2 # keep\n", Err(VerificationError::ChangedProgram)),
+            ("x = 1 # changed\n", Err(VerificationError::ChangedComments)),
+        ] {
+            assert_eq!(
+                verify_format_from_parse(&input, || parse_with_options(output, options), options),
+                expected,
+            );
+        }
+        let malformed = parse_with_options("function f(", options);
+        assert!(matches!(
+            verify_format_from_parse(&malformed, || panic!("input is invalid"), options),
+            Err(VerificationError::InputSyntax { .. })
+        ));
+    }
 
     fn strip(normalized: &str) -> String {
         let mut tokens = sexpr_tokens(normalized);
