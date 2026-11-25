@@ -42,7 +42,13 @@ tasks:
       - cargo deny check
 
   bench:
-    desc: Benchmark formatter throughput vs Runic and JuliaFormatter (writes bench/results.json and the docs table)
+    desc: Run all benchmarks published in the documentation
+    cmds:
+      - task: bench-format
+      - task: bench-lsp
+
+  bench-format:
+    desc: Benchmark Fatou, Runic, and JuliaFormatter (writes bench/results.json)
     cmds:
       - ./bench/compare_format.sh
 
@@ -55,11 +61,6 @@ tasks:
     desc: Compare two Fatou release binaries over the same editing workload
     cmds:
       - python3 bench/lsp_ab.py {{.CLI_ARGS}}
-
-  bench-memory:
-    desc: Alias for bench-lsp
-    cmds:
-      - task: bench-lsp
 
   profile:
     desc: Profile the formatter with perf, writing bench/profile.svg (needs bench-corpus)
@@ -80,11 +81,6 @@ tasks:
     desc: Fetch the pinned JuliaSyntax.jl corpus for the formatter benchmark
     cmds:
       - ./bench/corpus/download.sh
-
-  bench-lsenv:
-    desc: Provision the pinned LanguageServer.jl and JETLS environments the LSP benchmark needs
-    cmds:
-      - ./bench/lsenv/setup.sh
 
   docs-preview:
     desc: Serve VitePress locally with live reload

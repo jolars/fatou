@@ -109,13 +109,14 @@ Run these commands from the repository root in the devenv shell:
 
 ```sh
 task bench-corpus  # Fetch the pinned Julia projects.
-task bench        # Measure formatter speed.
-BENCH_JULIA=/path/to/julia-1.13.4/bin/julia task bench-lsp
+BENCH_JULIA=/path/to/julia-1.13.4/bin/julia task bench
 ```
 
-The commands write `bench/results.json` and `bench/memory.json`. These committed
-files supply the charts, machine details, and tool versions shown above.
-Building the documentation reads them without running the benchmarks.
+Run `task bench-format` for the formatter benchmarks or `task bench-lsp` for the
+language-server benchmarks. The tasks write `bench/results.json` and
+`bench/memory.json`, respectively. These committed files supply the charts,
+machine details, and tool versions shown above. Building the documentation reads
+them without running the benchmarks.
 
 Set `BENCH_OUT` to write an exploratory comparison to a separate file. The
 current harness also measures completion after an unsaved edit and diagnostics
