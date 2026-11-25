@@ -2,6 +2,7 @@
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
+use std::sync::Arc;
 
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range, TextEdit};
 use rowan::TextRange;
@@ -13,10 +14,14 @@ use crate::formatter::{
     FormatOptions, FormatStyle, RangeFormatted, format_node_with_options, format_range_with_options,
 };
 use crate::incremental::Analysis;
-use crate::parser::{ParseDiagnostic, ParseOptions, parse_with_options};
+use crate::parser::{ParseDiagnostic, ParseOptions, ParseOutput, parse_with_options};
+use crate::syntax::SyntaxNode;
+use crate::text::edit::apply_text_edits;
 use crate::text::line_diff::bounded_line_diff;
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
-use fatou_formatter::verify::{VerificationError, verify_format_with_options};
+use fatou_formatter::verify::{
+    VerificationError, verify_format_from_parse, verify_format_with_options,
+};
 
 /// Verify the complete document a client would produce from these edits.
 /// Checking the spliced document also covers syntax and comments outside a
@@ -47,6 +52,41 @@ pub(crate) fn verify_format_edits_with_options(
     }
     formatted.push_str(&text[end..]);
     verify_format_with_options(text, &formatted, options)
+}
+
+pub(crate) fn verify_range_format_edits_via_db(
+    snapshot: &Analysis,
+    path: &Path,
+    text: &TextBuffer,
+    edits: &[TextEdit],
+    encoding: PositionEncoding,
+    options: ParseOptions,
+) -> Result<(), VerificationError> {
+    let cached = snapshot
+        .lookup_file(path)
+        .and_then(|file| snapshot.cached_parse(file, &text.text_arc(), options));
+    let Some(cached) = cached else {
+        return verify_format_edits_with_options(text, edits, encoding, options);
+    };
+    let (formatted, edits) = apply_text_edits(text, edits.to_vec(), encoding)
+        .expect("range formatter must return valid, non-overlapping edits");
+    let input = ParseOutput {
+        cst: SyntaxNode::new_root(cached.green.clone()),
+        diagnostics: cached.diagnostics.clone(),
+    };
+    verify_format_from_parse(
+        &input,
+        || {
+            cached.parse_proposed_edits(&edits, &formatted).map_or_else(
+                || parse_with_options(&formatted, options),
+                |parsed| ParseOutput {
+                    cst: SyntaxNode::new_root(parsed.green),
+                    diagnostics: parsed.diagnostics,
+                },
+            )
+        },
+        options,
+    )
 }
 
 /// Format `text` off the snapshot's cached parse when the db's tracked buffer
@@ -253,42 +293,26 @@ pub(crate) fn format_range_edits_via_db(
     style: FormatStyle,
     encoding: PositionEncoding,
 ) -> Option<Vec<TextEdit>> {
+    let options = FormatOptions {
+        style,
+        parse_options: snapshot.options_for_path(path),
+    };
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
-        if snapshot.file_text(file) != text {
+        let tracked = snapshot.file_text_arc(file);
+        let original = text.text_arc();
+        if !Arc::ptr_eq(&tracked, &original) && tracked != original {
             // The tracked input lags the live buffer; the cached tree is stale.
             return None;
         }
-        let root = snapshot.parsed_tree(file);
-        let text_range = lsp_range_to_text_range(text, range, encoding);
-        Some(
-            match format_range_with_options(
-                &root,
-                text_range,
-                FormatOptions {
-                    style,
-                    parse_options: snapshot.options_for_path(path),
-                },
-            ) {
-                Ok(Some(formatted)) => Some(edits_for_range_formatted(text, formatted, encoding)),
-                // The selection touches no statement, or an unmodeled container
-                // shape: nothing to do rather than an error.
-                Ok(None) => Some(Vec::new()),
-                Err(_) => None,
-            },
-        )
+        Some(snapshot.parsed_tree(file))
     }));
-    match cached {
-        Ok(Some(edits)) => edits,
+    let root = match cached {
+        Ok(Some(root)) => root,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_format_range_edits_with_options(
-            text,
-            range,
-            style,
-            encoding,
-            snapshot.options_for_path(path),
-        ),
-    }
+        Ok(None) | Err(_) => parse_with_options(text, options.parse_options).cst,
+    };
+    range_edits_from_tree(&root, text, &text.line_index(), range, options, encoding)
 }
 
 /// Compute the LSP `TextEdit`s to format the statements `range` touches,
@@ -314,28 +338,46 @@ pub fn compute_format_range_edits_with_options(
     options: ParseOptions,
 ) -> Option<Vec<TextEdit>> {
     let root = parse_with_options(text, options).cst;
-    let text_range = lsp_range_to_text_range(text, range, encoding);
-    match format_range_with_options(
+    range_edits_from_tree(
         &root,
-        text_range,
+        text,
+        &LineIndex::new(text),
+        range,
         FormatOptions {
             style,
             parse_options: options,
         },
+        encoding,
     )
-    .ok()?
-    {
-        Some(formatted) => Some(edits_for_range_formatted(text, formatted, encoding)),
-        None => Some(Vec::new()),
-    }
+}
+
+fn range_edits_from_tree(
+    root: &SyntaxNode,
+    text: &str,
+    line_index: &LineIndex,
+    range: Range,
+    options: FormatOptions,
+    encoding: PositionEncoding,
+) -> Option<Vec<TextEdit>> {
+    let start = line_index.position_to_byte(range.start, encoding);
+    let end = line_index.position_to_byte(range.end, encoding);
+    let selection = TextRange::new(
+        (start.min(end) as u32).into(),
+        (start.max(end) as u32).into(),
+    );
+    let formatted = format_range_with_options(root, selection, options).ok()?;
+    Some(formatted.map_or_else(Vec::new, |formatted| {
+        edits_for_range_formatted(text, line_index, formatted, encoding)
+    }))
 }
 
 /// The edits replacing a [`format_range`] result's widened span (empty when
 /// that span is already formatted). The edit-geometry twin of
 /// [`edits_for_formatted`], shared by the re-parse and cached-tree paths, and
 /// line-scoped within the widened span the same way.
-pub(crate) fn edits_for_range_formatted(
+fn edits_for_range_formatted(
     text: &str,
+    line_index: &LineIndex,
     formatted: RangeFormatted,
     encoding: PositionEncoding,
 ) -> Vec<TextEdit> {
@@ -345,9 +387,8 @@ pub(crate) fn edits_for_range_formatted(
     if old == Some(formatted.text.as_str()) {
         return Vec::new();
     }
-    let line_index = LineIndex::new(text);
     if let Some(edits) =
-        old.and_then(|old| line_diff_edits(&line_index, start, old, &formatted.text, encoding))
+        old.and_then(|old| line_diff_edits(line_index, start, old, &formatted.text, encoding))
     {
         return edits;
     }
@@ -358,23 +399,6 @@ pub(crate) fn edits_for_range_formatted(
         },
         new_text: formatted.text,
     }]
-}
-
-/// Convert an LSP selection to the byte range it covers, clamped to `text`
-/// (via [`LineIndex::position_to_byte`]'s clamping) and normalized so an
-/// inverted selection cannot panic `TextRange::new`.
-pub(crate) fn lsp_range_to_text_range(
-    text: &str,
-    range: Range,
-    encoding: PositionEncoding,
-) -> TextRange {
-    let line_index = LineIndex::new(text);
-    let start = line_index.position_to_byte(range.start, encoding);
-    let end = line_index.position_to_byte(range.end, encoding);
-    TextRange::new(
-        (start.min(end) as u32).into(),
-        (start.max(end) as u32).into(),
-    )
 }
 
 /// Convert parse diagnostics into LSP diagnostics against `text` (the source
@@ -430,6 +454,41 @@ mod tests {
         let source = TextBuffer::new("function f(");
         assert!(matches!(
             verify_format_edits(&source, &[], PositionEncoding::Utf16),
+            Err(VerificationError::InputSyntax { .. })
+        ));
+    }
+
+    #[test]
+    fn range_verification_uses_live_text_when_the_cached_parse_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.jl");
+        let mut db = IncrementalDatabase::default();
+        let file = db.upsert_file(&path, "x=1\ny=2\n");
+        let snapshot = db.snapshot();
+        assert_eq!(snapshot.parsed_tree(file).text().to_string(), "x=1\ny=2\n");
+
+        let text = TextBuffer::new("x=1\nfunction f(");
+        let encoding = PositionEncoding::Utf16;
+        let range = Range::new(Position::new(0, 0), Position::new(0, 3));
+        let edits = format_range_edits_via_db(
+            &snapshot,
+            &path,
+            &text,
+            range,
+            FormatStyle::default(),
+            encoding,
+        )
+        .unwrap();
+        assert!(!edits.is_empty());
+        assert!(matches!(
+            verify_range_format_edits_via_db(
+                &snapshot,
+                &path,
+                &text,
+                &edits,
+                encoding,
+                ParseOptions::default(),
+            ),
             Err(VerificationError::InputSyntax { .. })
         ));
     }

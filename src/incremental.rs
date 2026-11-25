@@ -25,8 +25,7 @@ use crate::index::{DeclaredDeps, PackageIndex};
 use crate::parse_context::{EditionSelection, SourceContext};
 use crate::parser::{Edit, ParseDiagnostic, ReparseTier, diff_edit};
 use crate::parser::{
-    ParseOptions, ReparseBase, Reparsed, parse_with_options, reparse_edits_with_options,
-    reparse_with_options,
+    ParseOptions, ReparseBase, parse_with_options, reparse_edits_with_options, reparse_with_options,
 };
 use crate::project::{self, IncludeEdge};
 use crate::resolve::{
@@ -477,6 +476,39 @@ pub struct PrevParse {
     pub text: Arc<str>,
     pub green: rowan::GreenNode,
     pub diagnostics: Vec<ParseDiagnostic>,
+}
+
+impl PrevParse {
+    /// Replay a bounded edit chain against this parse. On a miss the caller can
+    /// parse the proposed text in full, using the same edition.
+    pub(crate) fn parse_proposed_edits(
+        &self,
+        edits: &[Edit],
+        rewritten: &str,
+    ) -> Option<ParsedDocument> {
+        if edits.is_empty() && self.text.as_ref() == rewritten {
+            return Some(ParsedDocument {
+                green: self.green.clone(),
+                diagnostics: self.diagnostics.clone(),
+            });
+        }
+        if edits.len() > MAX_CHAIN_EDITS
+            || edits.iter().map(|edit| edit.insert.len()).sum::<usize>() > MAX_CHAIN_INSERT_BYTES
+        {
+            return None;
+        }
+        let base = ReparseBase {
+            text: &self.text,
+            green: &self.green,
+            diagnostics: &self.diagnostics,
+            options: self.options,
+        };
+        let parsed = reparse_edits_with_options(base, edits, rewritten, self.options)?;
+        Some(ParsedDocument {
+            green: parsed.green,
+            diagnostics: parsed.diagnostics,
+        })
+    }
 }
 
 #[salsa::db]
@@ -2693,32 +2725,16 @@ impl Analysis {
         parsed_tree_root_with_options(&self.0, file, self.parse_options(file))
     }
 
-    /// Check a proposed rewrite against a cached parse for the same text and
-    /// edition. The caller can fully parse the proposal if no splice applies.
-    pub(crate) fn reparse_proposed_edits(
+    /// Reuse a previous parse only when its source text and edition match.
+    pub(crate) fn cached_parse(
         &self,
         file: SourceFile,
         text: &Arc<str>,
-        edits: &[Edit],
-        rewritten: &str,
         options: ParseOptions,
-    ) -> Option<Reparsed> {
-        if edits.len() > MAX_CHAIN_EDITS
-            || edits.iter().map(|edit| edit.insert.len()).sum::<usize>() > MAX_CHAIN_INSERT_BYTES
-        {
-            return None;
-        }
-        let prev = self.0.reparse_prev_with_options(file, options)?;
-        if !Arc::ptr_eq(&prev.text, text) && prev.text != *text {
-            return None;
-        }
-        let base = ReparseBase {
-            text: &prev.text,
-            green: &prev.green,
-            diagnostics: &prev.diagnostics,
-            options: prev.options,
-        };
-        reparse_edits_with_options(base, edits, rewritten, options)
+    ) -> Option<Arc<PrevParse>> {
+        self.0
+            .reparse_prev_with_options(file, options)
+            .filter(|prev| Arc::ptr_eq(&prev.text, text) || prev.text == *text)
     }
 
     /// The cached semantic model for `file`.

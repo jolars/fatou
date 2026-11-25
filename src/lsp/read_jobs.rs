@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use crossbeam_channel::{SendError, Sender};
+use fatou_formatter::verify::VerificationError;
 use lsp_server::{ErrorCode, Message, RequestId, Response};
 
 use lsp_types::{
@@ -16,7 +17,8 @@ use lsp_types::{
 use std::sync::{Arc, Mutex};
 
 use crate::formatter::{FormatStyle, VerifiedFormatError};
-use crate::incremental::Analysis;
+use crate::incremental::{Analysis, SourceFile};
+use crate::parser::{Edit, ParseOptions, parse_with_options};
 use crate::text::edit::apply_text_edits;
 use crate::text::{PositionEncoding, TextBuffer};
 
@@ -28,7 +30,10 @@ use super::completion::{completion_via_db, resolve_completion};
 use super::definition::definition_via_db;
 use super::document_link::document_links_via_db;
 use super::folding::folding_ranges_via_db;
-use super::format::{format_edits_via_db, format_range_edits_via_db};
+use super::format::{
+    format_edits_via_db, format_range_edits_via_db, verify_format_edits_with_options,
+    verify_range_format_edits_via_db,
+};
 use super::hover::hover_via_db;
 use super::lint::ServerRules;
 use super::project_navigation::{
@@ -555,19 +560,16 @@ pub(crate) fn diagnostic_report(
 
 fn format_response(
     id: RequestId,
-    text: &TextBuffer,
     edits: Option<Vec<TextEdit>>,
     safe: bool,
-    encoding: PositionEncoding,
-    options: crate::parser::ParseOptions,
+    verify: impl FnOnce(&[TextEdit]) -> Result<(), VerificationError>,
 ) -> Response {
     if safe {
         let verified = edits
             .as_ref()
             .ok_or_else(|| "safe formatting failed: formatter rejected the input".to_string())
             .and_then(|edits| {
-                super::format::verify_format_edits_with_options(text, edits, encoding, options)
-                    .map_err(|error| VerifiedFormatError::from(error).to_string())
+                verify(edits).map_err(|error| VerifiedFormatError::from(error).to_string())
             });
         if let Err(message) = verified {
             return Response::new_err(id, ErrorCode::RequestFailed as i32, message);
@@ -773,8 +775,14 @@ fn valid_rewrite(
     if value.is_null() {
         return true;
     }
-    if let ReadJob::Format { text, safe, .. } | ReadJob::FormatRange { text, safe, .. } = job {
-        let fallback = crate::parser::ParseOptions::default();
+    if let ReadJob::Format {
+        path, text, safe, ..
+    }
+    | ReadJob::FormatRange {
+        path, text, safe, ..
+    } = job
+    {
+        let fallback = ParseOptions::default();
         let primary = contexts
             .first()
             .map_or(fallback, |(_, selected)| selected.options);
@@ -784,13 +792,16 @@ fn valid_rewrite(
         let Ok(edits) = serde_json::from_value::<Vec<TextEdit>>(value.clone()) else {
             return false;
         };
-        return apply_text_edits(text, edits, encoding).is_some_and(|(next, _)| {
+        return apply_text_edits(text, edits, encoding).is_some_and(|(next, edits)| {
+            let file = snapshot.lookup_file(path);
+            let original = text.text_arc();
+            let valid = |options| {
+                parses_cleanly_after_edits(snapshot, file, &original, &edits, &next, options)
+            };
             if contexts.is_empty() {
-                parses_cleanly(&next, fallback)
+                valid(fallback)
             } else {
-                contexts
-                    .iter()
-                    .all(|(_, selected)| parses_cleanly(&next, selected.options))
+                contexts.iter().all(|(_, selected)| valid(selected.options))
             }
         });
     }
@@ -865,15 +876,8 @@ fn valid_text_edits(
     salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path);
         let original = text.text_arc();
-        let valid = |options| {
-            let reparsed = file.and_then(|file| {
-                snapshot.reparse_proposed_edits(file, &original, &edits, &next, options)
-            });
-            reparsed.map_or_else(
-                || parses_cleanly(&next, options),
-                |parsed| parsed.diagnostics.is_empty(),
-            )
-        };
+        let valid =
+            |options| parses_cleanly_after_edits(snapshot, file, &original, &edits, &next, options);
         let contexts = file.map_or(&[][..], |file| snapshot.source_editions(file).as_slice());
         if contexts.is_empty() {
             return valid(snapshot.options_for_path(path));
@@ -885,10 +889,24 @@ fn valid_text_edits(
     .unwrap_or(false)
 }
 
-fn parses_cleanly(text: &str, options: crate::parser::ParseOptions) -> bool {
-    crate::parser::parse_with_options(text, options)
-        .diagnostics
-        .is_empty()
+fn parses_cleanly_after_edits(
+    snapshot: &Analysis,
+    file: Option<SourceFile>,
+    original: &Arc<str>,
+    edits: &[Edit],
+    rewritten: &str,
+    options: ParseOptions,
+) -> bool {
+    file.and_then(|file| snapshot.cached_parse(file, original, options))
+        .and_then(|cached| cached.parse_proposed_edits(edits, rewritten))
+        .map_or_else(
+            || {
+                parse_with_options(rewritten, options)
+                    .diagnostics
+                    .is_empty()
+            },
+            |parsed| parsed.diagnostics.is_empty(),
+        )
 }
 
 fn run_read_single(
@@ -942,11 +960,16 @@ fn run_read_single(
             safe,
             sender,
         } => {
-            let options = snapshot.options_for_path(&path);
             let result = format_edits_via_db(&snapshot, &path, &text, style, encoding);
-            let _ = sender.send(Message::Response(format_response(
-                id, &text, result, safe, encoding, options,
-            )));
+            let response = format_response(id, result, safe, |edits| {
+                verify_format_edits_with_options(
+                    &text,
+                    edits,
+                    encoding,
+                    snapshot.options_for_path(&path),
+                )
+            });
+            let _ = sender.send(Message::Response(response));
         }
         ReadJob::FormatRange {
             id,
@@ -957,11 +980,18 @@ fn run_read_single(
             safe,
             sender,
         } => {
-            let options = snapshot.options_for_path(&path);
             let result = format_range_edits_via_db(&snapshot, &path, &text, range, style, encoding);
-            let _ = sender.send(Message::Response(format_response(
-                id, &text, result, safe, encoding, options,
-            )));
+            let response = format_response(id, result, safe, |edits| {
+                verify_range_format_edits_via_db(
+                    &snapshot,
+                    &path,
+                    &text,
+                    edits,
+                    encoding,
+                    snapshot.options_for_path(&path),
+                )
+            });
+            let _ = sender.send(Message::Response(response));
         }
         ReadJob::DocumentSymbols {
             id,
