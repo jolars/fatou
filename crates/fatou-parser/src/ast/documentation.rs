@@ -333,14 +333,22 @@ impl MappedText {
         for token in literal.content_tokens() {
             let base: u32 = token.text_range().start().into();
             out.text.push_str(token.text());
-            for i in 0..token.text().len() as u32 {
-                out.bytes.push(SourceSpan {
-                    start: TextSize::from(base + i),
-                    end: TextSize::from(base + i + 1),
-                });
-            }
+            out.bytes.extend(
+                (base..base + token.text().len() as u32).map(|start| SourceSpan {
+                    start: TextSize::from(start),
+                    end: TextSize::from(start + 1),
+                }),
+            );
         }
         out
+    }
+
+    fn output_buffer(&self) -> Self {
+        Self {
+            text: String::with_capacity(self.text.len()),
+            bytes: Vec::with_capacity(self.bytes.len()),
+            empty_at: self.empty_at,
+        }
     }
 
     fn push_slice(&mut self, source: &Self, range: std::ops::Range<usize>) {
@@ -416,43 +424,32 @@ fn decode_literal(literal: &StringLiteral) -> DocText {
 }
 
 fn normalize_newlines(input: MappedText) -> MappedText {
-    let bytes = input.text.as_bytes();
-    let mut out = MappedText {
-        text: String::new(),
-        bytes: Vec::new(),
-        empty_at: input.empty_at,
-    };
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'\r' {
-            let end = if bytes.get(i + 1) == Some(&b'\n') {
-                i + 2
-            } else {
-                i + 1
-            };
-            out.text.push('\n');
-            out.bytes.push(SourceSpan {
-                start: input.bytes[i].start,
-                end: input.bytes[end - 1].end,
-            });
-            i = end;
-        } else {
-            let len = input.text[i..].chars().next().unwrap().len_utf8();
-            out.push_slice(&input, i..i + len);
-            i += len;
-        }
+    let mut returns = input.text.match_indices('\r').peekable();
+    if returns.peek().is_none() {
+        return input;
     }
+    let mut out = input.output_buffer();
+    let mut start = 0;
+    for (at, _) in returns {
+        out.push_slice(&input, start..at);
+        let has_lf = input.text.as_bytes().get(at + 1) == Some(&b'\n');
+        start = at + 1 + usize::from(has_lf);
+        out.text.push('\n');
+        out.bytes.push(SourceSpan {
+            start: input.bytes[at].start,
+            end: input.bytes[start - 1].end,
+        });
+    }
+    out.push_slice(&input, start..input.text.len());
     out
 }
 
-fn dedent_triple(input: MappedText) -> MappedText {
+fn dedent_triple(mut input: MappedText) -> MappedText {
     let mut lines = Vec::new();
     let mut start = 0;
-    for (i, byte) in input.text.bytes().enumerate() {
-        if byte == b'\n' {
-            lines.push((start, i, Some(i)));
-            start = i + 1;
-        }
+    for (i, _) in input.text.match_indices('\n') {
+        lines.push((start, i, Some(i)));
+        start = i + 1;
     }
     lines.push((start, input.text.len(), None));
 
@@ -477,11 +474,15 @@ fn dedent_triple(input: MappedText) -> MappedText {
         .collect();
     let dedent = common_whitespace_prefix_len(&candidates);
 
-    let mut out = MappedText {
-        text: String::new(),
-        bytes: Vec::new(),
-        empty_at: input.empty_at,
-    };
+    if dedent == 0 {
+        if input.text.starts_with('\n') {
+            input.text.remove(0);
+            input.bytes.remove(0);
+        }
+        return input;
+    }
+
+    let mut out = input.output_buffer();
     for (i, (start, end, newline)) in lines.into_iter().enumerate() {
         if i == 0 && start == end {
             continue;
@@ -514,16 +515,15 @@ pub(crate) fn common_whitespace_prefix_len(strings: &[&str]) -> usize {
 }
 
 fn decode_raw(input: MappedText) -> MappedText {
-    let bytes = input.text.as_bytes();
-    let mut out = MappedText {
-        text: String::new(),
-        bytes: Vec::new(),
-        empty_at: input.empty_at,
+    let Some(mut i) = input.text.find('\\') else {
+        return input;
     };
-    let mut i = 0;
+    let bytes = input.text.as_bytes();
+    let mut out = input.output_buffer();
+    out.push_slice(&input, 0..i);
     while i < bytes.len() {
         if bytes[i] != b'\\' {
-            let len = input.text[i..].chars().next().unwrap().len_utf8();
+            let len = input.text[i..].find('\\').unwrap_or(bytes.len() - i);
             out.push_slice(&input, i..i + len);
             i += len;
             continue;
@@ -562,13 +562,17 @@ fn decode_raw(input: MappedText) -> MappedText {
 }
 
 fn decode_escapes(input: MappedText) -> Result<MappedText, StringDecodeError> {
+    let Some(mut i) = input.text.find('\\') else {
+        return Ok(input);
+    };
     let source = input.text.as_bytes();
-    let mut decoded = Vec::new();
-    let mut spans = Vec::new();
-    let mut i = 0;
+    let mut decoded = Vec::with_capacity(source.len());
+    let mut spans = Vec::with_capacity(source.len());
+    decoded.extend_from_slice(&source[..i]);
+    spans.extend_from_slice(&input.bytes[..i]);
     while i < source.len() {
         if source[i] != b'\\' {
-            let len = input.text[i..].chars().next().unwrap().len_utf8();
+            let len = input.text[i..].find('\\').unwrap_or(source.len() - i);
             decoded.extend_from_slice(&source[i..i + len]);
             spans.extend_from_slice(&input.bytes[i..i + len]);
             i += len;

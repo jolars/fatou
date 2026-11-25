@@ -111,6 +111,29 @@ fn triple_strings_normalize_newlines_and_dedent_with_mapping() {
 }
 
 #[test]
+fn unindented_triple_strings_map_text_between_transformed_bytes() {
+    let source = "\"\"\"\n# α\nβ\\u03b3\r\nDelta\n\"\"\"\nf() = 1\n";
+    let text = static_text(source);
+    assert_eq!(text.as_str(), "# α\nβγ\nDelta\n");
+    for (decoded, original) in [
+        ("# α\nβ", "# α\nβ"),
+        ("γ\n", "\\u03b3\r\n"),
+        ("Delta", "Delta"),
+    ] {
+        let start = text.as_str().find(decoded).unwrap() as u32;
+        let source_start = source.find(original).unwrap() as u32;
+        let range = TextRange::at(start.into(), (decoded.len() as u32).into());
+        assert_eq!(
+            text.source_map().source_range(range),
+            Some(TextRange::at(
+                source_start.into(),
+                (original.len() as u32).into()
+            ))
+        );
+    }
+}
+
+#[test]
 fn raw_doc_payload_is_static_but_other_payloads_are_opaque() {
     let raw = static_text("@doc raw\"\\n\" f\n");
     assert_eq!(raw.as_str(), "\\n");
