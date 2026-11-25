@@ -7191,15 +7191,24 @@ fn initialize_with_options(client: &Connection, options: serde_json::Value) {
 
 /// Drain messages until a `publishDiagnostics` for `uri` arrives.
 fn recv_publish_for(client: &Connection, uri: &Uri) -> PublishDiagnosticsParams {
+    recv_publish_for_where(client, uri, |_| true)
+}
+
+fn recv_publish_for_where(
+    client: &Connection,
+    uri: &Uri,
+    accept: impl Fn(&PublishDiagnosticsParams) -> bool,
+) -> PublishDiagnosticsParams {
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         match client
             .receiver
-            .recv_timeout(Duration::from_secs(10))
-            .unwrap()
+            .recv_deadline(deadline)
+            .unwrap_or_else(|error| panic!("waiting for diagnostics for {uri:?}: {error}"))
         {
             Message::Notification(n) if n.method == "textDocument/publishDiagnostics" => {
                 let params: PublishDiagnosticsParams = serde_json::from_value(n.params).unwrap();
-                if params.uri == *uri {
+                if params.uri == *uri && accept(&params) {
                     return params;
                 }
             }
@@ -8338,12 +8347,14 @@ fn unsaved_manifest_editions_refresh_dependency_buffers_and_restore_on_close() {
             "syntax.julia_version = \"1.14\"\n[deps.Foo.extensions]",
         ),
     );
-    let report = recv_publish_for(&client, &dependency);
+    // Graph diagnostics can republish the previous parse before the live
+    // manifest's edition has been applied to the dependency buffer.
+    let report = recv_publish_for_where(&client, &dependency, |report| {
+        report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == Some(DiagnosticSeverity::ERROR) && diagnostic.code.is_none()
+        })
+    });
     assert_eq!(report.version, Some(1));
-    assert!(
-        !report.diagnostics.is_empty(),
-        "dependency grammar follows its unsaved manifest entry"
-    );
     client
         .sender
         .send(Message::Notification(Notification {
@@ -8354,13 +8365,9 @@ fn unsaved_manifest_editions_refresh_dependency_buffers_and_restore_on_close() {
             .unwrap(),
         }))
         .unwrap();
-    loop {
-        let report = recv_publish_for(&client, &dependency);
-        assert_eq!(report.version, Some(1));
-        if report.diagnostics.is_empty() {
-            break;
-        }
-    }
+    let report =
+        recv_publish_for_where(&client, &dependency, |report| report.diagnostics.is_empty());
+    assert_eq!(report.version, Some(1));
     let helper = file_uri(&helper);
     open_document(&client, &helper, helper_text);
     let initial = request_formatting(&client, &helper, 923, None);
