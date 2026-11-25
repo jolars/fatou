@@ -15,12 +15,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use lsp_types::{DocumentSymbol, Range, SymbolKind};
-use rowan::ast::AstNode as _;
+use rowan::{GreenNodeData, Language as _, NodeOrToken, TextSize, ast::AstNode as _};
 
 use crate::ast::{DocAttachment, DocText};
 use crate::incremental::Analysis;
 use crate::parser::{ParseOptions, parse_with_options};
-use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
+use crate::syntax::{JuliaLanguage, SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 use fatou_parser::documentation::ast::Heading;
 
@@ -83,63 +83,87 @@ fn symbols_for_tree<'a>(
 ) -> Vec<DocumentSymbol> {
     let ctx = Ctx {
         text,
-        line_index,
+        line_index: &line_index,
         encoding,
+        offset: TextSize::default(),
     };
     let mut out = Vec::new();
-    collect_symbols(root, &ctx, &mut out);
+    collect_symbols(root.green(), &ctx, &mut out);
     out
 }
 
+#[derive(Clone, Copy)]
 struct Ctx<'a> {
     text: &'a str,
-    line_index: LineIndex<'a>,
+    line_index: &'a LineIndex<'a>,
     encoding: PositionEncoding,
+    /// File offset of the current cursor's root.
+    offset: TextSize,
 }
 
 impl Ctx<'_> {
+    fn at(&self, relative: TextSize) -> Self {
+        Self {
+            offset: self.offset + relative,
+            ..*self
+        }
+    }
+
     fn lsp_range(&self, range: rowan::TextRange) -> Range {
         Range::new(
             self.line_index
-                .byte_to_position(range.start().into(), self.encoding),
+                .byte_to_position((self.offset + range.start()).into(), self.encoding),
             self.line_index
-                .byte_to_position(range.end().into(), self.encoding),
+                .byte_to_position((self.offset + range.end()).into(), self.encoding),
         )
     }
+
+    fn source(&self) -> &str {
+        &self.text[usize::from(self.offset)..]
+    }
 }
 
-/// Walk `node`'s child nodes, emitting symbols for definitions and descending
-/// through every other node — that transparency is what lets a definition
-/// nested in an `if`/`let`/`begin` (none of which introduce a symbol of their
-/// own) surface at the right level instead of being dropped.
-fn collect_symbols(node: &SyntaxNode, ctx: &Ctx<'_>, out: &mut Vec<DocumentSymbol>) {
+/// Follow the green tree through expressions and control flow without
+/// allocating cursors. Token widths contribute to each child's file offset.
+fn collect_symbols(node: &GreenNodeData, ctx: &Ctx<'_>, out: &mut Vec<DocumentSymbol>) {
+    let mut offset = TextSize::default();
     for child in node.children() {
-        visit(&child, ctx, out);
+        if let NodeOrToken::Node(node) = child {
+            visit(node, &ctx.at(offset), out);
+        }
+        offset += child.text_len();
     }
 }
 
-/// Emit the symbol(s) for `node` if it is a definition, else recurse into it.
-fn visit(node: &SyntaxNode, ctx: &Ctx<'_>, out: &mut Vec<DocumentSymbol>) {
-    if matches!(node.kind(), SyntaxKind::DOC | SyntaxKind::MACRO_CALL)
-        && let Some(attachment) = DocAttachment::cast(node.clone())
-    {
-        visit_documentation(&attachment, ctx, out);
-        return;
-    }
-    let symbol = match node.kind() {
+fn visit_child(node: &SyntaxNode, ctx: &Ctx<'_>, out: &mut Vec<DocumentSymbol>) {
+    visit(node.green(), &ctx.at(node.text_range().start()), out);
+}
+
+fn visit(node: &GreenNodeData, ctx: &Ctx<'_>, out: &mut Vec<DocumentSymbol>) {
+    // Only definitions and possible documentation attachments need cursors
+    // for inspecting their own syntax. Their ranges are relative to this root.
+    let cursor = || SyntaxNode::new_root(node.to_owned());
+    let symbol = match JuliaLanguage::kind_from_raw(node.kind()) {
+        SyntaxKind::DOC | SyntaxKind::MACRO_CALL => {
+            if let Some(attachment) = DocAttachment::cast(cursor()) {
+                visit_documentation(&attachment, ctx, out);
+                return;
+            }
+            None
+        }
         SyntaxKind::MODULE_DEF
         | SyntaxKind::FUNCTION_DEF
         | SyntaxKind::MACRO_DEF
         | SyntaxKind::STRUCT_DEF
         | SyntaxKind::ABSTRACT_DEF
-        | SyntaxKind::PRIMITIVE_DEF => def_symbol(node, ctx),
+        | SyntaxKind::PRIMITIVE_DEF => def_symbol(&cursor(), ctx),
         SyntaxKind::CONST_STMT => {
-            if const_symbols(node, ctx, out) {
+            if const_symbols(&cursor(), ctx, out) {
                 return;
             }
             None
         }
-        SyntaxKind::ASSIGNMENT_EXPR => short_form_symbol(node, ctx),
+        SyntaxKind::ASSIGNMENT_EXPR => short_form_symbol(&cursor(), ctx),
         _ => None,
     };
     match symbol {
@@ -156,7 +180,7 @@ fn visit(node: &SyntaxNode, ctx: &Ctx<'_>, out: &mut Vec<DocumentSymbol>) {
 /// definition selected by the symbol.
 fn visit_documentation(attachment: &DocAttachment, ctx: &Ctx<'_>, out: &mut Vec<DocumentSymbol>) {
     let mut targets = Vec::new();
-    visit(attachment.target(), ctx, &mut targets);
+    visit_child(attachment.target(), ctx, &mut targets);
     let headings = match attachment.text() {
         DocText::Static(decoded) => markdown_heading_symbols(&decoded, ctx),
         DocText::Opaque(_) | DocText::Invalid(_) => Vec::new(),
@@ -246,7 +270,7 @@ fn def_symbol(def: &SyntaxNode, ctx: &Ctx<'_>) -> Option<DocumentSymbol> {
         name.insert(0, '@');
     }
     let detail = function_like
-        .then(|| signature_detail(&sig_expr, selection, ctx.text))
+        .then(|| signature_detail(&sig_expr, selection, ctx.source()))
         .flatten();
 
     let kind = match def.kind() {
@@ -261,7 +285,11 @@ fn def_symbol(def: &SyntaxNode, ctx: &Ctx<'_>) -> Option<DocumentSymbol> {
         if def.kind() == SyntaxKind::STRUCT_DEF {
             collect_struct_members(&block, ctx, &mut children);
         } else {
-            collect_symbols(&block, ctx, &mut children);
+            collect_symbols(
+                block.green(),
+                &ctx.at(block.text_range().start()),
+                &mut children,
+            );
         }
     }
 
@@ -286,12 +314,12 @@ fn short_form_symbol(assign: &SyntaxNode, ctx: &Ctx<'_>) -> Option<DocumentSymbo
         return None;
     }
     let (name, selection) = callee_name(&head)?;
-    let detail = signature_detail(&lhs, selection, ctx.text);
+    let detail = signature_detail(&lhs, selection, ctx.source());
 
     // Nested definitions live in the value side; the signature binds none.
     let mut children = Vec::new();
     for rhs in assign.children().skip(1) {
-        visit(&rhs, ctx, &mut children);
+        visit_child(&rhs, ctx, &mut children);
     }
 
     Some(make_symbol(
@@ -372,7 +400,7 @@ fn collect_struct_members(block: &SyntaxNode, ctx: &Ctx<'_>, out: &mut Vec<Docum
                     field_symbol(&child, &lhs, ctx, out);
                 }
             }
-            _ => visit(&child, ctx, out),
+            _ => visit_child(&child, ctx, out),
         }
     }
 }
@@ -627,5 +655,39 @@ mod tests {
             nested[0].selection_range.start,
             lsp_types::Position::new(3, 0)
         );
+    }
+
+    #[test]
+    fn nested_document_symbols_use_file_positions() {
+        use lsp_types::Position;
+
+        let source = concat!(
+            "module Outer\n",
+            "if enabled\n",
+            "    register(\"🧪\", begin\n",
+            "        @doc \"\\u0023 Guide\" function f(x::Int)\n",
+            "            inner(y) = y\n",
+            "        end\n",
+            "    end)\n",
+            "end\n",
+            "end\n",
+        );
+        let symbols = compute_document_symbols(source, PositionEncoding::Utf16);
+        let children = symbols[0].children.as_ref().unwrap();
+        assert_eq!(children.len(), 1);
+        let f = &children[0];
+        assert_eq!(f.name, "f");
+        assert_eq!(f.detail.as_deref(), Some("(x::Int)"));
+        assert_eq!(f.range.start, Position::new(3, 8));
+        assert_eq!(
+            f.selection_range,
+            Range::new(Position::new(3, 37), Position::new(3, 38))
+        );
+        let children = f.children.as_ref().unwrap();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].name, "Guide");
+        assert_eq!(children[0].selection_range.start, Position::new(3, 14));
+        assert_eq!(children[1].name, "inner");
+        assert_eq!(children[1].selection_range.start, Position::new(4, 12));
     }
 }
