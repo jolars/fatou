@@ -26,7 +26,7 @@
 #              package load and first-call JIT all count. See bench/cold_start.py.
 #
 # Env overrides: SINGLE_ITERS, PROJECT_ITERS, COLD_ITERS, WARMUP, COLD_FILE,
-# JULIA_PROJECT.
+# BENCH_JULIA, JULIA_PROJECT.
 # JULIA_PROJECT points Julia at an environment that provides Runic and
 # JuliaFormatter; leave it unset to use the devenv default env.
 set -euo pipefail
@@ -34,6 +34,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BENCH="$ROOT/bench"
 CORPUS="$BENCH/corpus"
+BENCH_JULIA="${BENCH_JULIA:-julia}"
 
 SINGLE_ITERS="${SINGLE_ITERS:-50}"
 PROJECT_ITERS="${PROJECT_ITERS:-20}"
@@ -88,7 +89,7 @@ for entry in "${SCENARIOS[@]}"; do
     FATOU_BENCH_WARMUP="$WARMUP" \
     FATOU_BENCH_OUTPUT_JSON="$TMP/fatou_$key.json" \
       cargo bench --quiet --manifest-path "$ROOT/Cargo.toml" --bench format_compare
-    julia "${julia_args[@]}" "$BENCH/julia_bench.jl" \
+    "$BENCH_JULIA" "${julia_args[@]}" "$BENCH/julia_bench.jl" \
       "$target" "$iters" "$WARMUP" "$TMP/julia_$key.json" dir
   else
     iters="$SINGLE_ITERS"
@@ -98,7 +99,7 @@ for entry in "${SCENARIOS[@]}"; do
     FATOU_BENCH_WARMUP="$WARMUP" \
     FATOU_BENCH_OUTPUT_JSON="$TMP/fatou_$key.json" \
       cargo bench --quiet --manifest-path "$ROOT/Cargo.toml" --bench format_compare
-    julia "${julia_args[@]}" "$BENCH/julia_bench.jl" \
+    "$BENCH_JULIA" "${julia_args[@]}" "$BENCH/julia_bench.jl" \
       "$TMP/list_$key.txt" "$iters" "$WARMUP" "$TMP/julia_$key.json"
     [[ -n "$first_file_key" ]] || first_file_key="$key"
   fi
@@ -126,7 +127,7 @@ python3 "$BENCH/cold_start.py" \
   --iterations "$COLD_ITERS" \
   --out "$TMP/cold.json" \
   --fatou "$ROOT/target/release/fatou" \
-  --julia julia \
+  --julia "$BENCH_JULIA" \
   "${cold_project_args[@]}"
 
 # --- metadata ----------------------------------------------------------------

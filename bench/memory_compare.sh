@@ -24,7 +24,7 @@
 # servers see a resolvable environment (this writes a Manifest.toml into the
 # gitignored checkout and populates the shared Julia depot).
 #
-# Env overrides: SETTLE_TIMEOUT, QUIET_SECONDS, LSP_LATENCY_RUNS,
+# Env overrides: BENCH_JULIA, SETTLE_TIMEOUT, QUIET_SECONDS, LSP_LATENCY_RUNS,
 # LSP_LATENCY_WARMUPS, CLI_RUNS, OPEN_FILE_COUNT, and GNU_TIME for a GNU `time`
 # outside PATH (the devenv shell provides one).
 set -euo pipefail
@@ -40,11 +40,6 @@ export JULIA_DEPOT_PATH="$LSENV/depot:"
 LSP_SESSIONS="${LSP_SESSIONS:-6}"
 SETTLE_TIMEOUT="${SETTLE_TIMEOUT:-300}"
 BENCH_OUT="${BENCH_OUT:-$BENCH/memory.json}"
-expected_version="julia version 1.13.4"
-if [[ "$("$BENCH_JULIA" --startup-file=no --version)" != "$expected_version" ]]; then
-  echo "Set BENCH_JULIA to the Julia 1.13.4 executable" >&2
-  exit 1
-fi
 BENCH_JULIA="$(realpath "$(command -v "$BENCH_JULIA")")"
 export PATH="$(dirname "$BENCH_JULIA"):$PATH"
 QUIET_SECONDS="${QUIET_SECONDS:-5}"

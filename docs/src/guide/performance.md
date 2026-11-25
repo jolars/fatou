@@ -105,18 +105,17 @@ can be in memory at once.
 
 ## Reproduce the results
 
-Run these commands from the repository root in the devenv shell:
+Run this command from the repository root in the devenv shell:
 
 ```sh
-task bench-corpus  # Fetch the pinned Julia projects.
-BENCH_JULIA=/path/to/julia-1.13.4/bin/julia task bench
+task bench
 ```
 
 Run `task bench-format` for the formatter benchmarks or `task bench-lsp` for the
-language-server benchmarks. The tasks write `bench/results.json` and
-`bench/memory.json`, respectively. These committed files supply the charts,
-machine details, and tool versions shown above. Building the documentation reads
-them without running the benchmarks.
+language-server benchmarks. Devenv supplies stable Julia for both suites. The
+tasks write `bench/results.json` and `bench/memory.json`, respectively. These
+committed files supply the charts, machine details, and tool versions shown
+above. Building the documentation reads them without running the benchmarks.
 
 Set `BENCH_OUT` to write an exploratory comparison to a separate file. The
 current harness also measures completion after an unsaved edit and diagnostics
@@ -132,12 +131,12 @@ Fatou, prepare the workspace directly:
 ```sh
 task bench-corpus
 JULIA_DEPOT_PATH="$PWD/bench/lsenv/depot:" \
-  /path/to/julia-1.13.4/bin/julia --startup-file=no \
+  "$BENCH_JULIA" --startup-file=no \
   --project=bench/corpus/DataFrames -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
 ```
 
 ```sh
-BENCH_JULIA=/path/to/julia-1.13.4/bin/julia task bench-lsp-ab -- \
+task bench-lsp-ab -- \
   --baseline /path/to/baseline/fatou --candidate /path/to/candidate/fatou \
   --out bench/lsp-ab.tmp.json
 ```

@@ -6,10 +6,27 @@
   ...
 }:
 
+let
+  stableJulia =
+    (import inputs.nixpkgs-julia {
+      system = pkgs.stdenv.hostPlatform.system;
+    }).julia_113-bin;
+  benchmarkJulia = stableJulia.overrideAttrs (_: {
+    # Check the executable without running Julia's full test suite on shell entry.
+    installCheckPhase = ''
+      runHook preInstallCheck
+      "$out/bin/julia" --startup-file=no --version
+      runHook postInstallCheck
+    '';
+  });
+in
 {
   # Make every Julia invocation in the repo use the pinned root project
   # (`Project.toml` + `Manifest.toml`), searching upward from the cwd.
   env.JULIA_PROJECT = "@.";
+
+  # LanguageServer.jl's dependencies may fail to precompile on the oracle nightly.
+  env.BENCH_JULIA = "${benchmarkJulia}/bin/julia";
 
   # The npm workerd binary needs the Nix dynamic loader on Linux.
   env.MINIFLARE_WORKERD_PATH = lib.mkIf pkgs.stdenv.isLinux "${pkgs.writeShellScript "fatou-workerd" ''
@@ -64,9 +81,7 @@
           }
         else
           # The lock currently provides only a Linux x86-64 archive.
-          (import inputs.nixpkgs-julia {
-            system = pkgs.stdenv.hostPlatform.system;
-          }).julia_113-bin;
+          stableJulia;
     };
 
     javascript = {
