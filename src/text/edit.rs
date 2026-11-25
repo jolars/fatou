@@ -1,13 +1,11 @@
-//! Applying LSP `didChange` content changes to a text buffer.
+//! Applying LSP content changes and proposed text edits to a buffer.
 //!
 //! The edit currency itself ([`Edit`] plus `apply_edits`/`try_apply_edits`/
 //! `diff_edit`) lives in `fatou-parser` (`parser::edit`), because the
 //! incremental reparser is its busiest consumer and the operations are pure
-//! text manipulation; `crate::parser` is the one path to it. This module owns
-//! the one LSP-shaped entry point: turning a `didChange` batch into byte
-//! [`Edit`]s.
+//! text manipulation. This module converts LSP positions into byte [`Edit`]s.
 
-use lsp_types::TextDocumentContentChangeEvent;
+use lsp_types::{TextDocumentContentChangeEvent, TextEdit};
 
 use super::{PositionEncoding, TextBuffer};
 use crate::parser::Edit;
@@ -61,6 +59,38 @@ pub fn apply_content_changes(
         }
     }
     (!replaced).then_some(edits)
+}
+
+/// Apply edits whose ranges all refer to the original buffer. Return the
+/// rewritten text and a right-to-left byte edit chain for incremental reparse.
+/// Applying the chain in this order preserves the original byte offsets.
+pub(crate) fn apply_text_edits(
+    buffer: &TextBuffer,
+    edits: Vec<TextEdit>,
+    encoding: PositionEncoding,
+) -> Option<(String, Vec<Edit>)> {
+    let index = buffer.line_index();
+    let mut edits: Vec<_> = edits
+        .into_iter()
+        .map(|edit| Edit {
+            range: index.position_to_byte(edit.range.start, encoding)
+                ..index.position_to_byte(edit.range.end, encoding),
+            insert: edit.new_text,
+        })
+        .collect();
+    edits.sort_by_key(|edit| (edit.range.start, edit.range.end));
+
+    let mut next = String::with_capacity(buffer.len());
+    let mut cursor = 0;
+    for edit in &edits {
+        next.push_str(buffer.get(cursor..edit.range.start)?);
+        buffer.get(edit.range.clone())?;
+        next.push_str(&edit.insert);
+        cursor = edit.range.end;
+    }
+    next.push_str(&buffer[cursor..]);
+    edits.reverse();
+    Some((next, edits))
 }
 
 #[cfg(test)]

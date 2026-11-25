@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::formatter::{FormatStyle, VerifiedFormatError};
 use crate::incremental::Analysis;
+use crate::text::edit::apply_text_edits;
 use crate::text::{PositionEncoding, TextBuffer};
 
 use super::call_hierarchy::{
@@ -783,7 +784,7 @@ fn valid_rewrite(
         let Ok(edits) = serde_json::from_value::<Vec<TextEdit>>(value.clone()) else {
             return false;
         };
-        return rewritten_text(text, &edits, encoding).is_some_and(|next| {
+        return apply_text_edits(text, edits, encoding).is_some_and(|(next, _)| {
             if contexts.is_empty() {
                 parses_cleanly(&next, fallback)
             } else {
@@ -832,7 +833,7 @@ fn valid_workspace_edit(
         if let Some((source, text)) = job.source()
             && source == path
         {
-            return valid_text_edits(snapshot, &path, text, &edits, encoding);
+            return valid_text_edits(snapshot, &path, text, edits, encoding);
         }
         let text = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
             snapshot
@@ -843,7 +844,7 @@ fn valid_workspace_edit(
         .flatten()
         .or_else(|| std::fs::read_to_string(&path).ok().map(Arc::from));
         text.is_some_and(|text| {
-            valid_text_edits(snapshot, &path, &TextBuffer::new(text), &edits, encoding)
+            valid_text_edits(snapshot, &path, &TextBuffer::new(text), edits, encoding)
         })
     })
 }
@@ -852,10 +853,10 @@ fn valid_text_edits(
     snapshot: &Analysis,
     path: &std::path::Path,
     text: &TextBuffer,
-    edits: &[TextEdit],
+    edits: Vec<TextEdit>,
     encoding: PositionEncoding,
 ) -> bool {
-    let Some(next) = rewritten_text(text, edits, encoding) else {
+    let Some((next, edits)) = apply_text_edits(text, edits, encoding) else {
         return false;
     };
     if crate::environment::is_environment_file(path) {
@@ -863,13 +864,23 @@ fn valid_text_edits(
     }
     salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path);
+        let original = text.text_arc();
+        let valid = |options| {
+            let reparsed = file.and_then(|file| {
+                snapshot.reparse_proposed_edits(file, &original, &edits, &next, options)
+            });
+            reparsed.map_or_else(
+                || parses_cleanly(&next, options),
+                |parsed| parsed.diagnostics.is_empty(),
+            )
+        };
         let contexts = file.map_or(&[][..], |file| snapshot.source_editions(file).as_slice());
         if contexts.is_empty() {
-            return parses_cleanly(&next, snapshot.options_for_path(path));
+            return valid(snapshot.options_for_path(path));
         }
         contexts
             .iter()
-            .all(|(_, selected)| selected.certain && parses_cleanly(&next, selected.options))
+            .all(|(_, selected)| selected.certain && valid(selected.options))
     }))
     .unwrap_or(false)
 }
@@ -878,42 +889,6 @@ fn parses_cleanly(text: &str, options: crate::parser::ParseOptions) -> bool {
     crate::parser::parse_with_options(text, options)
         .diagnostics
         .is_empty()
-}
-
-fn rewritten_text(
-    text: &TextBuffer,
-    edits: &[TextEdit],
-    encoding: PositionEncoding,
-) -> Option<String> {
-    let mut ranges: Vec<_> = edits
-        .iter()
-        .map(|edit| {
-            (
-                text.line_index()
-                    .position_to_byte(edit.range.start, encoding),
-                text.line_index().position_to_byte(edit.range.end, encoding),
-                &edit.new_text,
-            )
-        })
-        .collect();
-    ranges.sort_by_key(|(start, end, _)| (*start, *end));
-    let mut next = String::with_capacity(text.len());
-    let mut cursor = 0;
-    for (start, end, replacement) in ranges {
-        if start < cursor
-            || end < start
-            || end > text.len()
-            || !text.is_char_boundary(start)
-            || !text.is_char_boundary(end)
-        {
-            return None;
-        }
-        next.push_str(&text[cursor..start]);
-        next.push_str(replacement);
-        cursor = end;
-    }
-    next.push_str(&text[cursor..]);
-    Some(next)
 }
 
 fn run_read_single(
@@ -1419,6 +1394,49 @@ mod tests {
             receiver,
         );
         assert_eq!(result.response_result.unwrap().as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn rename_validates_utf16_edits_in_every_loading_edition() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shared.jl");
+        let uri = super::super::uri::from_path(&path).unwrap();
+        let text = Arc::new(TextBuffer::new("value = 1\n(\"😀\", value, value)\n"));
+        let mut db = IncrementalDatabase::default();
+        db.upsert_file(&path, text.text_arc());
+        contexts(&mut db, &path);
+
+        let rename = |new_name: &str| {
+            let (sender, receiver) = crossbeam_channel::unbounded();
+            response(
+                &db,
+                ReadJob::Rename {
+                    id: 1.into(),
+                    uri: uri.clone(),
+                    path: path.clone(),
+                    text: Arc::clone(&text),
+                    position: Position::new(1, 8),
+                    new_name: new_name.into(),
+                    sender: ReadReply::new(sender),
+                },
+                receiver,
+            )
+            .response_result
+        };
+
+        assert_eq!(
+            rename("typegroup").unwrap_err().code,
+            ErrorCode::RequestFailed as i32
+        );
+        let edit: lsp_types::WorkspaceEdit =
+            serde_json::from_value(rename("renamed").unwrap()).unwrap();
+        assert_eq!(
+            edit.changes.unwrap()[&uri],
+            [(0, 0), (1, 7), (1, 14)].map(|(line, start)| TextEdit {
+                range: Range::new(Position::new(line, start), Position::new(line, start + 5)),
+                new_text: "renamed".into(),
+            })
+        );
     }
 
     #[test]
