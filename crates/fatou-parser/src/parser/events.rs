@@ -39,14 +39,14 @@ pub(crate) fn push_range(events: &mut Vec<Event>, start: usize, end: usize) {
 /// Reach for this whenever the matching [`Event::Start`] is far enough away that
 /// a reader would have to go looking for it; a bare `push(Event::Finish)` is
 /// fine when the pair is visible at a glance.
-pub(crate) fn finish(events: &mut Vec<Event>, kind: SyntaxKind) {
+pub(crate) fn finish(events: &mut Vec<Event>, _kind: SyntaxKind) {
     #[cfg(debug_assertions)]
     {
         let open = innermost_open(events);
         assert_eq!(
             open,
-            Some(kind),
-            "closing a {kind:?} but the innermost open node is {open:?}"
+            Some(_kind),
+            "closing a {_kind:?} but the innermost open node is {open:?}"
         );
     }
     events.push(Event::Finish);
