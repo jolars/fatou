@@ -12,6 +12,7 @@
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
+use std::sync::Arc;
 
 use lsp_types::{DocumentSymbol, Range, SymbolKind};
 use rowan::ast::AstNode as _;
@@ -39,7 +40,7 @@ pub fn compute_document_symbols_with_options(
     options: ParseOptions,
 ) -> Vec<DocumentSymbol> {
     let root = parse_with_options(text, options).cst;
-    symbols_for_tree(&root, text, encoding)
+    symbols_for_tree(&root, text, LineIndex::new(text), encoding)
 }
 
 /// Compute document symbols off the snapshot's cached parse when the db's
@@ -54,32 +55,35 @@ pub(crate) fn document_symbols_via_db(
 ) -> Vec<DocumentSymbol> {
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
-        if snapshot.file_text(file) != text {
+        let tracked = snapshot.file_text_arc(file);
+        if !Arc::ptr_eq(&tracked, &text.text_arc()) && &*tracked != text.text() {
             // The tracked input lags the live buffer; the cached tree is stale.
             return None;
         }
         let root = snapshot.parsed_tree(file);
-        Some(symbols_for_tree(&root, text, encoding))
+        Some(symbols_for_tree(&root, text, text.line_index(), encoding))
     }));
     match cached {
         Ok(Some(symbols)) => symbols,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
         Ok(None) | Err(_) => {
-            compute_document_symbols_with_options(text, encoding, snapshot.options_for_path(path))
+            let root = parse_with_options(text, snapshot.options_for_path(path)).cst;
+            symbols_for_tree(&root, text, text.line_index(), encoding)
         }
     }
 }
 
 /// Shared entry point for the fresh-parse and cached-tree paths: `root` must be
 /// the parse tree of exactly `text`.
-fn symbols_for_tree(
+fn symbols_for_tree<'a>(
     root: &SyntaxNode,
-    text: &str,
+    text: &'a str,
+    line_index: LineIndex<'a>,
     encoding: PositionEncoding,
 ) -> Vec<DocumentSymbol> {
     let ctx = Ctx {
         text,
-        line_index: LineIndex::new(text),
+        line_index,
         encoding,
     };
     let mut out = Vec::new();
@@ -116,7 +120,9 @@ fn collect_symbols(node: &SyntaxNode, ctx: &Ctx<'_>, out: &mut Vec<DocumentSymbo
 
 /// Emit the symbol(s) for `node` if it is a definition, else recurse into it.
 fn visit(node: &SyntaxNode, ctx: &Ctx<'_>, out: &mut Vec<DocumentSymbol>) {
-    if let Some(attachment) = DocAttachment::cast(node.clone()) {
+    if matches!(node.kind(), SyntaxKind::DOC | SyntaxKind::MACRO_CALL)
+        && let Some(attachment) = DocAttachment::cast(node.clone())
+    {
         visit_documentation(&attachment, ctx, out);
         return;
     }
@@ -274,12 +280,9 @@ fn def_symbol(def: &SyntaxNode, ctx: &Ctx<'_>) -> Option<DocumentSymbol> {
 /// for any other assignment. The LHS must be a call (possibly under `where` or
 /// `::` wrappers) and the operator a plain `=`.
 fn short_form_symbol(assign: &SyntaxNode, ctx: &Ctx<'_>) -> Option<DocumentSymbol> {
-    if op_token(assign)?.kind() != SyntaxKind::EQ {
-        return None;
-    }
-    let lhs = assign.children().next()?;
+    let lhs = assign.first_child()?;
     let head = unwrap_head(lhs.clone());
-    if head.kind() != SyntaxKind::CALL_EXPR {
+    if head.kind() != SyntaxKind::CALL_EXPR || op_token(assign)?.kind() != SyntaxKind::EQ {
         return None;
     }
     let (name, selection) = callee_name(&head)?;
