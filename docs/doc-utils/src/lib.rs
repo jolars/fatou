@@ -105,24 +105,11 @@ impl Scope {
         }
     }
 
-    /// What one dot stands for, used as the chart's legend title.
-    fn legend_title(self) -> &'static str {
+    /// Label for the chart's input axis.
+    fn input_title(self) -> &'static str {
         match self {
             Scope::Single => "File",
             Scope::Project => "Project",
-        }
-    }
-
-    fn caption(self) -> &'static str {
-        match self {
-            Scope::Single => {
-                "Median formatting time relative to Fatou (lower is faster). \
-                 Each color is one file; the dashed line at 1 is Fatou."
-            }
-            Scope::Project => {
-                "Median formatting time relative to Fatou (lower is faster). \
-                 Each color is one project; the dashed line at 1 is Fatou."
-            }
         }
     }
 }
@@ -185,14 +172,11 @@ struct Skipped {
     reason: String,
 }
 
-/// One dot in the warm-loop chart. `relative_time` (this tool's median time as a
-/// multiple of Fatou's in the same scenario) is the quantity plotted on the log
-/// axis; the rest feed the tooltip. Serialized inline for `bench-charts.js`.
+/// One dot in the warm-loop chart, serialized inline for `bench-charts.js`.
 #[derive(Serialize)]
 struct ChartPoint {
     scenario: String,
     tool: String,
-    relative_time: f64,
     throughput_mbps: f64,
     files_ok: u64,
     total_bytes: u64,
@@ -200,12 +184,11 @@ struct ChartPoint {
     relative: String,
 }
 
-/// One dot in the cold-start chart: a tool's cold time as a multiple of Fatou's
-/// (`relative_time`, plotted on the log axis) plus tooltip numbers.
+/// One dot in the cold-start chart.
 #[derive(Serialize)]
-struct ColdPoint {
+struct ColdPoint<'a> {
+    scenario: &'a str,
     tool: String,
-    relative_time: f64,
     median_ms: f64,
     throughput_mbps: f64,
     relative: String,
@@ -326,13 +309,12 @@ fn render_results(b: &Benchmarks, scope: Scope) -> String {
     out.push_str("<div class=\"bench-chart-block\">\n");
     out.push_str("<figure class=\"bench-figure\">\n");
     out.push_str(&format!(
-        "<div class=\"bench-chart\" data-legend=\"{}\"></div>\n",
-        scope.legend_title()
+        "<div class=\"bench-chart\" data-input=\"{}\"></div>\n",
+        scope.input_title()
     ));
     out.push_str("<script type=\"application/json\" class=\"bench-data\">");
     out.push_str(&data_json);
     out.push_str("</script>\n");
-    out.push_str(&format!("<figcaption>{}</figcaption>\n", scope.caption()));
     out.push_str("</figure>\n");
     out.push_str(
         "<noscript>Enable JavaScript for the interactive chart; \
@@ -345,9 +327,7 @@ fn render_results(b: &Benchmarks, scope: Scope) -> String {
     out
 }
 
-/// One dot per (scenario, tool) within a scope, in scenario then tool order. The
-/// plotted value is each tool's median time as a multiple of Fatou's in the same
-/// scenario (Fatou = 1); absolute throughput and time ride along in the tooltip.
+/// One dot per (scenario, tool) within a scope, in scenario then tool order.
 fn chart_points(b: &Benchmarks, scope: Scope) -> Vec<ChartPoint> {
     let mut points = Vec::new();
     for (key, sc) in b.ordered(scope) {
@@ -357,11 +337,10 @@ fn chart_points(b: &Benchmarks, scope: Scope) -> Vec<ChartPoint> {
             let Some(agg) = sc.tools.get(tool) else {
                 continue;
             };
-            let (relative_time, relative) = relative_time(tool, agg.median_total_ns, base);
+            let relative = relative_time(tool, agg.median_total_ns, base);
             points.push(ChartPoint {
                 scenario: label.clone(),
                 tool: tool_label.to_string(),
-                relative_time,
                 throughput_mbps: agg.throughput_mbps,
                 files_ok: agg.files_ok,
                 total_bytes: agg.total_bytes,
@@ -375,8 +354,7 @@ fn chart_points(b: &Benchmarks, scope: Scope) -> Vec<ChartPoint> {
 
 /// One `<h4>` + HTML `<table>` per scenario of a scope, in scenario order; rows
 /// follow tool order. `Relative` is each tool's median time as a multiple of
-/// Fatou's (what the chart plots), so the table and the dot plot tell the same
-/// story. The heading level sits one below the scope's own `###` on the page.
+/// Fatou's. The heading level sits one below the scope's own `###` on the page.
 fn render_results_tables_html(b: &Benchmarks, scope: Scope) -> String {
     let mut out = String::new();
     for (key, sc) in b.ordered(scope) {
@@ -395,7 +373,7 @@ fn render_results_tables_html(b: &Benchmarks, scope: Scope) -> String {
             let Some(agg) = sc.tools.get(tool) else {
                 continue;
             };
-            let (_, relative) = relative_time(tool, agg.median_total_ns, base);
+            let relative = relative_time(tool, agg.median_total_ns, base);
             out.push_str(&format!(
                 "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.1}</td><td>{:.2}</td><td>{}</td></tr>\n",
                 tool_label,
@@ -426,12 +404,7 @@ fn render_results_tables_html(b: &Benchmarks, scope: Scope) -> String {
     out
 }
 
-/// The cold-start marker becomes a log-scale dot plot of each tool's median
-/// fresh-process time relative to Fatou (startup plus, for the Julia tools,
-/// package load and first-call JIT), Fatou on a dashed baseline at 1, plus a
-/// an HTML data table with the absolute numbers. A log axis keeps the
-/// points readable across the wide dynamic range. (Points, not bars: a log scale
-/// has no zero baseline for bars to grow from.)
+/// Render a log-scale dot plot and a table of median fresh-process times.
 fn render_cold_start(b: &Benchmarks) -> String {
     let Some(sc) = b.scenarios.get("cold_start") else {
         return "_Cold-start data unavailable (run `task bench`)._".to_string();
@@ -446,11 +419,6 @@ fn render_cold_start(b: &Benchmarks) -> String {
     out.push_str("<script type=\"application/json\" class=\"bench-data\">");
     out.push_str(&data_json);
     out.push_str("</script>\n");
-    out.push_str(
-        "<figcaption>Median cold-start time relative to Fatou (lower is faster). \
-         The dashed line at 1 is Fatou. Each run starts a fresh process and \
-         formats one file.</figcaption>\n",
-    );
     out.push_str("</figure>\n");
     out.push_str(
         "<noscript>Enable JavaScript for the interactive chart; \
@@ -463,19 +431,18 @@ fn render_cold_start(b: &Benchmarks) -> String {
     out
 }
 
-/// One dot per tool for the cold-start chart, in tool order; the plotted value is
-/// each tool's cold time as a multiple of Fatou's (Fatou = 1, log axis).
-fn cold_points(sc: &Scenario) -> Vec<ColdPoint> {
+/// One dot per tool for the cold-start chart, in tool order.
+fn cold_points(sc: &Scenario) -> Vec<ColdPoint<'_>> {
     let base = sc.tools.get("fatou").map(|a| a.median_total_ns);
     let mut points = Vec::new();
     for &(tool, tool_label) in TOOL_ORDER {
         let Some(agg) = sc.tools.get(tool) else {
             continue;
         };
-        let (relative_time, relative) = relative_time(tool, agg.median_total_ns, base);
+        let relative = relative_time(tool, agg.median_total_ns, base);
         points.push(ColdPoint {
+            scenario: &sc.target,
             tool: tool_label.to_string(),
-            relative_time,
             median_ms: agg.median_total_ns / 1e6,
             throughput_mbps: agg.throughput_mbps,
             relative,
@@ -485,7 +452,7 @@ fn cold_points(sc: &Scenario) -> Vec<ColdPoint> {
 }
 
 /// The cold-start fallback table: absolute median time, throughput, and time
-/// relative to Fatou (what the dot plot shows).
+/// relative to Fatou.
 fn render_cold_table_html(sc: &Scenario) -> String {
     let base = sc.tools.get("fatou").map(|a| a.median_total_ns);
     let mut out = String::new();
@@ -501,7 +468,7 @@ fn render_cold_table_html(sc: &Scenario) -> String {
         let Some(agg) = sc.tools.get(tool) else {
             continue;
         };
-        let (_, relative) = relative_time(tool, agg.median_total_ns, base);
+        let relative = relative_time(tool, agg.median_total_ns, base);
         out.push_str(&format!(
             "<tr><td>{}</td><td>{}</td><td>{:.2}</td><td>{}</td></tr>\n",
             tool_label,
@@ -526,19 +493,14 @@ fn fmt_time(ns: f64) -> String {
     }
 }
 
-/// A tool's median time as a multiple of Fatou's, returned as both the raw ratio
-/// (plotted on the log axis) and a display label (`baseline` for Fatou, else e.g.
-/// `3.41x`). Fatou is always exactly 1; a missing/zero baseline yields `—`.
-fn relative_time(tool: &str, ns: f64, base: Option<f64>) -> (f64, String) {
+/// Display a tool's median time as a multiple of Fatou's.
+fn relative_time(tool: &str, ns: f64, base: Option<f64>) -> String {
     if tool == "fatou" {
-        return (1.0, "baseline".to_string());
+        return "baseline".to_string();
     }
     match base {
-        Some(b) if b > 0.0 => {
-            let ratio = ns / b;
-            (ratio, format!("{ratio:.2}x"))
-        }
-        _ => (1.0, "—".to_string()),
+        Some(b) if b > 0.0 => format!("{:.2}x", ns / b),
+        _ => "—".to_string(),
     }
 }
 

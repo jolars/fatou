@@ -18,7 +18,6 @@
 /* Vega renders into here at container width; height comes from the spec. */
 .bench-chart {
   width: 100%;
-  min-height: 0;
 }
 
 .bench-chart-block noscript {

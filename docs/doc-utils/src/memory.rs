@@ -444,7 +444,7 @@ fn render_speed(m: &Memory) -> String {
         "lsp-readiness",
         &readiness,
         "Readiness time in seconds on a log scale (lower is faster). \
-         Each color is one startup phase. The phases have different starting \
+         Each color is one server. The phases have different starting \
          points and are not additive.",
         "Readiness data",
         &table,
@@ -487,7 +487,7 @@ fn render_speed(m: &Memory) -> String {
         "lsp-requests",
         &requests,
         "Median request latency in milliseconds on a log scale (lower is faster). \
-         Each color is one request. Tooltips and the table include p95 and \
+         Each color is one server. Tooltips and the table include p95 and \
          the number of results returned.",
         "Request timings and returned work",
         &table,

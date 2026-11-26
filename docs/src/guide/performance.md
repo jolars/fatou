@@ -24,10 +24,9 @@ The three files cover parser internals (`parse_stream.jl`), a large data table
 (`kinds.jl`), and docstring- and macro-heavy library code
 (`abstractdataframe.jl`).
 
-The charts show time relative to Fatou: **1 is the Fatou baseline, and 10 means
-ten times as long**. Lower is faster. Each step on the logarithmic axis is a
-tenfold increase. Tooltips and expandable tables show the measured times and
-throughput.
+The formatter charts show median elapsed time in milliseconds on a logarithmic
+scale. Lower is faster. Each color represents a tool. Tooltips and expandable
+tables show throughput and time relative to Fatou.
 
 {{ benchmark-results-single }}
 
@@ -105,43 +104,6 @@ can be in memory at once.
 
 ## Reproduce the results
 
-Run this command from the repository root in the devenv shell:
-
-```sh
-task bench
-```
-
-Run `task bench-format` for the formatter benchmarks or `task bench-lsp` for the
-language-server benchmarks. Devenv supplies stable Julia for both suites. The
-tasks write `bench/results.json` and `bench/memory.json`, respectively. These
-committed files supply the charts, machine details, and tool versions shown
-above. Building the documentation reads them without running the benchmarks.
-
-Set `BENCH_OUT` to write an exploratory comparison to a separate file. The
-current harness also measures completion after an unsaved edit and diagnostics
-after introducing and repairing a syntax error. Only validated responses
-contribute to the latency distributions.
-
-### Compare two Fatou builds
-
-Use release binaries and an instantiated DataFrames workspace. The comparison
-task above prepares the workspace and its Julia depot. If you only want to run
-Fatou, prepare the workspace directly:
-
-```sh
-task bench-corpus
-JULIA_DEPOT_PATH="$PWD/bench/lsenv/depot:" \
-  "$BENCH_JULIA" --startup-file=no \
-  --project=bench/corpus/DataFrames -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
-```
-
-```sh
-task bench-lsp-ab -- \
-  --baseline /path/to/baseline/fatou --candidate /path/to/candidate/fatou \
-  --out bench/lsp-ab.tmp.json
-```
-
-Point both options at the same binary first to estimate measurement noise. The
-output includes raw samples, per-session results, and paired deltas (candidate
-minus baseline). Run on an idle machine so unrelated work has less effect on the
-timings.
+See the [benchmark
+README](https://github.com/jolars/fatou/blob/main/bench/README.md) for
+instructions on reproducing these results.
