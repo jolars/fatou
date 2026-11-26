@@ -57,6 +57,18 @@ tasks:
     cmds:
       - ./bench/memory_compare.sh
 
+  bench-cli-memory:
+    desc: Measure Fatou-only CLI memory for development (writes bench/cli-memory.tmp.json)
+    cmds:
+      - task: bench-corpus
+      - cargo build --release
+      - >-
+        python3 bench/cli_memory.py
+        --fatou target/release/fatou
+        --project bench/corpus/DataFrames
+        --out bench/cli-memory.tmp.json
+        {{.CLI_ARGS}}
+
   bench-lsp-ab:
     desc: Compare two Fatou release binaries over the same editing workload
     cmds:

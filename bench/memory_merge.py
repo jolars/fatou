@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
-"""Merge the language-server and CLI outputs into memory.json, the artifact the
-docs `doc-utils` documentation renderer reads to render speed and memory results.
+"""Merge language-server measurements into the documentation's memory.json.
 
-`lsp_memory.py` reports per-server readiness, request latency, returned work,
-and memory milestones over a scripted editing session; `cli_memory.py` reports
-peak RSS for one-shot runs. This flattens both into the shape the docs want,
-attaches the run metadata, and computes each server's settled memory relative
-to Fatou's -- the ratio is what survives a change of machine, even though for
-memory the absolute megabytes are worth printing too.
+The artifact contains per-server readiness, request latency, returned work,
+memory milestones, and settled memory relative to Fatou.
 
 Display labels are assigned here rather than in the preprocessor so the artifact
 stays self-describing, the same way scenario labels work in results.json.
@@ -99,7 +94,6 @@ def add_ratios(records):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--lsp", required=True)
-    parser.add_argument("--cli", required=True)
     parser.add_argument("--meta", required=True)
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
@@ -111,7 +105,6 @@ def main():
     }
     if any(failed.values()):
         parser.error(f"benchmark artifact has failed initialization sessions: {failed}")
-    cli = load(args.cli)
 
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -135,12 +128,6 @@ def main():
             "navigation_target": lsp.get("navigation_target"),
         },
         "servers": add_ratios(flatten_servers(lsp)),
-        "cli": {
-            "tree_files": cli["tree_files"],
-            "tree_bytes": cli["tree_bytes"],
-            "runs": cli["runs"],
-            "cases": cli["cases"],
-        },
     }
 
     output = Path(args.out)

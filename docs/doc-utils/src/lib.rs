@@ -161,6 +161,7 @@ struct Agg {
     files_ok: u64,
     total_bytes: u64,
     median_total_ns: f64,
+    median_peak_rss_kib: Option<f64>,
     throughput_mbps: f64,
     #[serde(default)]
     skipped: Vec<Skipped>,
@@ -190,6 +191,7 @@ struct ColdPoint<'a> {
     scenario: &'a str,
     tool: String,
     median_ms: f64,
+    peak_rss_mib: Option<f64>,
     throughput_mbps: f64,
     relative: String,
 }
@@ -444,6 +446,7 @@ fn cold_points(sc: &Scenario) -> Vec<ColdPoint<'_>> {
             scenario: &sc.target,
             tool: tool_label.to_string(),
             median_ms: agg.median_total_ns / 1e6,
+            peak_rss_mib: agg.median_peak_rss_kib.map(|kib| kib / 1024.0),
             throughput_mbps: agg.throughput_mbps,
             relative,
         });
@@ -451,8 +454,7 @@ fn cold_points(sc: &Scenario) -> Vec<ColdPoint<'_>> {
     points
 }
 
-/// The cold-start fallback table: absolute median time, throughput, and time
-/// relative to Fatou.
+/// The cold-start fallback table with timings, throughput, and peak RSS.
 fn render_cold_table_html(sc: &Scenario) -> String {
     let base = sc.tools.get("fatou").map(|a| a.median_total_ns);
     let mut out = String::new();
@@ -462,7 +464,7 @@ fn render_cold_table_html(sc: &Scenario) -> String {
     ));
     out.push_str(
         "<thead><tr><th>Tool</th><th>Median time</th>\
-         <th>Throughput (MB/s)</th><th>vs Fatou</th></tr></thead>\n<tbody>\n",
+         <th>Throughput (MB/s)</th><th>vs Fatou</th><th>Median peak RSS (MiB)</th></tr></thead>\n<tbody>\n",
     );
     for &(tool, tool_label) in TOOL_ORDER {
         let Some(agg) = sc.tools.get(tool) else {
@@ -470,11 +472,14 @@ fn render_cold_table_html(sc: &Scenario) -> String {
         };
         let relative = relative_time(tool, agg.median_total_ns, base);
         out.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{:.2}</td><td>{}</td></tr>\n",
+            "<tr><td>{}</td><td>{}</td><td>{:.2}</td><td>{}</td><td>{}</td></tr>\n",
             tool_label,
             fmt_time(agg.median_total_ns),
             agg.throughput_mbps,
             esc(&relative),
+            agg.median_peak_rss_kib
+                .map(|kib| format!("{:.1}", kib / 1024.0))
+                .unwrap_or_else(|| "—".to_string()),
         ));
     }
     out.push_str("</tbody>\n</table>\n");

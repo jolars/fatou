@@ -110,10 +110,20 @@ def cold_scenario(report):
         return None
     tools = julia_tools(report)
     order = ["fatou", "runic", "juliaformatter"]
+    aggregates = {}
+    for tool in order:
+        if tool not in tools:
+            continue
+        files = tools[tool]
+        summary = aggregate(files)
+        for record in files:
+            if record["ok"] and "median_peak_rss_kib" in record:
+                summary["median_peak_rss_kib"] = record["median_peak_rss_kib"]
+        aggregates[tool] = summary
     return {
         "label": "Cold start",
         "target": report.get("target", ""),
-        "tools": {t: aggregate(tools[t]) for t in order if t in tools},
+        "tools": aggregates,
     }
 
 

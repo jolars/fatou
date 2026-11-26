@@ -149,6 +149,16 @@ function spec(rows, kind, inputTitle) {
               },
             ]
           : []),
+        ...(kind === "cold" &&
+        points.some((point) => point.peak_rss_mib != null)
+          ? [
+              {
+                field: "peak_rss_mib",
+                title: "Median peak RSS (MiB)",
+                format: ".1f",
+              },
+            ]
+          : []),
         ...(!lsp && kind !== "cold"
           ? [
               { field: "files_ok", title: "Files" },

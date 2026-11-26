@@ -12,13 +12,19 @@ Run `task bench-format` for the formatter benchmarks or `task bench-lsp` for the
 language-server benchmarks. Devenv supplies stable Julia for both suites. The
 tasks write `bench/results.json` and `bench/memory.json`, respectively. These
 committed files supply the charts, machine details, and tool versions on the
-performance page. Building the documentation reads them without running the
+performance page. The formatter suite measures cold-start peak RSS with GNU
+`time`. Building the documentation reads the artifacts without running the
 benchmarks.
 
-Set `BENCH_OUT` to write an exploratory comparison to a separate file. The
-current harness also measures completion after an unsaved edit and diagnostics
-after introducing and repairing a syntax error. Only validated responses
-contribute to the latency distributions.
+Set `BENCH_OUT` to write an exploratory language-server comparison to a separate
+file. The current harness also measures completion after an unsaved edit and
+diagnostics after introducing and repairing a syntax error. Only validated
+responses contribute to the latency distributions.
+
+## Measure Fatou CLI memory during development
+
+Run `task bench-cli-memory` to measure Fatou’s formatting, linting, and parsing
+on the pinned DataFrames corpus. The task writes `bench/cli-memory.tmp.json`.
 
 ## Compare two Fatou builds
 

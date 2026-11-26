@@ -1,16 +1,8 @@
 #!/usr/bin/env bash
 # Language-server speed and memory benchmark: Fatou against the two Julia
-# language servers, plus Fatou's own one-shot CLI memory runs. Results land in
-# bench/memory.json, which the docs `doc-utils` documentation renderer reads to
-# render the language-server section of the performance page.
-#
-# Two scopes, because Fatou is used two ways:
-#
-#   language server  the resident case. Each server opens the same workspace,
-#                    is put through the same scripted session, and is sampled
-#                    across its whole process tree. See bench/lsp_memory.py.
-#   CLI              the one-shot case. Peak RSS of `fatou format`/`lint`/`parse`
-#                    over one file and over a whole tree. See bench/cli_memory.py.
+# language servers. Results land in bench/memory.json. Each server opens the
+# same workspace, runs a scripted editing session, and is sampled across its
+# process tree. See bench/lsp_memory.py.
 #
 # Unlike the throughput benchmark, this one reports absolute megabytes as well as
 # ratios: for memory the absolute figure is the thing a user feels, and the tools
@@ -25,8 +17,7 @@
 # gitignored checkout and populates the shared Julia depot).
 #
 # Env overrides: BENCH_JULIA, SETTLE_TIMEOUT, QUIET_SECONDS, LSP_LATENCY_RUNS,
-# LSP_LATENCY_WARMUPS, CLI_RUNS, OPEN_FILE_COUNT, and GNU_TIME for a GNU `time`
-# outside PATH (the devenv shell provides one).
+# LSP_LATENCY_WARMUPS, and OPEN_FILE_COUNT.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -43,7 +34,6 @@ BENCH_OUT="${BENCH_OUT:-$BENCH/memory.json}"
 BENCH_JULIA="$(realpath "$(command -v "$BENCH_JULIA")")"
 export PATH="$(dirname "$BENCH_JULIA"):$PATH"
 QUIET_SECONDS="${QUIET_SECONDS:-5}"
-CLI_RUNS="${CLI_RUNS:-5}"
 OPEN_FILE_COUNT="${OPEN_FILE_COUNT:-5}"
 LSP_LATENCY_RUNS="${LSP_LATENCY_RUNS:-20}"
 LSP_LATENCY_WARMUPS="${LSP_LATENCY_WARMUPS:-2}"
@@ -108,17 +98,6 @@ JULIA_PROJECT="$WORKSPACE" python3 "$BENCH/lsp_memory.py" \
   --stderr-dir "$LSENV" \
   --out "$TMP/lsp.json"
 
-# --- one-shot CLI -------------------------------------------------------------
-echo "==> memory: fatou CLI"
-cli_args=()
-[[ -n "${GNU_TIME:-}" ]] && cli_args=(--time "$GNU_TIME")
-python3 "$BENCH/cli_memory.py" \
-  --fatou "$ROOT/target/release/fatou" \
-  --project "$WORKSPACE" \
-  --runs "$CLI_RUNS" \
-  "${cli_args[@]}" \
-  --out "$TMP/cli.json"
-
 # --- metadata -----------------------------------------------------------------
 cpu="$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | sed 's/.*: //' || echo unknown)"
 mem_kb="$(grep -m1 MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)"
@@ -133,7 +112,6 @@ cat >"$TMP/meta.json" <<EOF
   "memory_gb": $((mem_kb / 1024 / 1024)),
   "settle_timeout": $SETTLE_TIMEOUT,
   "quiet_seconds": $QUIET_SECONDS,
-  "cli_runs": $CLI_RUNS,
   "lsp_latency_runs": $LSP_LATENCY_RUNS,
   "lsp_latency_warmups": $LSP_LATENCY_WARMUPS,
   "lsp_latency_files": $LSP_LATENCY_FILES,
@@ -146,7 +124,6 @@ EOF
 
 python3 "$BENCH/memory_merge.py" \
   --lsp "$TMP/lsp.json" \
-  --cli "$TMP/cli.json" \
   --meta "$TMP/meta.json" \
   --out "$BENCH_OUT"
 

@@ -1,5 +1,6 @@
-// mdBook removed punctuation that VitePress replaces with hyphens.
+// Preserve anchors from earlier versions of the docs.
 export const legacyAnchors = {
+  "cold-start": "command-line-memory-use",
   "languageserver-jl": "languageserverjl",
   "jetls-jl": "jetlsjl",
   "runic-jl": "runicjl",

@@ -6,7 +6,6 @@
 //!   `{{ memory-meta }}`    -> a bullet list of workspace, session, and versions
 //!   `{{ lsp-speed }}`      -> readiness and warm-request plots with detail tables
 //!   `{{ memory-servers }}` -> the language-server memory plot and detail table
-//!   `{{ memory-cli }}`     -> the one-shot CLI table
 //!
 //! Readiness, request latency, and memory have different units and shapes, so
 //! each gets its own plot. The inline data uses the same vendored Vega runtime
@@ -19,9 +18,8 @@ use std::path::Path;
 pub const META_MARKER: &str = "{{ memory-meta }}";
 pub const SPEED_MARKER: &str = "{{ lsp-speed }}";
 pub const SERVERS_MARKER: &str = "{{ memory-servers }}";
-pub const CLI_MARKER: &str = "{{ memory-cli }}";
 
-const MARKERS: &[&str] = &[META_MARKER, SPEED_MARKER, SERVERS_MARKER, CLI_MARKER];
+const MARKERS: &[&str] = &[META_MARKER, SPEED_MARKER, SERVERS_MARKER];
 
 // --- artifact schema (mirrors bench/memory_merge.py output) ------------------
 
@@ -33,7 +31,6 @@ struct Memory {
     session: Session,
     #[serde(default)]
     servers: Vec<Server>,
-    cli: Cli,
 }
 
 #[derive(Deserialize)]
@@ -169,26 +166,6 @@ struct RequestLatency {
     payload_bytes_median: Option<u64>,
 }
 
-#[derive(Deserialize)]
-struct Cli {
-    tree_files: u64,
-    tree_bytes: u64,
-    runs: u64,
-    #[serde(default)]
-    cases: Vec<Case>,
-}
-
-#[derive(Deserialize)]
-struct Case {
-    command: String,
-    /// What the command ran over: "src tree", "one file", or a floor marker.
-    target: String,
-    peak_rss_mb: f64,
-    seconds: f64,
-    #[serde(default)]
-    input_bytes: u64,
-}
-
 // --- rendering ---------------------------------------------------------------
 
 #[derive(Serialize)]
@@ -253,12 +230,7 @@ pub fn insert(replacements: &mut BTreeMap<&'static str, String>, project_root: &
         .ok()
         .and_then(|s| serde_json::from_str::<Memory>(&s).ok())
     {
-        Some(m) => vec![
-            render_meta(&m),
-            render_speed(&m),
-            render_servers(&m),
-            render_cli(&m.cli),
-        ],
+        Some(m) => vec![render_meta(&m), render_speed(&m), render_servers(&m)],
         None => {
             let note = format!(
                 "_Language-server data unavailable (`{}` missing or unreadable; run `task bench-lsp`)._",
@@ -562,38 +534,6 @@ fn render_speed(m: &Memory) -> String {
     out
 }
 
-fn render_cli(cli: &Cli) -> String {
-    if cli.cases.is_empty() {
-        return "_No CLI cases in the benchmark artifact (run `task bench-lsp`)._".to_string();
-    }
-
-    let mut out = String::from(
-        "| Command | Over | Input | Peak RSS | Wall |\n| --- | --- | ---: | ---: | ---: |\n",
-    );
-    for c in &cli.cases {
-        let input = if c.input_bytes == 0 {
-            "-".to_string()
-        } else {
-            human_bytes(c.input_bytes)
-        };
-        out.push_str(&format!(
-            "| `{}` | {} | {} | {:.1} MB | {:.0} ms |\n",
-            c.command,
-            c.target,
-            input,
-            c.peak_rss_mb,
-            c.seconds * 1000.0
-        ));
-    }
-    out.push_str(&format!(
-        "\n_The `src` tree is {} files, {}. Lowest of {} runs each, measured with GNU `time`._\n",
-        cli.tree_files,
-        human_bytes(cli.tree_bytes),
-        cli.runs
-    ));
-    out
-}
-
 fn megabytes(v: Option<f64>) -> String {
     v.map(|v| format!("{v:.0} MB"))
         .unwrap_or_else(|| "-".to_string())
@@ -882,20 +822,6 @@ mod tests {
         assert!(out.contains("edit completion, 2 invalid"), "{out}");
         let requests = chart_data(&out, "lsp-requests");
         assert_eq!(requests.as_array().unwrap().len(), 9);
-    }
-
-    #[test]
-    fn cli_table_is_a_table() {
-        let out = render_cli(&artifact().cli);
-        let rows: Vec<&str> = out.lines().filter(|l| l.starts_with('|')).collect();
-        // Header, separator, one case -- and nothing wedged between them, which
-        // is what would silently stop it rendering as a table.
-        assert_eq!(rows.len(), 3, "{out}");
-        assert!(
-            rows[2].contains("`fatou lint` | src tree | 850 KiB | 37.1 MB"),
-            "{out}"
-        );
-        assert!(out.contains("36 files, 850 KiB"), "{out}");
     }
 
     #[test]

@@ -42,7 +42,9 @@ it has no in-process directory API. The tables list any files a tool skipped.
 
 Each run starts a fresh process, formats `parse_stream.jl` once, and exits. This
 is the cost of a command-line invocation, including Julia startup, package
-loading, and compilation for Runic and JuliaFormatter.
+loading, and compilation for Runic and JuliaFormatter. The chart tooltips and
+data table show median peak resident memory (RSS) in MiB. GNU `time` measures
+RSS in separate runs of the same commands.
 
 {{ benchmark-cold-start }}
 
@@ -92,15 +94,6 @@ server, after an untimed cache-priming session. Earlier artifacts record one
 session per server.
 
 {{ memory-servers }}
-
-## Command-line memory use
-
-For a CI job or pre-commit hook, Fatou runs once and exits. This table shows
-peak memory use for `format`, `lint`, and `parse` on individual files and whole
-source trees. Whole-tree runs process files in parallel, so several syntax trees
-can be in memory at once.
-
-{{ memory-cli }}
 
 ## Reproduce the results
 

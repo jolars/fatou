@@ -23,10 +23,11 @@
 #              API, so it is excluded from these scenarios.
 #   cold_start the opposite of the warm loop: one fresh process per run on
 #              parse_stream.jl, so process startup and (for the Julia tools)
-#              package load and first-call JIT all count. See bench/cold_start.py.
+#              package load and first-call JIT count toward time and peak RSS.
+#              See bench/cold_start.py.
 #
 # Env overrides: SINGLE_ITERS, PROJECT_ITERS, COLD_ITERS, WARMUP, COLD_FILE,
-# BENCH_JULIA, JULIA_PROJECT.
+# BENCH_JULIA, JULIA_PROJECT, GNU_TIME.
 # JULIA_PROJECT points Julia at an environment that provides Runic and
 # JuliaFormatter; leave it unset to use the devenv default env.
 set -euo pipefail
