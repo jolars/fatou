@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { defineConfig } from "vitepress";
 import { legacyAnchors } from "../legacy-anchors.mjs";
 import {
@@ -8,6 +9,13 @@ import {
 } from "../scripts/content.mjs";
 
 const repository = "https://github.com/jolars/fatou";
+const { packages } = JSON.parse(
+  execFileSync("cargo", ["metadata", "--no-deps", "--format-version", "1"], {
+    cwd: new URL("../../", import.meta.url),
+    encoding: "utf8",
+  }),
+);
+const docsVersion = `Fatou v${packages.find(({ name }) => name === "fatou").version}`;
 const group = (text, pages) => ({
   text,
   items: pages.map(([text, path]) => ({ text, link: `/${path}.html` })),
@@ -137,6 +145,6 @@ export default defineConfig({
     search: { provider: "local" },
     socialLinks: [{ icon: "github", link: repository }],
     editLink: { pattern: `${repository}/edit/main/docs/src/:path` },
-    footer: { message: "Released under the MIT License." },
+    footer: { message: `${docsVersion} · Released under the MIT License.` },
   },
 });
