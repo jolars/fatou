@@ -79,21 +79,8 @@ Follow [Editor setup](editors.md) for formatting, diagnostics, and navigation
 while editing. See [Integrations](integrations.md) to run the checks in CI or a
 pre-commit hook.
 
-## Installation
-
-Installation options have moved to the [Installation](../installation.md) page:
-
-- <span id="cargo"></span>[Cargo](../installation.md#cargo)
-- <span id="homebrew"></span>[Homebrew](../installation.md#homebrew)
-- <span id="npm"></span>[npm](../installation.md#npm)
-- <span id="pypi"></span>[PyPI](../installation.md#pypi)
-- <span id="aur"></span>[AUR](../installation.md#aur)
-- <span id="nix"></span>[Nix](../installation.md#nix)
-- <span id="mise-and-aqua"></span>[mise and
-  Aqua](../installation.md#mise-and-aqua)
-- <span id="install-script"></span>[Install
-  script](../installation.md#install-script)
-- <span id="prebuilt-binaries"></span>[Prebuilt
-  binaries](../installation.md#prebuilt-binaries)
-- <span id="from-source"></span>[From source](../installation.md#from-source)
-- <span id="dprint"></span>[dprint](../installation.md#dprint)
+<span id="cargo"></span> <span id="homebrew"></span> <span id="npm"></span>
+<span id="pypi"></span> <span id="aur"></span> <span id="nix"></span>
+<span id="mise-and-aqua"></span> <span id="install-script"></span>
+<span id="prebuilt-binaries"></span> <span id="from-source"></span>
+<span id="dprint"></span>
