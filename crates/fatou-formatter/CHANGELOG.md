@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.10.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.9.0...fatou-formatter-v0.10.0) (2026-11-26)
+
+### Features
+
+- **formatter:** verify formatting from existing parses ([`76f90ba`](https://github.com/jolars/fatou/commit/76f90bae427d6ec7ba85d69cfb6f39418c735ac9))
+- **formatter:** sort explicit import names ([`a9676c9`](https://github.com/jolars/fatou/commit/a9676c972d889464763b244f971d9ec4a567794b))
+
+### Bug Fixes
+
+- **formatter:** sort selectors after an import keyword newline ([`91f23d0`](https://github.com/jolars/fatou/commit/91f23d0bc4cd76a8ee427544abe8488b48c760dc)), fixes [#151](https://github.com/jolars/fatou/issues/151)
+
+### Dependencies
+
+- updated crates/fatou-parser to v0.10.1
+
 ## [0.9.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.8.0...fatou-formatter-v0.9.0) (2026-11-18)
 
 ### Features

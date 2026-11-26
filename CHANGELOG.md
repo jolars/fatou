@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.28.0](https://github.com/jolars/fatou/compare/v0.27.0...v0.28.0) (2026-11-26)
+
+### Features
+
+- **lsp:** add a code action to qualify bare names ([`d0c4f53`](https://github.com/jolars/fatou/commit/d0c4f53c1fe8cf52c62013e9d76a5717ed8df15a))
+- add `dead-assignment` lint rule ([`4cd3cbb`](https://github.com/jolars/fatou/commit/4cd3cbb44fc4de1095c06a8b92dbcfeae3236863))
+
+### Bug Fixes
+
+- **docs:** restore the getting started installation anchor ([`3228419`](https://github.com/jolars/fatou/commit/3228419bf0d1f1f90d42552839ea609ff1ffb951))
+- retain Julia projects when their manifests fail ([`147bb32`](https://github.com/jolars/fatou/commit/147bb32c33018147db39954404d5d04679542a64))
+
+### Performance Improvements
+
+- **lsp:** reuse cached parses for range formatting ([`3492a81`](https://github.com/jolars/fatou/commit/3492a81bd3c856714cf448fd0c2bdcc6935ef797))
+- **lsp:** reuse cached parses for rename validation ([`b72650b`](https://github.com/jolars/fatou/commit/b72650bb82633bb689e397bc924a71fe5bab689a))
+- **lsp:** walk the green tree for document symbols ([`3f0e543`](https://github.com/jolars/fatou/commit/3f0e5438717a0021d164057c6426347e8bdda970))
+- **lsp:** reduce document symbol traversal overhead ([`67fc827`](https://github.com/jolars/fatou/commit/67fc82750d727546d6138371f4e5fd716d396a07))
+
+### Dependencies
+
+- updated crates/fatou-formatter to v0.10.0
+- updated crates/fatou-parser to v0.10.1
+
 ## [0.27.0](https://github.com/jolars/fatou/compare/v0.26.1...v0.27.0) (2026-11-18)
 
 ### Features
