@@ -3,7 +3,7 @@
 Run Fatou from the root of an existing Julia project. The commands below use the
 default settings unless your project already has a `fatou.toml`.
 
-## Install Fatou
+## Install Fatou {#installation}
 
 Use the installer to download Fatou for your platform:
 
